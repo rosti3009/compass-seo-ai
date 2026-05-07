@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Compass SEO AI Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <main class="container">
+      <section class="hero">
+        <p class="eyebrow">SEO MVP</p>
+        <h1>Compass SEO AI Dashboard</h1>
+        <p>Monitor crawler health and on-page SEO opportunities for <strong>{{ target_domain }}</strong>.</p>
+        <form method="post" action="/crawler/run">
+          <button type="submit">Run crawler</button>
+        </form>
+      </section>
+
+      <section class="cards">
+        <article class="card">
+          <span class="label">Latest status</span>
+          <strong>{{ latest_run.status if latest_run else 'No runs yet' }}</strong>
+        </article>
+        <article class="card">
+          <span class="label">Pages crawled</span>
+          <strong>{{ latest_run.pages_crawled if latest_run else 0 }}</strong>
+        </article>
+        <article class="card">
+          <span class="label">Average score</span>
+          <strong>{{ latest_run.average_score if latest_run else 0 }}</strong>
+        </article>
+      </section>
+
+      <section class="panel">
+        <h2>Latest page audits</h2>
+        {% if pages %}
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>URL</th>
+                <th>Status</th>
+                <th>Score</th>
+                <th>Title</th>
+                <th>Missing</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for page in pages %}
+              <tr>
+                <td><a href="{{ page.url }}" target="_blank" rel="noreferrer">{{ page.url }}</a></td>
+                <td>{{ page.status_code }}</td>
+                <td>{{ page.seo_score }}</td>
+                <td>{{ page.title or '—' }}</td>
+                <td>{{ page.missing_fields or '—' }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="empty">No crawl data yet. Use the crawler endpoint or button above to create the first audit.</p>
+        {% endif %}
+      </section>
+    </main>
+  </body>
+</html>
