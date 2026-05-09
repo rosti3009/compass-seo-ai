@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Environment and secrets
+.env
+*.sqlite
+*.db
+secrets/
+
+# Runtime data
+data/
+compass_seo.db
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
