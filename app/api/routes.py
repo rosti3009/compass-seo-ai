@@ -18,6 +18,7 @@ from app.integrations.openai_client import OpenAIClient
 from app.services.crawler import SEOCrawler
 from app.services.internal_links import authority_score, best_anchor_text, opportunity_score
 from app.services.sitemap import discover_sitemap_urls
+from app.services.topical_clusters import build_cluster_summary
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -231,6 +232,58 @@ def _merge_openai_internal_link_suggestions(
     return merged
 
 
+
+def _infer_page_type(page: PageAudit) -> str:
+    """Infer a compact page type from the URL and content shape."""
+    path = page.url.split("?", maxsplit=1)[0].rstrip("/").rsplit("/", maxsplit=1)[-1].lower()
+    segments = [segment for segment in page.url.split("?", maxsplit=1)[0].split("/")[3:] if segment]
+    if not segments:
+        return "homepage"
+    if any(segment in {"blog", "articles", "guides", "guide"} for segment in segments):
+        return "guide"
+    if any(segment in {"services", "service"} for segment in segments):
+        return "service"
+    if any(segment in {"products", "product", "shop", "collections"} for segment in segments):
+        return "product"
+    if path in {"category", "tag"} or len(segments) == 1:
+        return "category"
+    return "page"
+
+
+def _page_cluster_payload(page: PageAudit, task: SEOTask | None = None) -> dict[str, object]:
+    """Build page, crawl, task, and article fields used by topical cluster planning."""
+    return {
+        "url": page.url,
+        "title": page.title or "",
+        "h1": page.h1 or "",
+        "meta": page.meta_description or "",
+        "word_count": page.word_count,
+        "seo_score": page.seo_score,
+        "page_type": _infer_page_type(page),
+        "task_status": task.status if task else "none",
+        "article_status": task.article_status if task else "not_generated",
+        "keyword": task.keyword if task else None,
+        "priority": task.priority if task else None,
+    }
+
+
+def _valid_topical_clusters(payload: dict[str, object]) -> bool:
+    """Return whether a topical cluster payload matches the public response shape."""
+    clusters = payload.get("clusters")
+    if not isinstance(clusters, list):
+        return False
+    required_keys = {"cluster_name", "pillar_page", "supporting_pages", "missing_articles", "internal_link_strategy"}
+    for cluster in clusters:
+        if not isinstance(cluster, dict) or not required_keys.issubset(cluster):
+            return False
+        if not isinstance(cluster.get("supporting_pages"), list):
+            return False
+        if not isinstance(cluster.get("missing_articles"), list):
+            return False
+        if not isinstance(cluster.get("internal_link_strategy"), list):
+            return False
+    return True
+
 def _build_task_from_page(page: PageAudit) -> SEOTask:
     missing_fields = [field for field in page.missing_fields.split(",") if field]
     recommendation = {
@@ -393,6 +446,25 @@ def internal_link_opportunities(db: DatabaseSession) -> dict[str, object]:
         },
         "opportunities": opportunities,
     }
+
+
+@router.get("/seo/topical-clusters")
+def topical_clusters(db: DatabaseSession) -> dict[str, object]:
+    """Return topical SEO clusters from the latest crawl and saved SEO task context."""
+    pages = _latest_crawl_pages(db)
+    tasks_by_url = _tasks_by_page_url(db, [page.url for page in pages])
+    page_payloads = [_page_cluster_payload(page, tasks_by_url.get(page.url)) for page in pages]
+    clusters = build_cluster_summary(page_payloads)
+
+    if page_payloads and settings.openai_api_key:
+        try:
+            generated = OpenAIClient().generate_topical_clusters(pages=page_payloads)
+        except (RuntimeError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+            generated = {}
+        if _valid_topical_clusters(generated):
+            clusters = generated["clusters"]
+
+    return {"success": True, "total_pages_analyzed": len(page_payloads), "clusters": clusters}
 
 
 @router.post("/seo/tasks/{task_id}/generate-recommendation")

@@ -460,3 +460,163 @@ def test_internal_link_opportunities_empty_crawl_returns_empty_payload(client: T
         "summary": {"strong_pages": 0, "weak_pages": 0, "link_opportunities": 0},
         "opportunities": [],
     }
+
+
+def test_topical_cluster_grouping_uses_keyword_and_url_topics() -> None:
+    from app.services.topical_clusters import group_pages_by_topic
+
+    pages = [
+        {
+            "url": "https://example.com/guides/portable-grills",
+            "title": "Portable Grill Guide",
+            "keyword": "portable grills",
+            "seo_score": 82,
+        },
+        {
+            "url": "https://example.com/guides/portable-grill-cleaning",
+            "title": "Portable Grill Cleaning",
+            "keyword": "portable grills cleaning",
+            "seo_score": 74,
+        },
+        {
+            "url": "https://example.com/smokers/electric-smokers",
+            "title": "Electric Smokers",
+            "seo_score": 91,
+        },
+    ]
+
+    grouped = group_pages_by_topic(pages)
+
+    assert list(grouped) == ["Electric Smokers", "Portable Grills"]
+    assert [page["url"] for page in grouped["Portable Grills"]] == [
+        "https://example.com/guides/portable-grills",
+        "https://example.com/guides/portable-grill-cleaning",
+    ]
+
+
+def test_topical_cluster_pillar_selection_prefers_strong_guide_page() -> None:
+    from app.services.topical_clusters import select_pillar_page
+
+    pages = [
+        {
+            "url": "https://example.com/blog/portable-grill-tips",
+            "page_type": "page",
+            "seo_score": 85,
+            "word_count": 600,
+        },
+        {
+            "url": "https://example.com/guides/portable-grills",
+            "page_type": "guide",
+            "seo_score": 72,
+            "word_count": 1800,
+            "article_status": "generated",
+        },
+    ]
+
+    assert select_pillar_page(pages)["url"] == "https://example.com/guides/portable-grills"
+
+
+def test_topical_clusters_endpoint_handles_empty_crawl(client: TestClient) -> None:
+    response = client.get("/seo/topical-clusters")
+
+    assert response.status_code == 200
+    assert response.json() == {"success": True, "total_pages_analyzed": 0, "clusters": []}
+
+
+def test_topical_clusters_endpoint_returns_clusters_with_mocked_data(
+    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    crawl_run = CrawlRun(target_domain="https://example.com", status="completed", pages_crawled=3, average_score=76)
+    db_session.add(crawl_run)
+    db_session.flush()
+    db_session.add_all(
+        [
+            PageAudit(
+                crawl_run_id=crawl_run.id,
+                url="https://example.com/guides/portable-grills",
+                status_code=200,
+                title="Portable Grill Guide",
+                meta_description="Choose portable grills.",
+                h1="Portable Grill Guide",
+                word_count=1800,
+                internal_links=20,
+                missing_fields="",
+                seo_score=88,
+            ),
+            PageAudit(
+                crawl_run_id=crawl_run.id,
+                url="https://example.com/guides/portable-grill-cleaning",
+                status_code=200,
+                title="Portable Grill Cleaning",
+                meta_description="Clean portable grills.",
+                h1="Portable Grill Cleaning",
+                word_count=500,
+                internal_links=3,
+                missing_fields="",
+                seo_score=62,
+            ),
+            PageAudit(
+                crawl_run_id=crawl_run.id,
+                url="https://example.com/smokers/electric-smokers",
+                status_code=200,
+                title="Electric Smokers",
+                meta_description="Electric smoker guide.",
+                h1="Electric Smokers",
+                word_count=900,
+                internal_links=8,
+                missing_fields="",
+                seo_score=74,
+            ),
+        ]
+    )
+    db_session.add(
+        SEOTask(
+            page_url="https://example.com/guides/portable-grill-cleaning",
+            keyword="portable grills",
+            priority="high",
+            status="recommended",
+            article_status="not_generated",
+        )
+    )
+    db_session.commit()
+    monkeypatch.setattr("app.api.routes.settings.openai_api_key", "test-key")
+
+    class MockOpenAIClient:
+        def generate_topical_clusters(self, pages: list[dict]) -> dict:
+            portable_page = next(page for page in pages if page["url"].endswith("portable-grill-cleaning"))
+            assert portable_page["task_status"] == "recommended"
+            assert portable_page["article_status"] == "not_generated"
+            assert portable_page["page_type"] == "guide"
+            return {
+                "clusters": [
+                    {
+                        "cluster_name": "Portable Grills",
+                        "pillar_page": "https://example.com/guides/portable-grills",
+                        "supporting_pages": ["https://example.com/guides/portable-grill-cleaning"],
+                        "missing_articles": ["Portable grill fuel comparison"],
+                        "internal_link_strategy": [
+                            "Link cleaning support content to the portable grill pillar page."
+                        ],
+                    }
+                ]
+            }
+
+    monkeypatch.setattr("app.api.routes.OpenAIClient", MockOpenAIClient)
+
+    response = client.get("/seo/topical-clusters")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload == {
+        "success": True,
+        "total_pages_analyzed": 3,
+        "clusters": [
+            {
+                "cluster_name": "Portable Grills",
+                "pillar_page": "https://example.com/guides/portable-grills",
+                "supporting_pages": ["https://example.com/guides/portable-grill-cleaning"],
+                "missing_articles": ["Portable grill fuel comparison"],
+                "internal_link_strategy": ["Link cleaning support content to the portable grill pillar page."],
+            }
+        ],
+    }
