@@ -72,3 +72,38 @@ class PageAudit(Base):
             "seo_score": self.seo_score,
             "crawled_at": self.crawled_at.isoformat() if self.crawled_at else None,
         }
+
+
+class SEOTask(Base):
+    """Actionable SEO task generated from crawled page audit data."""
+
+    __tablename__ = "seo_tasks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    page_url: Mapped[str] = mapped_column(String(1024), nullable=False, unique=True, index=True)
+    keyword: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    priority: Mapped[str] = mapped_column(String(32), default="medium", index=True)
+    status: Mapped[str] = mapped_column(String(32), default="open", index=True)
+    suggested_title: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    suggested_h1: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    meta_description: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    recommendation_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+    )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "page_url": self.page_url,
+            "keyword": self.keyword,
+            "priority": self.priority,
+            "status": self.status,
+            "suggested_title": self.suggested_title,
+            "suggested_h1": self.suggested_h1,
+            "meta_description": self.meta_description,
+            "recommendation_json": self.recommendation_json,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
