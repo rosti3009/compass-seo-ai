@@ -13,6 +13,7 @@ from app.integrations.ga4 import GA4Client
 from app.integrations.ga4 import MissingGoogleCredentialsError as MissingGA4CredentialsError
 from app.integrations.gsc import GSCClient
 from app.integrations.gsc import MissingGoogleCredentialsError as MissingGSCCredentialsError
+from app.integrations.openai_client import OpenAIClient
 from app.services.crawler import SEOCrawler
 from app.services.sitemap import discover_sitemap_urls
 
@@ -36,6 +37,36 @@ def _priority_for_page(page: PageAudit) -> str:
     return "low"
 
 
+def _task_recommendation_payload(task: SEOTask) -> dict[str, object]:
+    """Build a compact page/task payload for OpenAI recommendation generation."""
+    try:
+        existing_recommendation = json.loads(task.recommendation_json or "{}")
+    except json.JSONDecodeError:
+        existing_recommendation = task.recommendation_json
+
+    return {
+        "task_id": task.id,
+        "page_url": task.page_url,
+        "keyword": task.keyword,
+        "priority": task.priority,
+        "status": task.status,
+        "suggested_title": task.suggested_title,
+        "suggested_h1": task.suggested_h1,
+        "meta_description": task.meta_description,
+        "existing_recommendation": existing_recommendation,
+    }
+
+
+def _apply_recommendation_to_task(task: SEOTask, recommendation: dict[str, object]) -> None:
+    """Persist generated recommendation fields on a task."""
+    task.recommendation_json = json.dumps(recommendation, ensure_ascii=False)
+    for field_name in ("suggested_title", "suggested_h1", "meta_description"):
+        value = recommendation.get(field_name)
+        if isinstance(value, str) and value:
+            setattr(task, field_name, value)
+    task.status = "recommended"
+
+
 def _build_task_from_page(page: PageAudit) -> SEOTask:
     missing_fields = [field for field in page.missing_fields.split(",") if field]
     recommendation = {
@@ -43,9 +74,7 @@ def _build_task_from_page(page: PageAudit) -> SEOTask:
         "page_audit_id": page.id,
         "seo_score": page.seo_score,
         "missing_fields": missing_fields,
-        "recommendations": [
-            f"Add or improve {field.replace('_', ' ')}." for field in missing_fields
-        ]
+        "recommendations": [f"Add or improve {field.replace('_', ' ')}." for field in missing_fields]
         or ["Improve on-page SEO signals for this low-scoring page."],
     }
     return SEOTask(
@@ -162,6 +191,27 @@ def list_seo_tasks(db: DatabaseSession) -> dict[str, object]:
     return {"tasks": [task.to_dict() for task in tasks]}
 
 
+@router.post("/seo/tasks/{task_id}/generate-recommendation")
+def generate_seo_task_recommendation(task_id: int, db: DatabaseSession) -> dict[str, object]:
+    """Generate and persist an OpenAI SEO recommendation for a saved SEO task."""
+    task = db.get(SEOTask, task_id)
+    if not task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SEO task not found")
+
+    payload = _task_recommendation_payload(task)
+    try:
+        recommendation = OpenAIClient().generate_seo_recommendation(page=payload)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+    _apply_recommendation_to_task(task, recommendation)
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+
+    return {"success": True, "task_id": task.id, "recommendation": recommendation}
+
+
 @router.get("/integrations/gsc/status")
 def gsc_status() -> dict[str, object]:
     """Validate Google Search Console credentials configuration."""
@@ -182,9 +232,7 @@ def ga4_status() -> dict[str, object]:
 
 @router.get("/sitemap/discover")
 async def sitemap_discover() -> dict:
-    sitemap_urls = await discover_sitemap_urls(
-        "https://compassgrill.co.il/sitemap.xml"
-    )
+    sitemap_urls = await discover_sitemap_urls("https://compassgrill.co.il/sitemap.xml")
 
     return {
         "total_urls": len(sitemap_urls),

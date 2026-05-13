@@ -23,8 +23,12 @@ class OpenAIClient:
                 {
                     "role": "system",
                     "content": (
-                        "You are an SEO strategist. Return only JSON with these keys: "
-                        "suggested_title, suggested_h1, meta_description, priority, keyword, recommendations."
+                        "You are an SEO strategist. Return only a JSON object with exactly these keys: "
+                        "suggested_title (string), suggested_h1 (string), meta_description (string), "
+                        "primary_keyword (string), secondary_keywords (array of strings), "
+                        "content_recommendations (array of strings), technical_recommendations (array of strings), "
+                        "internal_link_ideas (array of strings), and priority_reason (string). "
+                        "Do not include markdown, explanations, or additional top-level keys."
                     ),
                 },
                 {
