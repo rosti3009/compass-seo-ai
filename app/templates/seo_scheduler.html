@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SEO Scheduler</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <main class="container">
+      <section class="hero compact">
+        <p class="eyebrow">Safe scheduled SEO preparation</p>
+        <h1>SEO Scheduler</h1>
+        <p>Schedules can prepare SEO work daily or weekly, but they never auto-approve fixes, never auto-publish, and never mark publishing packages applied.</p>
+        <div class="actions">
+          <form method="post" action="/seo/scheduler/run-due">
+            <button type="submit">Run due schedules</button>
+          </form>
+          <a class="button-link" href="/seo/automation-view">SEO Automation</a>
+          <a class="button-link" href="/seo/fixes-view">SEO fixes</a>
+          <a class="button-link" href="/seo/publishing-packages-view">Publishing packages</a>
+          <a class="button-link" href="/">Back to dashboard</a>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Enabled schedules</h2>
+        {% if enabled_configs %}
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Frequency</th>
+                <th>Hour UTC</th>
+                <th>Max tasks</th>
+                <th>Generate articles</th>
+                <th>Sync GSC</th>
+                <th>Next run time</th>
+                <th>Last run time</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for config in enabled_configs %}
+              <tr>
+                <td>{{ config.name }}</td>
+                <td>{{ config.frequency }}</td>
+                <td>{{ config.hour_utc }}</td>
+                <td>{{ config.max_tasks }}</td>
+                <td>{{ config.generate_articles }}</td>
+                <td>{{ config.sync_gsc }}</td>
+                <td>{{ config.next_run_at or '—' }}</td>
+                <td>{{ config.last_run_at or '—' }}</td>
+                <td>
+                  <form method="post" action="/seo/scheduler/configs/{{ config.id }}/disable">
+                    <button type="submit" class="secondary-button">Disable</button>
+                  </form>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="empty">No enabled schedules.</p>
+        {% endif %}
+      </section>
+
+      <section class="panel">
+        <h2>Disabled schedules</h2>
+        {% if disabled_configs %}
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Frequency</th>
+                <th>Hour UTC</th>
+                <th>Max tasks</th>
+                <th>Generate articles</th>
+                <th>Sync GSC</th>
+                <th>Next run time</th>
+                <th>Last run time</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for config in disabled_configs %}
+              <tr>
+                <td>{{ config.name }}</td>
+                <td>{{ config.frequency }}</td>
+                <td>{{ config.hour_utc }}</td>
+                <td>{{ config.max_tasks }}</td>
+                <td>{{ config.generate_articles }}</td>
+                <td>{{ config.sync_gsc }}</td>
+                <td>{{ config.next_run_at or '—' }}</td>
+                <td>{{ config.last_run_at or '—' }}</td>
+                <td>
+                  <form method="post" action="/seo/scheduler/configs/{{ config.id }}/enable">
+                    <button type="submit">Enable</button>
+                  </form>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="empty">No disabled schedules.</p>
+        {% endif %}
+      </section>
+
+      <section class="panel">
+        <h2>Related automation runs</h2>
+        {% if runs %}
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Status</th>
+                <th>Started</th>
+                <th>Completed</th>
+                <th>Tasks</th>
+                <th>Fixes</th>
+                <th>Packages</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for run in runs %}
+              <tr>
+                <td>{{ run.id }}</td>
+                <td>{{ run.status }}</td>
+                <td>{{ run.started_at }}</td>
+                <td>{{ run.completed_at or '—' }}</td>
+                <td>{{ run.seo_tasks_created }}</td>
+                <td>{{ run.fixes_created }}</td>
+                <td>{{ run.publishing_packages_created }}</td>
+                <td><a href="/seo/automation/runs/{{ run.id }}">JSON</a></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="empty">No scheduled automation runs yet.</p>
+        {% endif %}
+      </section>
+    </main>
+  </body>
+</html>

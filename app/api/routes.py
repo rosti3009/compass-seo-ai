@@ -6,9 +6,10 @@ from typing import Annotated
 from urllib.parse import urlencode
 
 import requests
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -21,6 +22,7 @@ from app.db.models import (
     PublishingPackage,
     SEOAutomationRun,
     SEOFix,
+    SEOScheduleConfig,
     SEOStrategyRecommendation,
     SEOTask,
 )
@@ -33,6 +35,12 @@ from app.integrations.openai_client import OpenAIClient
 from app.services.crawler import SEOCrawler
 from app.services.internal_links import authority_score, best_anchor_text, opportunity_score
 from app.services.seo_automation import run_seo_automation
+from app.services.seo_scheduler import (
+    create_schedule_config,
+    ensure_default_schedule_config,
+    run_due_schedules,
+    set_schedule_enabled,
+)
 from app.services.seo_strategy_engine import generate_strategy_recommendations, summarize_site_strategy
 from app.services.sitemap import discover_sitemap_urls
 from app.services.topical_clusters import build_cluster_summary
@@ -40,6 +48,16 @@ from app.services.topical_clusters import build_cluster_summary
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 DatabaseSession = Annotated[Session, Depends(get_db)]
+
+class SEOScheduleConfigCreate(BaseModel):
+    name: str = "Daily SEO Automation"
+    frequency: str = "daily"
+    hour_utc: int = 5
+    max_tasks: int = 10
+    generate_articles: bool = False
+    sync_gsc: bool = True
+    enabled: bool = False
+
 
 SEO_FIX_TYPES = {
     "meta_title",
@@ -73,6 +91,23 @@ LOW_CTR_THRESHOLD = 0.03
 HIGH_IMPRESSIONS_THRESHOLD = 50
 WEAK_RANKING_MIN = 4
 WEAK_RANKING_MAX = 20
+
+
+def _get_schedule_config_or_404(db: Session, config_id: int) -> SEOScheduleConfig:
+    config = db.get(SEOScheduleConfig, config_id)
+    if config is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SEO schedule config not found")
+    return config
+
+
+def _scheduled_automation_runs(db: Session, limit: int = 25) -> list[SEOAutomationRun]:
+    return (
+        db.query(SEOAutomationRun)
+        .filter(SEOAutomationRun.summary_json.contains('"scheduler"'))
+        .order_by(SEOAutomationRun.started_at.desc(), SEOAutomationRun.id.desc())
+        .limit(limit)
+        .all()
+    )
 
 
 def _require_google_oauth_settings() -> tuple[str, str, str]:
@@ -1005,6 +1040,88 @@ def dashboard(request: Request, db: DatabaseSession) -> HTMLResponse:
             "latest_run": latest_run,
             "pages": latest_pages,
             "metrics": _dashboard_metrics(db, metrics_pages),
+        },
+    )
+
+
+@router.get("/seo/scheduler/configs")
+def list_seo_scheduler_configs(db: DatabaseSession) -> dict[str, object]:
+    """Return safe SEO scheduler configs, creating the default disabled config if needed."""
+    ensure_default_schedule_config(db)
+    configs = db.query(SEOScheduleConfig).order_by(SEOScheduleConfig.enabled.desc(), SEOScheduleConfig.id.asc()).all()
+    return {"configs": [config.to_dict() for config in configs]}
+
+
+@router.post("/seo/scheduler/configs", status_code=status.HTTP_201_CREATED)
+def create_seo_scheduler_config(
+    db: DatabaseSession,
+    payload: Annotated[SEOScheduleConfigCreate | None, Body()] = None,
+    name: str = "Daily SEO Automation",
+    frequency: str = "daily",
+    hour_utc: int = 5,
+    max_tasks: int = 10,
+    generate_articles: bool = False,
+    sync_gsc: bool = True,
+    enabled: bool = False,
+) -> dict[str, object]:
+    """Create a disabled-by-default scheduler config for safe SEO preparation work."""
+    values = payload.model_dump() if payload is not None else {
+        "name": name,
+        "frequency": frequency,
+        "hour_utc": hour_utc,
+        "max_tasks": max_tasks,
+        "generate_articles": generate_articles,
+        "sync_gsc": sync_gsc,
+        "enabled": enabled,
+    }
+    try:
+        config = create_schedule_config(
+            db,
+            name=values["name"],
+            frequency=values["frequency"],
+            hour_utc=values["hour_utc"],
+            max_tasks=values["max_tasks"],
+            generate_articles=values["generate_articles"],
+            sync_gsc=values["sync_gsc"],
+            enabled=values["enabled"],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return {"config": config.to_dict()}
+
+
+@router.post("/seo/scheduler/configs/{config_id}/enable")
+def enable_seo_scheduler_config(config_id: int, db: DatabaseSession) -> dict[str, object]:
+    """Enable a scheduler config without running it immediately."""
+    config = set_schedule_enabled(db, _get_schedule_config_or_404(db, config_id), True)
+    return {"config": config.to_dict()}
+
+
+@router.post("/seo/scheduler/configs/{config_id}/disable")
+def disable_seo_scheduler_config(config_id: int, db: DatabaseSession) -> dict[str, object]:
+    """Disable a scheduler config without changing previous automation runs."""
+    config = set_schedule_enabled(db, _get_schedule_config_or_404(db, config_id), False)
+    return {"config": config.to_dict()}
+
+
+@router.post("/seo/scheduler/run-due")
+def run_due_seo_scheduler_configs(db: DatabaseSession) -> dict[str, object]:
+    """Run due schedules through the safe automation pipeline only; no publishing is performed."""
+    return run_due_schedules(db)
+
+
+@router.get("/seo/scheduler-view", response_class=HTMLResponse)
+def seo_scheduler_view(request: Request, db: DatabaseSession) -> HTMLResponse:
+    """Render enabled and disabled scheduler configs plus related automation runs."""
+    ensure_default_schedule_config(db)
+    configs = db.query(SEOScheduleConfig).order_by(SEOScheduleConfig.enabled.desc(), SEOScheduleConfig.id.asc()).all()
+    return templates.TemplateResponse(
+        request,
+        "seo_scheduler.html",
+        {
+            "enabled_configs": [config for config in configs if config.enabled],
+            "disabled_configs": [config for config in configs if not config.enabled],
+            "runs": _scheduled_automation_runs(db),
         },
     )
 
