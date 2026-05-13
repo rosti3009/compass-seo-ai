@@ -3,17 +3,20 @@ import re
 from datetime import date
 from html import escape
 from typing import Annotated
+from urllib.parse import urlencode
 
+import requests
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.database import get_db
-from app.db.models import CrawlRun, GSCKeywordMetric, PageAudit, PublishingPackage, SEOFix, SEOTask
+from app.db.models import CrawlRun, GoogleOAuthToken, GSCKeywordMetric, PageAudit, PublishingPackage, SEOFix, SEOTask
 from app.integrations.ga4 import GA4Client
 from app.integrations.ga4 import MissingGoogleCredentialsError as MissingGA4CredentialsError
+from app.integrations.google_auth import GOOGLE_OAUTH_SCOPES, oauth_status, utc_expiry_from_seconds
 from app.integrations.gsc import GSCAPIError, GSCClient
 from app.integrations.gsc import MissingGoogleCredentialsError as MissingGSCCredentialsError
 from app.integrations.openai_client import OpenAIClient
@@ -44,6 +47,54 @@ LOW_CTR_THRESHOLD = 0.03
 HIGH_IMPRESSIONS_THRESHOLD = 50
 WEAK_RANKING_MIN = 4
 WEAK_RANKING_MAX = 20
+
+
+def _require_google_oauth_settings() -> tuple[str, str, str]:
+    """Return configured Google OAuth client settings or raise a clear API error."""
+    missing = [
+        name
+        for name, value in (
+            ("GOOGLE_OAUTH_CLIENT_ID", settings.google_oauth_client_id),
+            ("GOOGLE_OAUTH_CLIENT_SECRET", settings.google_oauth_client_secret),
+            ("GOOGLE_OAUTH_REDIRECT_URI", settings.google_oauth_redirect_uri),
+        )
+        if not value
+    ]
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Google OAuth is not configured. Set {', '.join(missing)}.",
+        )
+    return (
+        settings.google_oauth_client_id or "",
+        settings.google_oauth_client_secret or "",
+        settings.google_oauth_redirect_uri or "",
+    )
+
+
+def _store_google_oauth_token(db: Session, token_payload: dict[str, object]) -> GoogleOAuthToken:
+    """Persist a Google OAuth token response, replacing any previous Google token."""
+    client_id, client_secret, _redirect_uri = _require_google_oauth_settings()
+    scopes = str(token_payload.get("scope") or " ".join(GOOGLE_OAUTH_SCOPES)).split()
+    token = (
+        db.query(GoogleOAuthToken)
+        .filter(GoogleOAuthToken.provider == "google")
+        .order_by(GoogleOAuthToken.updated_at.desc(), GoogleOAuthToken.id.desc())
+        .first()
+    )
+    if token is None:
+        token = GoogleOAuthToken(provider="google", client_id=client_id, client_secret=client_secret, access_token="")
+        db.add(token)
+    token.access_token = str(token_payload.get("access_token") or "")
+    token.refresh_token = str(token_payload.get("refresh_token") or token.refresh_token or "") or None
+    token.token_uri = str(token_payload.get("token_uri") or "https://oauth2.googleapis.com/token")
+    token.client_id = client_id
+    token.client_secret = client_secret
+    token.scopes_json = json.dumps(scopes)
+    token.expiry = utc_expiry_from_seconds(token_payload.get("expires_in"))
+    db.commit()
+    db.refresh(token)
+    return token
 
 
 def _parse_metric_date(value: object) -> date:
@@ -849,6 +900,61 @@ def _latest_crawl_context(db: Session, limit: int | None = None) -> tuple[CrawlR
     return latest_run, query.all()
 
 
+@router.get("/auth/google/start")
+def google_oauth_start() -> RedirectResponse:
+    """Redirect the user to Google's OAuth consent screen for GSC and GA4 read access."""
+    client_id, _client_secret, redirect_uri = _require_google_oauth_settings()
+    query = urlencode(
+        {
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "response_type": "code",
+            "scope": " ".join(GOOGLE_OAUTH_SCOPES),
+            "access_type": "offline",
+            "prompt": "consent",
+            "include_granted_scopes": "true",
+        }
+    )
+    return RedirectResponse(f"https://accounts.google.com/o/oauth2/v2/auth?{query}")
+
+
+@router.get("/auth/google/callback")
+def google_oauth_callback(db: DatabaseSession, code: str | None = None, error: str | None = None) -> dict[str, object]:
+    """Exchange a Google OAuth code and store the returned user token."""
+    if error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Google OAuth failed: {error}")
+    if not code:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing Google OAuth code.")
+    client_id, client_secret, redirect_uri = _require_google_oauth_settings()
+    response = requests.post(
+        "https://oauth2.googleapis.com/token",
+        data={
+            "code": code,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uri": redirect_uri,
+            "grant_type": "authorization_code",
+        },
+        timeout=20,
+    )
+    if response.status_code >= 400:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Google OAuth token exchange failed.")
+    payload = response.json()
+    if not payload.get("access_token"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Google OAuth response did not include an access token.",
+        )
+    token = _store_google_oauth_token(db, payload)
+    return {"connected": True, "provider": token.provider, "scopes": token.scopes}
+
+
+@router.get("/auth/google/status")
+def google_oauth_status(db: DatabaseSession) -> dict[str, object]:
+    """Return whether a Google user OAuth connection has been stored."""
+    return oauth_status(db)
+
+
 @router.get("/health")
 def health() -> dict[str, str]:
     """Return a lightweight health check response."""
@@ -876,7 +982,7 @@ def dashboard(request: Request, db: DatabaseSession) -> HTMLResponse:
 def sync_gsc_keywords(db: DatabaseSession) -> dict[str, object]:
     """Fetch Search Console keyword rows and upsert them into the local keyword intelligence table."""
     try:
-        client = GSCClient.from_settings()
+        client = GSCClient.from_settings(db)
         rows = client.fetch_top_queries(client.site_url, limit=250)
     except (MissingGSCCredentialsError, GSCAPIError, RuntimeError, ValueError) as exc:
         return {"success": False, "rows_synced": 0, "top_queries": [], "error": str(exc)}
@@ -1464,19 +1570,19 @@ def preview_seo_task_article(task_id: int, db: DatabaseSession) -> HTMLResponse:
 
 
 @router.get("/integrations/gsc/status")
-def gsc_status() -> dict[str, object]:
+def gsc_status(db: DatabaseSession) -> dict[str, object]:
     """Validate Google Search Console credentials configuration."""
     try:
-        return GSCClient.from_settings().status()
+        return GSCClient.from_settings(db).status()
     except MissingGSCCredentialsError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
 
 @router.get("/integrations/ga4/status")
-def ga4_status() -> dict[str, object]:
+def ga4_status(db: DatabaseSession) -> dict[str, object]:
     """Validate GA4 credentials configuration."""
     try:
-        return GA4Client.from_settings().status()
+        return GA4Client.from_settings(db).status()
     except MissingGA4CredentialsError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
