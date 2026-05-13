@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SEO Fix Review</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <main class="container">
+      <section class="hero compact">
+        <p class="eyebrow">Safe SEO fix pipeline</p>
+        <h1>Review SEO fixes</h1>
+        <p>Approve, reject, or export copy-friendly website update packages. Nothing is auto-published.</p>
+        <p><a href="/">Back to dashboard</a></p>
+      </section>
+
+      {% for group_name, group_fixes in fix_groups.items() %}
+      <section class="panel">
+        <h2>{{ group_name|capitalize }} fixes ({{ group_fixes|length }})</h2>
+        {% if group_fixes %}
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Task</th>
+                <th>Page</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Proposed value</th>
+                <th>Export</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for fix in group_fixes %}
+              <tr>
+                <td>{{ fix.id }}</td>
+                <td>{{ fix.task_id }}</td>
+                <td><a href="{{ fix.page_url }}" target="_blank" rel="noreferrer">{{ fix.page_url }}</a></td>
+                <td>{{ fix.fix_type }}</td>
+                <td>{{ fix.status }}</td>
+                <td>{{ (fix.proposed_value or '')|truncate(120) }}</td>
+                <td><a href="/seo/fixes/{{ fix.id }}/export">Export JSON</a></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="empty">No {{ group_name }} fixes yet.</p>
+        {% endif %}
+      </section>
+      {% endfor %}
+    </main>
+  </body>
+</html>

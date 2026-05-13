@@ -97,6 +97,8 @@ class SEOTask(Base):
         DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
     )
 
+    fixes: Mapped[list["SEOFix"]] = relationship(back_populates="task", cascade="all, delete-orphan")
+
     def to_dict(self) -> dict[str, object]:
         return {
             "id": self.id,
@@ -112,6 +114,45 @@ class SEOTask(Base):
             "article_schema_json": self.article_schema_json,
             "faq_schema_json": self.faq_schema_json,
             "article_status": self.article_status,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class SEOFix(Base):
+    """Reviewable website update package created from an SEO task."""
+
+    __tablename__ = "seo_fixes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    task_id: Mapped[int] = mapped_column(ForeignKey("seo_tasks.id"), nullable=False, index=True)
+    page_url: Mapped[str] = mapped_column(String(1024), nullable=False, index=True)
+    fix_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    current_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    proposed_value: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(32), default="draft", index=True)
+    confidence_score: Mapped[float] = mapped_column(Float, default=0.0)
+    source: Mapped[str] = mapped_column(String(64), default="seo_task")
+    notes_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+    )
+
+    task: Mapped["SEOTask"] = relationship(back_populates="fixes")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "task_id": self.task_id,
+            "page_url": self.page_url,
+            "fix_type": self.fix_type,
+            "current_value": self.current_value,
+            "proposed_value": self.proposed_value,
+            "status": self.status,
+            "confidence_score": self.confidence_score,
+            "source": self.source,
+            "notes_json": self.notes_json,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

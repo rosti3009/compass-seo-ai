@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db.database import Base, get_db
-from app.db.models import CrawlRun, PageAudit, SEOTask
+from app.db.models import CrawlRun, PageAudit, SEOFix, SEOTask
 from app.integrations.openai_client import OpenAIClient
 from app.main import app
 
@@ -922,3 +922,195 @@ def test_topical_clusters_view_renders_latest_crawl_clusters(client: TestClient,
     assert "https://example.com/guides/portable-grills" in response.text
     assert "https://example.com/guides/portable-grill-cleaning" in response.text
     assert "Create or expand supporting article" in response.text
+
+
+def test_create_seo_fixes_from_recommended_task(client: TestClient, db_session: Session) -> None:
+    crawl_run = CrawlRun(target_domain="https://example.com", status="completed")
+    db_session.add(crawl_run)
+    db_session.flush()
+    db_session.add(
+        PageAudit(
+            crawl_run_id=crawl_run.id,
+            url="https://example.com/recommended",
+            title="Old title",
+            h1="Old H1",
+            meta_description="Old description",
+            seo_score=55,
+        )
+    )
+    db_session.add(
+        SEOTask(
+            page_url="https://example.com/recommended",
+            status="recommended",
+            suggested_title="New title",
+            suggested_h1="New H1",
+            meta_description="New description",
+            recommendation_json=json.dumps({"confidence_score": 0.91}),
+        )
+    )
+    db_session.commit()
+    task = db_session.query(SEOTask).one()
+
+    response = client.post(f"/seo/tasks/{task.id}/create-fixes")
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["created_count"] == 3
+    assert {fix["fix_type"] for fix in payload["fixes"]} == {"meta_title", "meta_description", "h1"}
+    assert db_session.query(SEOFix).count() == 3
+    meta_title = db_session.query(SEOFix).filter(SEOFix.fix_type == "meta_title").one()
+    assert meta_title.current_value == "Old title"
+    assert meta_title.proposed_value == "New title"
+
+
+def test_create_seo_fixes_from_generated_article(client: TestClient, db_session: Session) -> None:
+    db_session.add(
+        SEOTask(
+            page_url="https://example.com/article",
+            status="recommended",
+            suggested_title="Article title",
+            suggested_h1="Article H1",
+            meta_description="Article description",
+            recommendation_json=json.dumps({"recommendations": ["Write article"]}),
+            article_html="<h1>Article H1</h1><p>Body copy.</p>",
+            faq_schema_json=json.dumps({"@type": "FAQPage"}),
+            article_schema_json=json.dumps({"@type": "Article"}),
+            article_status="generated",
+        )
+    )
+    db_session.commit()
+    task = db_session.query(SEOTask).one()
+
+    response = client.post(f"/seo/tasks/{task.id}/create-fixes")
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["created_count"] == 6
+    assert {fix["fix_type"] for fix in payload["fixes"]} == {
+        "meta_title",
+        "meta_description",
+        "h1",
+        "article_html",
+        "faq_schema",
+        "article_schema",
+    }
+
+
+def test_create_seo_fixes_prevents_duplicate_drafts(client: TestClient, db_session: Session) -> None:
+    db_session.add(
+        SEOTask(
+            page_url="https://example.com/dupe-fix",
+            status="recommended",
+            suggested_title="Duplicate title",
+            recommendation_json=json.dumps({"recommendations": ["Improve title"]}),
+        )
+    )
+    db_session.commit()
+    task = db_session.query(SEOTask).one()
+
+    first_response = client.post(f"/seo/tasks/{task.id}/create-fixes")
+    second_response = client.post(f"/seo/tasks/{task.id}/create-fixes")
+
+    assert first_response.status_code == 201
+    assert first_response.json()["created_count"] == 1
+    assert second_response.status_code == 201
+    assert second_response.json()["created_count"] == 0
+    assert db_session.query(SEOFix).count() == 1
+
+
+def test_approve_and_reject_seo_fix(client: TestClient, db_session: Session) -> None:
+    db_session.add(SEOTask(page_url="https://example.com/review", recommendation_json=json.dumps({"ok": True})))
+    db_session.commit()
+    task = db_session.query(SEOTask).one()
+    db_session.add_all(
+        [
+            SEOFix(task_id=task.id, page_url=task.page_url, fix_type="meta_title", proposed_value="Approve me"),
+            SEOFix(task_id=task.id, page_url=task.page_url, fix_type="h1", proposed_value="Reject me"),
+        ]
+    )
+    db_session.commit()
+    approve_fix, reject_fix = db_session.query(SEOFix).order_by(SEOFix.id.asc()).all()
+
+    approve_response = client.post(f"/seo/fixes/{approve_fix.id}/approve")
+    reject_response = client.post(f"/seo/fixes/{reject_fix.id}/reject")
+
+    assert approve_response.status_code == 200
+    assert approve_response.json()["fix"]["status"] == "approved"
+    assert reject_response.status_code == 200
+    assert reject_response.json()["fix"]["status"] == "rejected"
+
+
+def test_export_seo_fix_returns_copy_friendly_payload(client: TestClient, db_session: Session) -> None:
+    db_session.add(SEOTask(page_url="https://example.com/export-fix", recommendation_json=json.dumps({"ok": True})))
+    db_session.commit()
+    task = db_session.query(SEOTask).one()
+    db_session.add(
+        SEOFix(
+            task_id=task.id,
+            page_url=task.page_url,
+            fix_type="meta_description",
+            current_value="Old",
+            proposed_value="New",
+            status="approved",
+        )
+    )
+    db_session.commit()
+    fix = db_session.query(SEOFix).one()
+
+    response = client.get(f"/seo/fixes/{fix.id}/export")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "page_url": "https://example.com/export-fix",
+        "fix_type": "meta_description",
+        "current_value": "Old",
+        "proposed_value": "New",
+        "publishing_instructions": [
+            "Do not auto-publish; apply this fix manually only after approval.",
+            "Update the page meta description with proposed_value.",
+        ],
+    }
+
+
+def test_seo_fixes_endpoint_filters_results(client: TestClient, db_session: Session) -> None:
+    db_session.add(SEOTask(page_url="https://example.com/filter-fix", recommendation_json=json.dumps({"ok": True})))
+    db_session.commit()
+    task = db_session.query(SEOTask).one()
+    db_session.add_all(
+        [
+            SEOFix(
+                task_id=task.id,
+                page_url=task.page_url,
+                fix_type="meta_title",
+                proposed_value="Title",
+                status="approved",
+            ),
+            SEOFix(task_id=task.id, page_url=task.page_url, fix_type="h1", proposed_value="H1", status="draft"),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get(f"/seo/fixes?status=approved&fix_type=meta_title&task_id={task.id}")
+
+    assert response.status_code == 200
+    fixes = response.json()["fixes"]
+    assert len(fixes) == 1
+    assert fixes[0]["fix_type"] == "meta_title"
+    assert fixes[0]["status"] == "approved"
+
+
+def test_seo_fixes_view_loads(client: TestClient, db_session: Session) -> None:
+    db_session.add(SEOTask(page_url="https://example.com/fixes-view", recommendation_json=json.dumps({"ok": True})))
+    db_session.commit()
+    task = db_session.query(SEOTask).one()
+    db_session.add(
+        SEOFix(task_id=task.id, page_url=task.page_url, fix_type="meta_title", proposed_value="View title")
+    )
+    db_session.commit()
+
+    response = client.get("/seo/fixes-view")
+
+    assert response.status_code == 200
+    assert "Review SEO fixes" in response.text
+    assert "View title" in response.text
+    assert f'href="/seo/fixes/{db_session.query(SEOFix).one().id}/export"' in response.text
