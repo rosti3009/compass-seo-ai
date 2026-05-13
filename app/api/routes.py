@@ -3,14 +3,14 @@ import re
 from html import escape
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.database import get_db
-from app.db.models import CrawlRun, PageAudit, SEOFix, SEOTask
+from app.db.models import CrawlRun, PageAudit, PublishingPackage, SEOFix, SEOTask
 from app.integrations.ga4 import GA4Client
 from app.integrations.ga4 import MissingGoogleCredentialsError as MissingGA4CredentialsError
 from app.integrations.gsc import GSCClient
@@ -36,6 +36,51 @@ SEO_FIX_TYPES = {
     "noindex_recommendation",
 }
 SEO_FIX_STATUSES = {"draft", "ready_for_review", "approved", "rejected", "exported", "applied_manually"}
+PUBLISHING_PACKAGE_STATUSES = {"draft", "ready", "exported", "applied_manually", "failed"}
+
+
+def _payload_field_for_fix_type(fix_type: str) -> str:
+    """Return the ISTORE payload field that should receive the approved fix value."""
+    return {
+        "meta_title": "meta_title",
+        "meta_description": "meta_description",
+        "h1": "h1",
+        "article_html": "body_html",
+        "faq_schema": "faq_schema_json",
+        "article_schema": "article_schema_json",
+        "internal_links": "internal_links",
+        "noindex_recommendation": "robots_directive",
+    }.get(fix_type, "manual_update")
+
+
+def _publishing_package_payload(fix: SEOFix, cms_type: str = "istore") -> dict[str, object]:
+    """Build the copyable manual CMS payload for an approved SEO fix."""
+    payload_field = _payload_field_for_fix_type(fix.fix_type)
+    return {
+        "cms_type": cms_type,
+        "page_url": fix.page_url,
+        "fix_id": fix.id,
+        "task_id": fix.task_id,
+        "fix_type": fix.fix_type,
+        "target_field": payload_field,
+        "current_value": fix.current_value or "",
+        "proposed_value": fix.proposed_value or "",
+        "istore_fields": {payload_field: fix.proposed_value or ""},
+        "manual_instructions": _fix_publishing_instructions(fix),
+        "safety": {
+            "auto_publish": False,
+            "requires_manual_istore_application": True,
+        },
+    }
+
+
+def _publishing_packages_by_status(packages: list[PublishingPackage]) -> dict[str, list[PublishingPackage]]:
+    """Group publishing packages for the manual publishing dashboard."""
+    return {
+        "ready": [package for package in packages if package.status == "ready"],
+        "exported": [package for package in packages if package.status == "exported"],
+        "applied": [package for package in packages if package.status == "applied_manually"],
+    }
 
 
 def _seo_task_candidate(page: PageAudit) -> bool:
@@ -473,7 +518,6 @@ def _merge_openai_internal_link_suggestions(
     return merged
 
 
-
 def _infer_page_type(page: PageAudit) -> str:
     """Infer a compact page type from the URL and content shape."""
     path = page.url.split("?", maxsplit=1)[0].rstrip("/").rsplit("/", maxsplit=1)[-1].lower()
@@ -524,6 +568,7 @@ def _valid_topical_clusters(payload: dict[str, object]) -> bool:
         if not isinstance(cluster.get("internal_link_strategy"), list):
             return False
     return True
+
 
 def _build_task_from_page(page: PageAudit) -> SEOTask:
     missing_fields = [field for field in page.missing_fields.split(",") if field]
@@ -615,6 +660,27 @@ def seo_fixes_view(request: Request, db: DatabaseSession) -> HTMLResponse:
         request,
         "seo_fixes.html",
         {"fix_groups": _fixes_by_status(fixes), "fixes": fixes},
+    )
+
+
+@router.get("/seo/publishing-packages-view", response_class=HTMLResponse)
+def publishing_packages_view(request: Request, db: DatabaseSession) -> HTMLResponse:
+    """Render manual ISTORE publishing packages grouped by publishing status."""
+    packages = (
+        db.query(PublishingPackage).order_by(PublishingPackage.created_at.desc(), PublishingPackage.id.desc()).all()
+    )
+    fixes_by_id = (
+        {fix.id: fix for fix in db.query(SEOFix).filter(SEOFix.id.in_([p.fix_id for p in packages])).all()}
+        if packages
+        else {}
+    )
+    return templates.TemplateResponse(
+        request,
+        "publishing_packages.html",
+        {
+            "package_groups": _publishing_packages_by_status(packages),
+            "fixes_by_id": fixes_by_id,
+        },
     )
 
 
@@ -737,9 +803,7 @@ def create_seo_fixes_for_task(task_id: int, db: DatabaseSession) -> dict[str, ob
 
     existing_draft_types = {
         fix_type
-        for (fix_type,) in db.query(SEOFix.fix_type)
-        .filter(SEOFix.task_id == task.id, SEOFix.status == "draft")
-        .all()
+        for (fix_type,) in db.query(SEOFix.fix_type).filter(SEOFix.task_id == task.id, SEOFix.status == "draft").all()
     }
     current_page = _latest_page_audit_for_url(db, task.page_url)
     candidates = _seo_fix_candidate_specs(task, current_page)
@@ -830,6 +894,94 @@ def export_seo_fix(fix_id: int, db: DatabaseSession) -> dict[str, object]:
         "proposed_value": fix.proposed_value or "",
         "publishing_instructions": _fix_publishing_instructions(fix),
     }
+
+
+@router.post("/seo/fixes/{fix_id}/create-publishing-package", status_code=status.HTTP_201_CREATED)
+def create_publishing_package_for_fix(fix_id: int, response: Response, db: DatabaseSession) -> dict[str, object]:
+    """Create a manual ISTORE publishing package from an approved SEO fix."""
+    fix = db.get(SEOFix, fix_id)
+    if not fix:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SEO fix not found")
+    if fix.status != "approved":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only approved SEO fixes can be packaged")
+
+    existing_package = (
+        db.query(PublishingPackage)
+        .filter(PublishingPackage.fix_id == fix.id, PublishingPackage.status.in_(["draft", "ready"]))
+        .order_by(PublishingPackage.created_at.desc(), PublishingPackage.id.desc())
+        .first()
+    )
+    if existing_package:
+        response.status_code = status.HTTP_200_OK
+        return {"success": True, "duplicate": True, "package": existing_package.to_dict()}
+
+    package = PublishingPackage(
+        fix_id=fix.id,
+        page_url=fix.page_url,
+        cms_type="istore",
+        payload_json=json.dumps(_publishing_package_payload(fix), ensure_ascii=False),
+        status="ready",
+        notes="Prepared for manual ISTORE/CMS publishing. Auto-publishing is disabled.",
+    )
+    db.add(package)
+    db.commit()
+    db.refresh(package)
+    return {"success": True, "duplicate": False, "package": package.to_dict()}
+
+
+@router.get("/seo/publishing-packages")
+def list_publishing_packages(
+    db: DatabaseSession,
+    status: str | None = None,
+    cms_type: str | None = None,
+) -> dict[str, object]:
+    """Return publishing packages with optional status and CMS filters."""
+    query = db.query(PublishingPackage)
+    if status:
+        if status not in PUBLISHING_PACKAGE_STATUSES:
+            raise HTTPException(status_code=400, detail="Invalid publishing package status")
+        query = query.filter(PublishingPackage.status == status)
+    if cms_type:
+        query = query.filter(PublishingPackage.cms_type == cms_type)
+    packages = query.order_by(PublishingPackage.created_at.desc(), PublishingPackage.id.desc()).all()
+    return {"packages": [package.to_dict() for package in packages]}
+
+
+@router.get("/seo/publishing-packages/{package_id}/export")
+def export_publishing_package(package_id: int, db: DatabaseSession) -> dict[str, object]:
+    """Return a copy-friendly manual ISTORE application payload for one package."""
+    package = db.get(PublishingPackage, package_id)
+    if not package:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Publishing package not found")
+
+    package.status = "exported"
+    db.add(package)
+    db.commit()
+    db.refresh(package)
+    payload = package.to_dict()["payload_json"]
+    return {
+        "success": True,
+        "package": package.to_dict(),
+        "copy_payload": payload,
+        "copy_payload_json": _pretty_json(payload),
+        "instructions": [
+            "Copy the payload into the matching ISTORE fields manually.",
+            "Verify the rendered page before marking this package applied.",
+        ],
+    }
+
+
+@router.post("/seo/publishing-packages/{package_id}/mark-applied")
+def mark_publishing_package_applied(package_id: int, db: DatabaseSession) -> dict[str, object]:
+    """Mark a publishing package as manually applied in ISTORE/CMS."""
+    package = db.get(PublishingPackage, package_id)
+    if not package:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Publishing package not found")
+    package.status = "applied_manually"
+    db.add(package)
+    db.commit()
+    db.refresh(package)
+    return {"success": True, "package": package.to_dict()}
 
 
 @router.get("/seo/internal-link-opportunities")
