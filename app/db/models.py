@@ -88,6 +88,10 @@ class SEOTask(Base):
     suggested_h1: Mapped[str | None] = mapped_column(String(512), nullable=True)
     meta_description: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     recommendation_json: Mapped[str] = mapped_column(Text, default="{}")
+    article_html: Mapped[str | None] = mapped_column(Text, nullable=True)
+    article_schema_json: Mapped[str] = mapped_column(Text, default="{}")
+    faq_schema_json: Mapped[str] = mapped_column(Text, default="{}")
+    article_status: Mapped[str] = mapped_column(String(32), default="not_generated", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
@@ -104,6 +108,10 @@ class SEOTask(Base):
             "suggested_h1": self.suggested_h1,
             "meta_description": self.meta_description,
             "recommendation_json": self.recommendation_json,
+            "article_html": self.article_html,
+            "article_schema_json": self.article_schema_json,
+            "faq_schema_json": self.faq_schema_json,
+            "article_status": self.article_status,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

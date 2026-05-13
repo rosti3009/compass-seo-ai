@@ -42,3 +42,33 @@ class OpenAIClient:
         if not isinstance(recommendation, dict):
             raise RuntimeError("OpenAI returned an invalid SEO recommendation payload.")
         return recommendation
+
+    def generate_full_article(self, task: dict) -> dict:
+        """Generate a complete SEO article package for a saved task and recommendation."""
+        response = self.client.chat.completions.create(
+            model=self.model,
+            response_format={"type": "json_object"},
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an expert SEO content writer. Return only a JSON object with exactly these keys: "
+                        "article_title (string), article_html (string), faq (array of objects), "
+                        "faq_schema_json (object), article_schema_json (object), meta_title (string), "
+                        "meta_description (string), and slug_suggestion (string). "
+                        "The article_html value must be publish-ready semantic HTML and must not include markdown. "
+                        "Do not include explanations or additional top-level keys."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"Generate a full SEO article from this saved SEO task: {json.dumps(task)}",
+                },
+            ],
+        )
+        content = response.choices[0].message.content or "{}"
+        article = json.loads(content)
+        if not isinstance(article, dict):
+            raise RuntimeError("OpenAI returned an invalid SEO article payload.")
+        return article
+
