@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Hebrew SEO Insights</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <main class="container rtl-page">
+      <section class="hero compact">
+        <p class="eyebrow">Hebrew SEO Intelligence</p>
+        <h1>ניתוח SEO עברי ל־{{ supported_site }}</h1>
+        <p>תובנות ייעודיות לאיקומרס ישראלי: כוונת חיפוש, איכות כותרות בעברית, עמודי קטגוריה/מותג/מוצר ועונתיות.</p>
+        <div class="actions">
+          <a class="button-link" href="/">חזרה לדשבורד</a>
+          <a class="button-link" href="/seo/hebrew-insights">JSON API</a>
+        </div>
+      </section>
+
+      <section class="cards" aria-label="Hebrew SEO summary">
+        <article class="card">
+          <span class="label">עמודים נותחו</span>
+          <strong>{{ summary.pages_analyzed }}</strong>
+        </article>
+        <article class="card">
+          <span class="label">ציון SEO עברי ממוצע</span>
+          <strong>{{ summary.average_hebrew_seo_score }}</strong>
+        </article>
+        <article class="card">
+          <span class="label">אתר נתמך</span>
+          <strong>{{ supported_site }}</strong>
+        </article>
+      </section>
+
+      <section class="panel">
+        <h2>עונתיות חיפוש בישראל</h2>
+        <div class="cluster-list">
+          {% for helper in seasonality %}
+          <article class="card cluster-card">
+            <h3>{{ helper.hebrew_name }} {% if helper.active_now %}<span class="badge">פעיל עכשיו</span>{% endif %}</h3>
+            <p>{{ helper.recommended_action }}</p>
+            <p><strong>מילות מפתח:</strong> {{ helper.keywords | join(', ') }}</p>
+          </article>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>תובנות לעמודים</h2>
+        {% if insights %}
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>URL</th>
+                <th>כוונה</th>
+                <th>סוג עמוד</th>
+                <th>ציון</th>
+                <th>מילת מפתח מנורמלת</th>
+                <th>המלצות</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for insight in insights %}
+              <tr>
+                <td><a href="{{ insight.url }}" target="_blank" rel="noreferrer">{{ insight.url }}</a></td>
+                <td>{{ insight.intent }}</td>
+                <td>{{ insight.ecommerce_signals.page_type }}</td>
+                <td>{{ insight.hebrew_seo_score }}</td>
+                <td>{{ insight.normalized_primary_keyword }}</td>
+                <td>
+                  <ul>
+                    {% for recommendation in insight.recommendations %}
+                    <li>{{ recommendation }}</li>
+                    {% endfor %}
+                  </ul>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="empty">אין עדיין נתוני זחילה. הריצו Crawl כדי ליצור תובנות SEO בעברית.</p>
+        {% endif %}
+      </section>
+    </main>
+  </body>
+</html>
