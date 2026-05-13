@@ -315,6 +315,116 @@ def test_generate_seo_article_saves_mocked_article(
     assert task.article_status == "generated"
 
 
+def test_export_seo_article_missing_task_returns_404(client: TestClient) -> None:
+    response = client.get("/seo/tasks/999/export")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "SEO task not found"
+
+
+def test_export_seo_article_without_generated_article_returns_400(client: TestClient, db_session: Session) -> None:
+    db_session.add(SEOTask(page_url="https://example.com/no-export", priority="medium", status="recommended"))
+    db_session.commit()
+    task = db_session.query(SEOTask).one()
+
+    response = client.get(f"/seo/tasks/{task.id}/export")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Generated article is required"
+
+
+def test_export_seo_article_view_without_generated_article_returns_400(
+    client: TestClient, db_session: Session
+) -> None:
+    db_session.add(SEOTask(page_url="https://example.com/no-export-view", priority="medium", status="recommended"))
+    db_session.commit()
+    task = db_session.query(SEOTask).one()
+
+    response = client.get(f"/seo/tasks/{task.id}/export-view")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Generated article is required"
+
+
+def test_export_seo_article_returns_cms_payload(client: TestClient, db_session: Session) -> None:
+    db_session.add(
+        SEOTask(
+            page_url="https://example.com/grills/portable-grill-guide",
+            priority="high",
+            status="recommended",
+            suggested_title="Portable Grill Buying Guide",
+            suggested_h1="Best Portable Grills for Camping",
+            meta_description="Choose the best portable grill for camping and tailgating.",
+            article_html="<article><h1>Best Portable Grills for Camping</h1><p>Portable grill body.</p></article>",
+            faq_schema_json=json.dumps({"@type": "FAQPage", "mainEntity": []}),
+            article_schema_json=json.dumps({"@type": "Article", "headline": "Best Portable Grills for Camping"}),
+            article_status="generated",
+        )
+    )
+    db_session.commit()
+    task = db_session.query(SEOTask).one()
+
+    response = client.get(f"/seo/tasks/{task.id}/export")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "success": True,
+        "task_id": task.id,
+        "page_url": "https://example.com/grills/portable-grill-guide",
+        "meta_title": "Portable Grill Buying Guide",
+        "meta_description": "Choose the best portable grill for camping and tailgating.",
+        "h1": "Best Portable Grills for Camping",
+        "article_html": "<article><h1>Best Portable Grills for Camping</h1><p>Portable grill body.</p></article>",
+        "faq_schema_json": {"@type": "FAQPage", "mainEntity": []},
+        "article_schema_json": {"@type": "Article", "headline": "Best Portable Grills for Camping"},
+        "slug_suggestion": "best-portable-grills-for-camping",
+        "publishing_notes": [
+            "Copy article_html into the CMS body field.",
+            "Add faq_schema_json and article_schema_json to the page schema/script area.",
+        ],
+    }
+
+
+def test_export_seo_article_view_returns_copy_friendly_html(client: TestClient, db_session: Session) -> None:
+    db_session.add(
+        SEOTask(
+            page_url="https://example.com/grills/kamado-guide",
+            priority="high",
+            status="recommended",
+            suggested_title="Kamado Grill Guide",
+            suggested_h1="Kamado Grill Setup Tips",
+            meta_description="Set up a kamado grill with confidence.",
+            article_html="<article><h1>Kamado Grill Setup Tips</h1><p>Setup body.</p></article>",
+            faq_schema_json=json.dumps({"@type": "FAQPage"}),
+            article_schema_json=json.dumps({"@type": "Article", "headline": "Kamado Grill Setup Tips"}),
+            article_status="generated",
+        )
+    )
+    db_session.commit()
+    task = db_session.query(SEOTask).one()
+
+    response = client.get(f"/seo/tasks/{task.id}/export-view")
+
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "<!doctype html>" in response.text
+    assert "<h2>Meta title</h2>" in response.text
+    assert "Kamado Grill Guide" in response.text
+    assert "<h2>Meta description</h2>" in response.text
+    assert "Set up a kamado grill with confidence." in response.text
+    assert "<h2>H1</h2>" in response.text
+    assert "Kamado Grill Setup Tips" in response.text
+    assert "<h2>Article HTML</h2>" in response.text
+    escaped_article = (
+        "&lt;article&gt;&lt;h1&gt;Kamado Grill Setup Tips&lt;/h1&gt;"
+        "&lt;p&gt;Setup body.&lt;/p&gt;&lt;/article&gt;"
+    )
+    assert escaped_article in response.text
+    assert "<h2>FAQ schema</h2>" in response.text
+    assert "<h2>Article schema</h2>" in response.text
+    assert "<h2>Publishing notes</h2>" in response.text
+
+
 def test_seo_article_preview_returns_html(client: TestClient, db_session: Session) -> None:
     db_session.add(
         SEOTask(

@@ -1,4 +1,5 @@
 import json
+import re
 from html import escape
 from typing import Annotated
 
@@ -102,7 +103,133 @@ def _apply_article_to_task(task: SEOTask, article: dict[str, object]) -> None:
     task.article_html = article_html if isinstance(article_html, str) else ""
     task.article_schema_json = json.dumps(article.get("article_schema_json") or {}, ensure_ascii=False)
     task.faq_schema_json = json.dumps(article.get("faq_schema_json") or {}, ensure_ascii=False)
+
+    meta_title = article.get("meta_title") or article.get("article_title")
+    meta_description = article.get("meta_description")
+    article_title = article.get("article_title")
+    if isinstance(meta_title, str) and meta_title:
+        task.suggested_title = meta_title
+    if isinstance(meta_description, str) and meta_description:
+        task.meta_description = meta_description
+    if isinstance(article_title, str) and article_title:
+        task.suggested_h1 = article_title
+
     task.article_status = "generated"
+
+
+def _json_object_from_text(value: str | None) -> dict[str, object]:
+    """Parse a stored JSON object string, falling back to an empty object for invalid values."""
+    if not value:
+        return {}
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _slugify(value: str) -> str:
+    """Return a CMS-friendly slug suggestion for generated article exports."""
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug or "seo-article"
+
+
+def _task_has_generated_article(task: SEOTask) -> bool:
+    """Return whether a task has generated article content available to export."""
+    return task.article_status == "generated" and bool((task.article_html or "").strip())
+
+
+def _task_export_payload(task: SEOTask) -> dict[str, object]:
+    """Build a CMS-copyable export payload for a generated SEO article."""
+    meta_title = task.suggested_title or task.suggested_h1 or ""
+    h1 = task.suggested_h1 or task.suggested_title or ""
+    slug_source = h1 or meta_title or task.page_url.rsplit("/", maxsplit=1)[-1]
+    publishing_notes = [
+        "Copy article_html into the CMS body field.",
+        "Add faq_schema_json and article_schema_json to the page schema/script area.",
+    ]
+
+    return {
+        "success": True,
+        "task_id": task.id,
+        "page_url": task.page_url,
+        "meta_title": meta_title,
+        "meta_description": task.meta_description or "",
+        "h1": h1,
+        "article_html": task.article_html or "",
+        "faq_schema_json": _json_object_from_text(task.faq_schema_json),
+        "article_schema_json": _json_object_from_text(task.article_schema_json),
+        "slug_suggestion": _slugify(slug_source),
+        "publishing_notes": publishing_notes,
+    }
+
+
+def _pretty_json(payload: object) -> str:
+    """Render JSON for human-friendly copy sections."""
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def _task_export_view_html(export: dict[str, object]) -> str:
+    """Render a standalone CMS export view for a generated article."""
+    faq_schema = _pretty_json(export["faq_schema_json"])
+    article_schema = _pretty_json(export["article_schema_json"])
+    notes = "".join(f"<li>{escape(str(note))}</li>" for note in export["publishing_notes"])
+
+    return (
+        "<!doctype html>"
+        '<html lang="en">'
+        "<head>"
+        '<meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        f"<title>SEO Article Export: {escape(str(export['meta_title'] or export['task_id']))}</title>"
+        "<style>"
+        "body{font-family:Arial,sans-serif;line-height:1.5;margin:2rem;max-width:1100px}"
+        "section{border:1px solid #ddd;border-radius:8px;margin:1rem 0;padding:1rem}"
+        "textarea{box-sizing:border-box;font-family:monospace;min-height:8rem;width:100%}"
+        "pre{background:#f7f7f7;overflow:auto;padding:1rem;white-space:pre-wrap}"
+        "</style>"
+        "</head>"
+        "<body>"
+        "<main>"
+        f"<h1>Export Article for Task {escape(str(export['task_id']))}</h1>"
+        f"<p><strong>Page URL:</strong> {escape(str(export['page_url']))}</p>"
+        f"<p><strong>Slug suggestion:</strong> <code>{escape(str(export['slug_suggestion']))}</code></p>"
+        "<section>"
+        "<h2>Meta title</h2>"
+        f"<textarea readonly>{escape(str(export['meta_title']))}</textarea>"
+        "</section>"
+        "<section>"
+        "<h2>Meta description</h2>"
+        f"<textarea readonly>{escape(str(export['meta_description']))}</textarea>"
+        "</section>"
+        "<section>"
+        "<h2>H1</h2>"
+        f"<textarea readonly>{escape(str(export['h1']))}</textarea>"
+        "</section>"
+        "<section>"
+        "<h2>Article HTML</h2>"
+        f"<textarea readonly>{escape(str(export['article_html']))}</textarea>"
+        "<h3>Rendered preview</h3>"
+        f"<article>{export['article_html']}</article>"
+        "</section>"
+        "<section>"
+        "<h2>FAQ schema</h2>"
+        f"<textarea readonly>{escape(faq_schema)}</textarea>"
+        f"<pre>{escape(faq_schema)}</pre>"
+        "</section>"
+        "<section>"
+        "<h2>Article schema</h2>"
+        f"<textarea readonly>{escape(article_schema)}</textarea>"
+        f"<pre>{escape(article_schema)}</pre>"
+        "</section>"
+        "<section>"
+        "<h2>Publishing notes</h2>"
+        f"<ul>{notes}</ul>"
+        "</section>"
+        "</main>"
+        "</body>"
+        "</html>"
+    )
 
 
 def _task_article_preview_html(task: SEOTask) -> str:
@@ -509,6 +636,30 @@ def generate_seo_task_article(task_id: int, db: DatabaseSession) -> dict[str, ob
     db.refresh(task)
 
     return {"success": True, "task_id": task.id, "article": article}
+
+
+@router.get("/seo/tasks/{task_id}/export")
+def export_seo_task_article(task_id: int, db: DatabaseSession) -> dict[str, object]:
+    """Return a CMS-copyable JSON export for a generated SEO task article."""
+    task = db.get(SEOTask, task_id)
+    if not task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SEO task not found")
+    if not _task_has_generated_article(task):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Generated article is required")
+
+    return _task_export_payload(task)
+
+
+@router.get("/seo/tasks/{task_id}/export-view", response_class=HTMLResponse)
+def export_seo_task_article_view(task_id: int, db: DatabaseSession) -> HTMLResponse:
+    """Return a copy-friendly HTML export view for a generated SEO task article."""
+    task = db.get(SEOTask, task_id)
+    if not task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SEO task not found")
+    if not _task_has_generated_article(task):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Generated article is required")
+
+    return HTMLResponse(content=_task_export_view_html(_task_export_payload(task)))
 
 
 @router.get("/seo/tasks/{task_id}/preview", response_class=HTMLResponse)
