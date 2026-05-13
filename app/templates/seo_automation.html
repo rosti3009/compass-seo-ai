@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SEO Automation</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <main class="container">
+      <section class="hero compact">
+        <p class="eyebrow">One-click safe SEO workflow</p>
+        <h1>SEO Automation</h1>
+        <p>Run crawl analysis, GSC sync, recommendations, draft fixes, approved-fix packaging, and strategy recommendations. The automation never auto-approves fixes, never auto-publishes, and never marks publishing packages applied.</p>
+        <div class="actions">
+          <form method="post" action="/seo/automation/run?max_tasks=10&amp;generate_articles=false&amp;sync_gsc=true">
+            <button type="submit">Start automation</button>
+          </form>
+          <a class="button-link" href="/seo/strategy-view">SEO strategy</a>
+          <a class="button-link" href="/seo/fixes-view">SEO fixes</a>
+          <a class="button-link" href="/seo/publishing-packages-view">Publishing packages</a>
+          <a class="button-link" href="/">Back to dashboard</a>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Last automation runs</h2>
+        {% if runs %}
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Status</th>
+                <th>Started</th>
+                <th>Completed</th>
+                <th>Crawl</th>
+                <th>GSC rows</th>
+                <th>Tasks</th>
+                <th>Recommendations</th>
+                <th>Articles</th>
+                <th>Fixes</th>
+                <th>Packages</th>
+                <th>Strategy</th>
+                <th>Errors / warnings</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for run in runs %}
+              <tr>
+                <td>{{ run.id }}</td>
+                <td>{{ run.status }}</td>
+                <td>{{ run.started_at }}</td>
+                <td>{{ run.completed_at or '—' }}</td>
+                <td>{{ run.crawl_run_id or '—' }}</td>
+                <td>{{ run.gsc_synced_rows }}</td>
+                <td>{{ run.seo_tasks_created }}</td>
+                <td>{{ run.recommendations_generated }}</td>
+                <td>{{ run.articles_generated }}</td>
+                <td>{{ run.fixes_created }}</td>
+                <td>{{ run.publishing_packages_created }}</td>
+                <td>{{ run.strategy_recommendations_created }}</td>
+                <td>
+                  {% if run.errors %}
+                    <ul>
+                    {% for item in run.errors %}
+                      <li>{{ item.step if item.step is defined else 'warning' }}: {{ item.message if item.message is defined else item }}</li>
+                    {% endfor %}
+                    </ul>
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td><a href="/seo/automation/runs/{{ run.id }}">JSON</a></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="empty">No automation runs yet.</p>
+        {% endif %}
+      </section>
+    </main>
+  </body>
+</html>
