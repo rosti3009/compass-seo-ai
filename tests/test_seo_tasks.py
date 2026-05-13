@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db.database import Base, get_db
-from app.db.models import CrawlRun, PageAudit, SEOFix, SEOTask
+from app.db.models import CrawlRun, PageAudit, PublishingPackage, SEOFix, SEOTask
 from app.integrations.openai_client import OpenAIClient
 from app.main import app
 
@@ -333,9 +333,7 @@ def test_export_seo_article_without_generated_article_returns_400(client: TestCl
     assert response.json()["detail"] == "Generated article is required"
 
 
-def test_export_seo_article_view_without_generated_article_returns_400(
-    client: TestClient, db_session: Session
-) -> None:
+def test_export_seo_article_view_without_generated_article_returns_400(client: TestClient, db_session: Session) -> None:
     db_session.add(SEOTask(page_url="https://example.com/no-export-view", priority="medium", status="recommended"))
     db_session.commit()
     task = db_session.query(SEOTask).one()
@@ -416,8 +414,7 @@ def test_export_seo_article_view_returns_copy_friendly_html(client: TestClient, 
     assert "Kamado Grill Setup Tips" in response.text
     assert "<h2>Article HTML</h2>" in response.text
     escaped_article = (
-        "&lt;article&gt;&lt;h1&gt;Kamado Grill Setup Tips&lt;/h1&gt;"
-        "&lt;p&gt;Setup body.&lt;/p&gt;&lt;/article&gt;"
+        "&lt;article&gt;&lt;h1&gt;Kamado Grill Setup Tips&lt;/h1&gt;" "&lt;p&gt;Setup body.&lt;/p&gt;&lt;/article&gt;"
     )
     assert escaped_article in response.text
     assert "<h2>FAQ schema</h2>" in response.text
@@ -704,9 +701,7 @@ def test_topical_clusters_endpoint_returns_clusters_with_mocked_data(
                         "pillar_page": "https://example.com/guides/portable-grills",
                         "supporting_pages": ["https://example.com/guides/portable-grill-cleaning"],
                         "missing_articles": ["Portable grill fuel comparison"],
-                        "internal_link_strategy": [
-                            "Link cleaning support content to the portable grill pillar page."
-                        ],
+                        "internal_link_strategy": ["Link cleaning support content to the portable grill pillar page."],
                     }
                 ]
             }
@@ -1103,9 +1098,7 @@ def test_seo_fixes_view_loads(client: TestClient, db_session: Session) -> None:
     db_session.add(SEOTask(page_url="https://example.com/fixes-view", recommendation_json=json.dumps({"ok": True})))
     db_session.commit()
     task = db_session.query(SEOTask).one()
-    db_session.add(
-        SEOFix(task_id=task.id, page_url=task.page_url, fix_type="meta_title", proposed_value="View title")
-    )
+    db_session.add(SEOFix(task_id=task.id, page_url=task.page_url, fix_type="meta_title", proposed_value="View title"))
     db_session.commit()
 
     response = client.get("/seo/fixes-view")
@@ -1114,3 +1107,136 @@ def test_seo_fixes_view_loads(client: TestClient, db_session: Session) -> None:
     assert "Review SEO fixes" in response.text
     assert "View title" in response.text
     assert f'href="/seo/fixes/{db_session.query(SEOFix).one().id}/export"' in response.text
+
+
+def _approved_fix(db_session: Session, status: str = "approved", fix_type: str = "meta_title") -> SEOFix:
+    task = SEOTask(
+        page_url="https://example.com/publish-me",
+        keyword="publish keyword",
+        priority="high",
+        status="recommended",
+    )
+    db_session.add(task)
+    db_session.flush()
+    fix = SEOFix(
+        task_id=task.id,
+        page_url=task.page_url,
+        fix_type=fix_type,
+        current_value="Old value",
+        proposed_value="New ISTORE-ready value",
+        status=status,
+        confidence_score=0.92,
+        source="seo_task",
+    )
+    db_session.add(fix)
+    db_session.commit()
+    return fix
+
+
+def test_cannot_create_publishing_package_from_unapproved_fix(client: TestClient, db_session: Session) -> None:
+    fix = _approved_fix(db_session, status="draft")
+
+    response = client.post(f"/seo/fixes/{fix.id}/create-publishing-package")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Only approved SEO fixes can be packaged"
+
+
+def test_create_publishing_package_from_approved_fix(client: TestClient, db_session: Session) -> None:
+    fix = _approved_fix(db_session, fix_type="meta_description")
+
+    response = client.post(f"/seo/fixes/{fix.id}/create-publishing-package")
+
+    assert response.status_code == 201
+    payload = response.json()
+    package = payload["package"]
+    assert payload["success"] is True
+    assert payload["duplicate"] is False
+    assert package["fix_id"] == fix.id
+    assert package["cms_type"] == "istore"
+    assert package["status"] == "ready"
+    assert package["payload_json"]["fix_type"] == "meta_description"
+    assert package["payload_json"]["istore_fields"] == {"meta_description": "New ISTORE-ready value"}
+
+
+def test_create_publishing_package_prevents_duplicate_draft_or_ready_package(
+    client: TestClient, db_session: Session
+) -> None:
+    fix = _approved_fix(db_session)
+
+    first_response = client.post(f"/seo/fixes/{fix.id}/create-publishing-package")
+    second_response = client.post(f"/seo/fixes/{fix.id}/create-publishing-package")
+
+    assert first_response.status_code == 201
+    assert second_response.status_code == 200
+    assert second_response.json()["duplicate"] is True
+    assert db_session.query(PublishingPackage).filter(PublishingPackage.fix_id == fix.id).count() == 1
+
+
+def test_list_publishing_packages_filters_by_status_and_cms_type(client: TestClient, db_session: Session) -> None:
+    fix = _approved_fix(db_session)
+    db_session.add_all(
+        [
+            PublishingPackage(
+                fix_id=fix.id,
+                page_url=fix.page_url,
+                cms_type="istore",
+                payload_json='{"fix_type":"meta_title"}',
+                status="ready",
+            ),
+            PublishingPackage(
+                fix_id=fix.id,
+                page_url=fix.page_url,
+                cms_type="other",
+                payload_json='{"fix_type":"meta_title"}',
+                status="exported",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get("/seo/publishing-packages?status=ready&cms_type=istore")
+
+    assert response.status_code == 200
+    packages = response.json()["packages"]
+    assert len(packages) == 1
+    assert packages[0]["status"] == "ready"
+    assert packages[0]["cms_type"] == "istore"
+
+
+def test_export_publishing_package_returns_copy_payload_and_marks_exported(
+    client: TestClient, db_session: Session
+) -> None:
+    fix = _approved_fix(db_session)
+    create_response = client.post(f"/seo/fixes/{fix.id}/create-publishing-package")
+    package_id = create_response.json()["package"]["id"]
+
+    response = client.get(f"/seo/publishing-packages/{package_id}/export")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["package"]["status"] == "exported"
+    assert payload["copy_payload"]["page_url"] == fix.page_url
+    assert "New ISTORE-ready value" in payload["copy_payload_json"]
+
+
+def test_mark_publishing_package_applied(client: TestClient, db_session: Session) -> None:
+    fix = _approved_fix(db_session)
+    create_response = client.post(f"/seo/fixes/{fix.id}/create-publishing-package")
+    package_id = create_response.json()["package"]["id"]
+
+    response = client.post(f"/seo/publishing-packages/{package_id}/mark-applied")
+
+    assert response.status_code == 200
+    assert response.json()["package"]["status"] == "applied_manually"
+
+
+def test_publishing_packages_view_loads(client: TestClient, db_session: Session) -> None:
+    fix = _approved_fix(db_session)
+    client.post(f"/seo/fixes/{fix.id}/create-publishing-package")
+
+    response = client.get("/seo/publishing-packages-view")
+
+    assert response.status_code == 200
+    assert "Publishing packages" in response.text
+    assert "https://example.com/publish-me" in response.text

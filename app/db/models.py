@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 
 from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
@@ -140,6 +141,9 @@ class SEOFix(Base):
     )
 
     task: Mapped["SEOTask"] = relationship(back_populates="fixes")
+    publishing_packages: Mapped[list["PublishingPackage"]] = relationship(
+        back_populates="fix", cascade="all, delete-orphan"
+    )
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -153,6 +157,43 @@ class SEOFix(Base):
             "confidence_score": self.confidence_score,
             "source": self.source,
             "notes_json": self.notes_json,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class PublishingPackage(Base):
+    """Manual CMS publishing package prepared from an approved SEO fix."""
+
+    __tablename__ = "publishing_packages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    fix_id: Mapped[int] = mapped_column(ForeignKey("seo_fixes.id"), nullable=False, index=True)
+    page_url: Mapped[str] = mapped_column(String(1024), nullable=False, index=True)
+    cms_type: Mapped[str] = mapped_column(String(64), default="istore", index=True)
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    status: Mapped[str] = mapped_column(String(32), default="draft", index=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+    )
+
+    fix: Mapped["SEOFix"] = relationship(back_populates="publishing_packages")
+
+    def to_dict(self) -> dict[str, object]:
+        try:
+            payload: object = json.loads(self.payload_json or "{}")
+        except json.JSONDecodeError:
+            payload = self.payload_json
+        return {
+            "id": self.id,
+            "fix_id": self.fix_id,
+            "page_url": self.page_url,
+            "cms_type": self.cms_type,
+            "payload_json": payload,
+            "status": self.status,
+            "notes": self.notes,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

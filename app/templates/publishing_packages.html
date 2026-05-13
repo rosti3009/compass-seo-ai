@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ISTORE Publishing Packages</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <main class="container">
+      <section class="hero compact">
+        <p class="eyebrow">Manual ISTORE publishing prep</p>
+        <h1>Publishing packages</h1>
+        <p>Copy approved SEO fixes into ISTORE manually. Packages are prepared and exported, but never auto-published.</p>
+        <p><a href="/">Back to dashboard</a></p>
+      </section>
+
+      {% for group_name, packages in package_groups.items() %}
+      <section class="panel">
+        <h2>{{ group_name|capitalize }} packages ({{ packages|length }})</h2>
+        {% if packages %}
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Page URL</th>
+                <th>Fix type</th>
+                <th>CMS</th>
+                <th>Status</th>
+                <th>Copy/export</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for package in packages %}
+              {% set fix = fixes_by_id.get(package.fix_id) %}
+              <tr>
+                <td>{{ package.id }}</td>
+                <td><a href="{{ package.page_url }}" target="_blank" rel="noreferrer">{{ package.page_url }}</a></td>
+                <td>{{ fix.fix_type if fix else 'Unknown' }}</td>
+                <td>{{ package.cms_type }}</td>
+                <td>{{ package.status }}</td>
+                <td><a href="/seo/publishing-packages/{{ package.id }}/export">Export payload</a></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="empty">No {{ group_name }} packages yet.</p>
+        {% endif %}
+      </section>
+      {% endfor %}
+    </main>
+  </body>
+</html>
