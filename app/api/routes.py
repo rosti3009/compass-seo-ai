@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.database import get_db
-from app.db.models import CrawlRun, PageAudit, SEOTask
+from app.db.models import CrawlRun, PageAudit, SEOFix, SEOTask
 from app.integrations.ga4 import GA4Client
 from app.integrations.ga4 import MissingGoogleCredentialsError as MissingGA4CredentialsError
 from app.integrations.gsc import GSCClient
@@ -24,6 +24,18 @@ from app.services.topical_clusters import build_cluster_summary
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 DatabaseSession = Annotated[Session, Depends(get_db)]
+
+SEO_FIX_TYPES = {
+    "meta_title",
+    "meta_description",
+    "h1",
+    "article_html",
+    "faq_schema",
+    "article_schema",
+    "internal_links",
+    "noindex_recommendation",
+}
+SEO_FIX_STATUSES = {"draft", "ready_for_review", "approved", "rejected", "exported", "applied_manually"}
 
 
 def _seo_task_candidate(page: PageAudit) -> bool:
@@ -137,6 +149,108 @@ def _slugify(value: str) -> str:
 def _task_has_generated_article(task: SEOTask) -> bool:
     """Return whether a task has generated article content available to export."""
     return task.article_status == "generated" and bool((task.article_html or "").strip())
+
+
+def _latest_page_audit_for_url(db: Session, page_url: str) -> PageAudit | None:
+    """Return the newest audit row for a page URL when crawl context exists."""
+    return (
+        db.query(PageAudit)
+        .filter(PageAudit.url == page_url)
+        .order_by(PageAudit.crawled_at.desc(), PageAudit.id.desc())
+        .first()
+    )
+
+
+def _stored_json_fix_value(value: str | None) -> str:
+    """Normalize stored JSON strings for readable fix proposals."""
+    payload = _json_object_from_text(value)
+    return _pretty_json(payload) if payload else ""
+
+
+def _seo_fix_candidate_specs(task: SEOTask, current_page: PageAudit | None) -> list[dict[str, object]]:
+    """Build SEO fix specs from recommendation fields and generated article assets."""
+    current_title = current_page.title if current_page else None
+    current_description = current_page.meta_description if current_page else None
+    current_h1 = current_page.h1 if current_page else None
+    recommendation = _parse_task_recommendation(task)
+    has_generated_article = _task_has_generated_article(task)
+    confidence_score = float(recommendation.get("confidence_score", 0.8) or 0.8) if recommendation else 0.9
+    primary_source = "generated_article" if has_generated_article else "recommendation"
+    specs = [
+        {
+            "fix_type": "meta_title",
+            "current_value": current_title,
+            "proposed_value": task.suggested_title,
+            "source": primary_source,
+        },
+        {
+            "fix_type": "meta_description",
+            "current_value": current_description,
+            "proposed_value": task.meta_description,
+            "source": primary_source,
+        },
+        {
+            "fix_type": "h1",
+            "current_value": current_h1,
+            "proposed_value": task.suggested_h1,
+            "source": primary_source,
+        },
+    ]
+    if has_generated_article:
+        specs.extend(
+            [
+                {
+                    "fix_type": "article_html",
+                    "current_value": None,
+                    "proposed_value": task.article_html,
+                    "source": "generated_article",
+                },
+                {
+                    "fix_type": "faq_schema",
+                    "current_value": None,
+                    "proposed_value": _stored_json_fix_value(task.faq_schema_json),
+                    "source": "generated_article",
+                },
+                {
+                    "fix_type": "article_schema",
+                    "current_value": None,
+                    "proposed_value": _stored_json_fix_value(task.article_schema_json),
+                    "source": "generated_article",
+                },
+            ]
+        )
+    return [
+        {**spec, "confidence_score": confidence_score}
+        for spec in specs
+        if isinstance(spec.get("proposed_value"), str) and str(spec["proposed_value"]).strip()
+    ]
+
+
+def _fix_publishing_instructions(fix: SEOFix) -> list[str]:
+    """Return copy-friendly manual publishing instructions for a fix package."""
+    instructions_by_type = {
+        "meta_title": ["Update the page meta title/title tag with proposed_value."],
+        "meta_description": ["Update the page meta description with proposed_value."],
+        "h1": ["Update the page H1 heading with proposed_value."],
+        "article_html": ["Paste proposed_value into the CMS body/editor after human review."],
+        "faq_schema": ["Add proposed_value as FAQPage JSON-LD in the page schema area."],
+        "article_schema": ["Add proposed_value as Article JSON-LD in the page schema area."],
+        "internal_links": ["Manually add the proposed internal links in the CMS."],
+        "noindex_recommendation": ["Review the recommendation before changing robots/noindex settings."],
+    }
+    return [
+        "Do not auto-publish; apply this fix manually only after approval.",
+        *instructions_by_type.get(fix.fix_type, ["Review proposed_value and apply manually if appropriate."]),
+    ]
+
+
+def _fixes_by_status(fixes: list[SEOFix]) -> dict[str, list[SEOFix]]:
+    """Group fixes for the review dashboard."""
+    return {
+        "pending": [fix for fix in fixes if fix.status in {"draft", "ready_for_review"}],
+        "approved": [fix for fix in fixes if fix.status == "approved"],
+        "rejected": [fix for fix in fixes if fix.status == "rejected"],
+    }
 
 
 def _task_export_payload(task: SEOTask) -> dict[str, object]:
@@ -493,6 +607,17 @@ def seo_tasks_view(request: Request, db: DatabaseSession) -> HTMLResponse:
     return templates.TemplateResponse(request, "seo_tasks.html", {"tasks": tasks})
 
 
+@router.get("/seo/fixes-view", response_class=HTMLResponse)
+def seo_fixes_view(request: Request, db: DatabaseSession) -> HTMLResponse:
+    """Render SEO fixes grouped by review status."""
+    fixes = db.query(SEOFix).order_by(SEOFix.created_at.desc(), SEOFix.id.desc()).all()
+    return templates.TemplateResponse(
+        request,
+        "seo_fixes.html",
+        {"fix_groups": _fixes_by_status(fixes), "fixes": fixes},
+    )
+
+
 @router.get("/seo/internal-link-opportunities-view", response_class=HTMLResponse)
 def internal_link_opportunities_view(request: Request, db: DatabaseSession) -> HTMLResponse:
     """Render deterministic internal link opportunities from the latest crawl."""
@@ -596,6 +721,115 @@ def list_seo_tasks(db: DatabaseSession) -> dict[str, object]:
     """Return saved SEO tasks ordered by creation date."""
     tasks = db.query(SEOTask).order_by(SEOTask.created_at.desc(), SEOTask.id.desc()).all()
     return {"tasks": [task.to_dict() for task in tasks]}
+
+
+@router.post("/seo/tasks/{task_id}/create-fixes", status_code=status.HTTP_201_CREATED)
+def create_seo_fixes_for_task(task_id: int, db: DatabaseSession) -> dict[str, object]:
+    """Create reviewable SEO fix packages from a task recommendation or generated article."""
+    task = db.get(SEOTask, task_id)
+    if not task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SEO task not found")
+    if not _parse_task_recommendation(task) and not _task_has_generated_article(task):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="SEO task recommendation or generated article is required",
+        )
+
+    existing_draft_types = {
+        fix_type
+        for (fix_type,) in db.query(SEOFix.fix_type)
+        .filter(SEOFix.task_id == task.id, SEOFix.status == "draft")
+        .all()
+    }
+    current_page = _latest_page_audit_for_url(db, task.page_url)
+    candidates = _seo_fix_candidate_specs(task, current_page)
+    new_fixes = [
+        SEOFix(
+            task_id=task.id,
+            page_url=task.page_url,
+            fix_type=str(candidate["fix_type"]),
+            current_value=candidate.get("current_value"),
+            proposed_value=str(candidate["proposed_value"]),
+            status="draft",
+            confidence_score=float(candidate["confidence_score"]),
+            source=str(candidate["source"]),
+            notes_json=json.dumps(
+                {
+                    "task_status": task.status,
+                    "article_status": task.article_status,
+                    "safe_pipeline": "manual_review_required",
+                }
+            ),
+        )
+        for candidate in candidates
+        if candidate["fix_type"] not in existing_draft_types
+    ]
+    db.add_all(new_fixes)
+    db.commit()
+    for fix in new_fixes:
+        db.refresh(fix)
+
+    return {"created_count": len(new_fixes), "fixes": [fix.to_dict() for fix in new_fixes]}
+
+
+@router.get("/seo/fixes")
+def list_seo_fixes(
+    db: DatabaseSession,
+    status: str | None = None,
+    fix_type: str | None = None,
+    task_id: int | None = None,
+) -> dict[str, object]:
+    """Return SEO fixes with optional status, type, and task filters."""
+    query = db.query(SEOFix)
+    if status:
+        query = query.filter(SEOFix.status == status)
+    if fix_type:
+        query = query.filter(SEOFix.fix_type == fix_type)
+    if task_id is not None:
+        query = query.filter(SEOFix.task_id == task_id)
+    fixes = query.order_by(SEOFix.created_at.desc(), SEOFix.id.desc()).all()
+    return {"fixes": [fix.to_dict() for fix in fixes]}
+
+
+@router.post("/seo/fixes/{fix_id}/approve")
+def approve_seo_fix(fix_id: int, db: DatabaseSession) -> dict[str, object]:
+    """Approve a reviewable SEO fix without publishing it."""
+    fix = db.get(SEOFix, fix_id)
+    if not fix:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SEO fix not found")
+    fix.status = "approved"
+    db.add(fix)
+    db.commit()
+    db.refresh(fix)
+    return {"success": True, "fix": fix.to_dict()}
+
+
+@router.post("/seo/fixes/{fix_id}/reject")
+def reject_seo_fix(fix_id: int, db: DatabaseSession) -> dict[str, object]:
+    """Reject a reviewable SEO fix without publishing it."""
+    fix = db.get(SEOFix, fix_id)
+    if not fix:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SEO fix not found")
+    fix.status = "rejected"
+    db.add(fix)
+    db.commit()
+    db.refresh(fix)
+    return {"success": True, "fix": fix.to_dict()}
+
+
+@router.get("/seo/fixes/{fix_id}/export")
+def export_seo_fix(fix_id: int, db: DatabaseSession) -> dict[str, object]:
+    """Return a copy-friendly manual publishing payload for one SEO fix."""
+    fix = db.get(SEOFix, fix_id)
+    if not fix:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SEO fix not found")
+    return {
+        "page_url": fix.page_url,
+        "fix_type": fix.fix_type,
+        "current_value": fix.current_value or "",
+        "proposed_value": fix.proposed_value or "",
+        "publishing_instructions": _fix_publishing_instructions(fix),
+    }
 
 
 @router.get("/seo/internal-link-opportunities")
