@@ -1,7 +1,7 @@
 import json
 from datetime import UTC, date, datetime
 
-from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -146,6 +146,54 @@ class GSCKeywordMetric(Base):
             "source": self.source,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class SEOScheduleConfig(Base):
+    """Safe scheduled SEO automation settings.
+
+    Schedules only prepare reviewable SEO work. They do not approve fixes,
+    publish changes, or mark publishing packages as applied.
+    """
+
+    __tablename__ = "seo_schedule_configs"
+
+    VALID_FREQUENCIES = {"daily", "weekly"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    frequency: Mapped[str] = mapped_column(String(32), default="daily", nullable=False, index=True)
+    hour_utc: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+    max_tasks: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
+    generate_articles: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    sync_gsc: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+    )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "enabled": self.enabled,
+            "frequency": self.frequency,
+            "hour_utc": self.hour_utc,
+            "max_tasks": self.max_tasks,
+            "generate_articles": self.generate_articles,
+            "sync_gsc": self.sync_gsc,
+            "last_run_at": self.last_run_at.isoformat() if self.last_run_at else None,
+            "next_run_at": self.next_run_at.isoformat() if self.next_run_at else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "safety": {
+                "auto_approve_fixes": False,
+                "auto_publish": False,
+                "auto_mark_publishing_packages_applied": False,
+            },
         }
 
 
