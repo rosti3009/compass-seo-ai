@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     crawler_max_pages: int = Field(default=25, ge=1, le=250)
     crawler_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
     google_service_account_file: str | None = None
+    google_application_credentials_json: str | None = None
     gsc_site_url: str | None = None
     ga4_property_id: str | None = None
     openai_api_key: str | None = None
