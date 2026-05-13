@@ -1,3 +1,4 @@
+import json
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -7,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.database import get_db
-from app.db.models import CrawlRun, PageAudit
+from app.db.models import CrawlRun, PageAudit, SEOTask
 from app.integrations.ga4 import GA4Client
 from app.integrations.ga4 import MissingGoogleCredentialsError as MissingGA4CredentialsError
 from app.integrations.gsc import GSCClient
@@ -18,6 +19,45 @@ from app.services.sitemap import discover_sitemap_urls
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 DatabaseSession = Annotated[Session, Depends(get_db)]
+
+
+def _seo_task_candidate(page: PageAudit) -> bool:
+    missing_fields = {field.strip() for field in page.missing_fields.split(",") if field.strip()}
+    missing_seo_basics = bool(missing_fields.intersection({"title", "meta_description", "h1"}))
+    return page.seo_score < 70 or missing_seo_basics
+
+
+def _priority_for_page(page: PageAudit) -> str:
+    missing_fields = {field.strip() for field in page.missing_fields.split(",") if field.strip()}
+    if page.seo_score < 50 or missing_fields.intersection({"title", "h1"}):
+        return "high"
+    if page.seo_score < 70 or "meta_description" in missing_fields:
+        return "medium"
+    return "low"
+
+
+def _build_task_from_page(page: PageAudit) -> SEOTask:
+    missing_fields = [field for field in page.missing_fields.split(",") if field]
+    recommendation = {
+        "source": "latest_crawl",
+        "page_audit_id": page.id,
+        "seo_score": page.seo_score,
+        "missing_fields": missing_fields,
+        "recommendations": [
+            f"Add or improve {field.replace('_', ' ')}." for field in missing_fields
+        ]
+        or ["Improve on-page SEO signals for this low-scoring page."],
+    }
+    return SEOTask(
+        page_url=page.url,
+        keyword=None,
+        priority=_priority_for_page(page),
+        status="open",
+        suggested_title=page.title or None,
+        suggested_h1=page.h1 or None,
+        meta_description=page.meta_description or None,
+        recommendation_json=json.dumps(recommendation),
+    )
 
 
 @router.get("/health")
@@ -86,6 +126,40 @@ def stats(db: DatabaseSession) -> dict[str, object]:
         "total_pages_audited": total_pages,
         "latest_run": latest_run.to_dict() if latest_run else None,
     }
+
+
+@router.post("/seo/tasks/from-latest-crawl", status_code=status.HTTP_201_CREATED)
+def create_seo_tasks_from_latest_crawl(db: DatabaseSession) -> dict[str, int]:
+    """Create SEO tasks from the latest crawl for pages that need on-page SEO work."""
+    crawl_run = db.query(CrawlRun).order_by(CrawlRun.started_at.desc()).first()
+    if not crawl_run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No crawler runs found")
+
+    pages = (
+        db.query(PageAudit)
+        .filter(PageAudit.crawl_run_id == crawl_run.id)
+        .order_by(PageAudit.seo_score.asc(), PageAudit.url.asc())
+        .all()
+    )
+    candidates = [page for page in pages if _seo_task_candidate(page)]
+    existing_urls = {
+        page_url
+        for (page_url,) in db.query(SEOTask.page_url)
+        .filter(SEOTask.page_url.in_([page.url for page in candidates]))
+        .all()
+    }
+    new_tasks = [_build_task_from_page(page) for page in candidates if page.url not in existing_urls]
+    db.add_all(new_tasks)
+    db.commit()
+
+    return {"created_count": len(new_tasks), "total_candidates": len(candidates)}
+
+
+@router.get("/seo/tasks")
+def list_seo_tasks(db: DatabaseSession) -> dict[str, object]:
+    """Return saved SEO tasks ordered by creation date."""
+    tasks = db.query(SEOTask).order_by(SEOTask.created_at.desc(), SEOTask.id.desc()).all()
+    return {"tasks": [task.to_dict() for task in tasks]}
 
 
 @router.get("/integrations/gsc/status")
