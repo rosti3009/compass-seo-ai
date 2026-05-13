@@ -1,7 +1,7 @@
 import json
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -72,6 +72,42 @@ class PageAudit(Base):
             "missing_fields": [field for field in self.missing_fields.split(",") if field],
             "seo_score": self.seo_score,
             "crawled_at": self.crawled_at.isoformat() if self.crawled_at else None,
+        }
+
+
+class GSCKeywordMetric(Base):
+    """Google Search Console keyword performance for a page/query/date."""
+
+    __tablename__ = "gsc_keyword_metrics"
+    __table_args__ = (UniqueConstraint("page_url", "query", "date", "source", name="uq_gsc_keyword_metric"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    page_url: Mapped[str] = mapped_column(String(1024), nullable=False, index=True)
+    query: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
+    clicks: Mapped[int] = mapped_column(Integer, default=0)
+    impressions: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    ctr: Mapped[float] = mapped_column(Float, default=0.0, index=True)
+    average_position: Mapped[float] = mapped_column(Float, default=0.0, index=True)
+    date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(64), default="gsc", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+    )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "page_url": self.page_url,
+            "query": self.query,
+            "clicks": self.clicks,
+            "impressions": self.impressions,
+            "ctr": self.ctr,
+            "average_position": self.average_position,
+            "date": self.date.isoformat() if self.date else None,
+            "source": self.source,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 
 

@@ -1,5 +1,6 @@
 import json
 import re
+from datetime import date
 from html import escape
 from typing import Annotated
 
@@ -10,10 +11,10 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.database import get_db
-from app.db.models import CrawlRun, PageAudit, PublishingPackage, SEOFix, SEOTask
+from app.db.models import CrawlRun, GSCKeywordMetric, PageAudit, PublishingPackage, SEOFix, SEOTask
 from app.integrations.ga4 import GA4Client
 from app.integrations.ga4 import MissingGoogleCredentialsError as MissingGA4CredentialsError
-from app.integrations.gsc import GSCClient
+from app.integrations.gsc import GSCAPIError, GSCClient
 from app.integrations.gsc import MissingGoogleCredentialsError as MissingGSCCredentialsError
 from app.integrations.openai_client import OpenAIClient
 from app.services.crawler import SEOCrawler
@@ -37,6 +38,180 @@ SEO_FIX_TYPES = {
 }
 SEO_FIX_STATUSES = {"draft", "ready_for_review", "approved", "rejected", "exported", "applied_manually"}
 PUBLISHING_PACKAGE_STATUSES = {"draft", "ready", "exported", "applied_manually", "failed"}
+
+
+LOW_CTR_THRESHOLD = 0.03
+HIGH_IMPRESSIONS_THRESHOLD = 50
+WEAK_RANKING_MIN = 4
+WEAK_RANKING_MAX = 20
+
+
+def _parse_metric_date(value: object) -> date:
+    """Parse a Search Console date, falling back to today for malformed provider data."""
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            pass
+    return date.today()
+
+
+def _keyword_opportunity_score(metric: GSCKeywordMetric | dict[str, object] | None) -> int:
+    """Score GSC opportunity from impressions, CTR weakness, and page-one/two ranking distance."""
+    if metric is None:
+        return 0
+    if isinstance(metric, dict):
+        impressions = int(metric.get("impressions") or 0)
+        ctr = float(metric.get("ctr") or 0.0)
+        position = float(metric.get("average_position") or 0.0)
+    else:
+        impressions = int(getattr(metric, "impressions", 0))
+        ctr = float(getattr(metric, "ctr", 0.0))
+        position = float(getattr(metric, "average_position", 0.0))
+    impression_score = min(impressions / 1000, 1) * 45
+    ctr_score = max(0.0, LOW_CTR_THRESHOLD - ctr) / LOW_CTR_THRESHOLD * 35 if ctr < LOW_CTR_THRESHOLD else 0
+    position_score = 20 if WEAK_RANKING_MIN <= position <= WEAK_RANKING_MAX else 8 if position <= 30 else 0
+    return round(impression_score + ctr_score + position_score)
+
+
+def _gsc_opportunity_reason(metric: GSCKeywordMetric) -> str:
+    reasons = []
+    if metric.impressions >= HIGH_IMPRESSIONS_THRESHOLD and metric.ctr < LOW_CTR_THRESHOLD:
+        reasons.append("high impressions with low CTR")
+    if WEAK_RANKING_MIN <= metric.average_position <= WEAK_RANKING_MAX:
+        reasons.append("ranking within positions 4-20")
+    if metric.clicks == 0 and metric.impressions > 0:
+        reasons.append("missing click coverage")
+    return ", ".join(reasons) or "keyword has measurable GSC demand"
+
+
+def _gsc_recommended_action(metric: GSCKeywordMetric) -> str:
+    if metric.ctr < LOW_CTR_THRESHOLD and metric.average_position <= 10:
+        return "Rewrite title/meta description around the query to improve SERP CTR."
+    if WEAK_RANKING_MIN <= metric.average_position <= WEAK_RANKING_MAX:
+        return "Strengthen on-page coverage and add internal links using this query as anchor text."
+    return "Review content coverage and align the page with this query's intent."
+
+
+def _metric_payload(metric: GSCKeywordMetric) -> dict[str, object]:
+    payload = metric.to_dict()
+    payload["keyword_opportunity_score"] = _keyword_opportunity_score(metric)
+    return payload
+
+
+def _top_gsc_metric_for_url(db: Session, page_url: str) -> GSCKeywordMetric | None:
+    return (
+        db.query(GSCKeywordMetric)
+        .filter(GSCKeywordMetric.page_url == page_url)
+        .order_by(GSCKeywordMetric.impressions.desc(), GSCKeywordMetric.clicks.desc(), GSCKeywordMetric.id.desc())
+        .first()
+    )
+
+
+def _gsc_metrics_by_url(db: Session, page_urls: list[str]) -> dict[str, GSCKeywordMetric]:
+    if not page_urls:
+        return {}
+    rows = (
+        db.query(GSCKeywordMetric)
+        .filter(GSCKeywordMetric.page_url.in_(page_urls))
+        .order_by(GSCKeywordMetric.impressions.desc(), GSCKeywordMetric.clicks.desc(), GSCKeywordMetric.id.desc())
+        .all()
+    )
+    metrics: dict[str, GSCKeywordMetric] = {}
+    for row in rows:
+        metrics.setdefault(row.page_url, row)
+    return metrics
+
+
+def _related_gsc_queries(db: Session, page_url: str, limit: int = 10) -> list[str]:
+    rows = (
+        db.query(GSCKeywordMetric)
+        .filter(GSCKeywordMetric.page_url == page_url)
+        .order_by(GSCKeywordMetric.impressions.desc(), GSCKeywordMetric.clicks.desc(), GSCKeywordMetric.id.desc())
+        .limit(limit)
+        .all()
+    )
+    return [row.query for row in rows if row.query]
+
+
+def _gsc_keyword_query(
+    db: Session,
+    page_url: str | None = None,
+    query: str | None = None,
+    min_impressions: int | None = None,
+    max_position: float | None = None,
+    low_ctr_only: bool = False,
+):
+    metrics_query = db.query(GSCKeywordMetric)
+    if page_url:
+        metrics_query = metrics_query.filter(GSCKeywordMetric.page_url == page_url)
+    if query:
+        metrics_query = metrics_query.filter(GSCKeywordMetric.query.ilike(f"%{query}%"))
+    if min_impressions is not None:
+        metrics_query = metrics_query.filter(GSCKeywordMetric.impressions >= min_impressions)
+    if max_position is not None:
+        metrics_query = metrics_query.filter(GSCKeywordMetric.average_position <= max_position)
+    if low_ctr_only:
+        metrics_query = metrics_query.filter(GSCKeywordMetric.ctr < LOW_CTR_THRESHOLD)
+    return metrics_query
+
+
+def _gsc_opportunities(db: Session, limit: int = 100) -> list[dict[str, object]]:
+    rows = (
+        db.query(GSCKeywordMetric)
+        .filter(
+            GSCKeywordMetric.impressions >= HIGH_IMPRESSIONS_THRESHOLD,
+            GSCKeywordMetric.ctr < LOW_CTR_THRESHOLD,
+            GSCKeywordMetric.average_position >= WEAK_RANKING_MIN,
+            GSCKeywordMetric.average_position <= WEAK_RANKING_MAX,
+        )
+        .order_by(GSCKeywordMetric.impressions.desc(), GSCKeywordMetric.average_position.asc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "page_url": row.page_url,
+            "query": row.query,
+            "clicks": row.clicks,
+            "impressions": row.impressions,
+            "ctr": row.ctr,
+            "average_position": row.average_position,
+            "opportunity_reason": _gsc_opportunity_reason(row),
+            "recommended_action": _gsc_recommended_action(row),
+            "keyword_opportunity_score": _keyword_opportunity_score(row),
+        }
+        for row in rows
+    ]
+
+
+def _upsert_gsc_metric(db: Session, row: dict[str, object]) -> bool:
+    page_url = str(row.get("page_url") or "").strip()
+    query = str(row.get("query") or "").strip()
+    metric_date = _parse_metric_date(row.get("date"))
+    source = str(row.get("source") or "gsc")
+    if not page_url or not query:
+        return False
+    metric = (
+        db.query(GSCKeywordMetric)
+        .filter(
+            GSCKeywordMetric.page_url == page_url,
+            GSCKeywordMetric.query == query,
+            GSCKeywordMetric.date == metric_date,
+            GSCKeywordMetric.source == source,
+        )
+        .first()
+    )
+    if metric is None:
+        metric = GSCKeywordMetric(page_url=page_url, query=query, date=metric_date, source=source)
+        db.add(metric)
+    metric.clicks = int(row.get("clicks") or 0)
+    metric.impressions = int(row.get("impressions") or 0)
+    metric.ctr = float(row.get("ctr") or 0.0)
+    metric.average_position = float(row.get("average_position") or 0.0)
+    return True
 
 
 def _payload_field_for_fix_type(fix_type: str) -> str:
@@ -98,13 +273,15 @@ def _priority_for_page(page: PageAudit) -> str:
     return "low"
 
 
-def _task_recommendation_payload(task: SEOTask) -> dict[str, object]:
+def _task_recommendation_payload(task: SEOTask, db: Session | None = None) -> dict[str, object]:
     """Build a compact page/task payload for OpenAI recommendation generation."""
     try:
         existing_recommendation = json.loads(task.recommendation_json or "{}")
     except json.JSONDecodeError:
         existing_recommendation = task.recommendation_json
 
+    gsc_metric = _top_gsc_metric_for_url(db, task.page_url) if db is not None else None
+    related_queries = _related_gsc_queries(db, task.page_url) if db is not None else []
     return {
         "task_id": task.id,
         "page_url": task.page_url,
@@ -114,6 +291,10 @@ def _task_recommendation_payload(task: SEOTask) -> dict[str, object]:
         "suggested_title": task.suggested_title,
         "suggested_h1": task.suggested_h1,
         "meta_description": task.meta_description,
+        "gsc_primary_query": gsc_metric.query if gsc_metric else task.keyword,
+        "gsc_keyword_opportunity_score": _keyword_opportunity_score(gsc_metric),
+        "gsc_metric": _metric_payload(gsc_metric) if gsc_metric else None,
+        "related_gsc_queries": related_queries,
         "existing_recommendation": existing_recommendation,
     }
 
@@ -139,17 +320,31 @@ def _parse_task_recommendation(task: SEOTask) -> dict[str, object]:
     return recommendation if isinstance(recommendation, dict) else {}
 
 
-def _task_article_payload(task: SEOTask) -> dict[str, object]:
+def _task_article_payload(task: SEOTask, db: Session | None = None) -> dict[str, object]:
     """Build the complete payload used for full article generation."""
+    gsc_metric = _top_gsc_metric_for_url(db, task.page_url) if db is not None else None
+    related_queries = _related_gsc_queries(db, task.page_url) if db is not None else []
+    gsc_keyword_rows = (
+        db.query(GSCKeywordMetric)
+        .filter(GSCKeywordMetric.page_url == task.page_url)
+        .order_by(GSCKeywordMetric.impressions.desc())
+        .limit(10)
+        .all()
+        if db is not None
+        else []
+    )
     return {
         "task_id": task.id,
         "page_url": task.page_url,
-        "keyword": task.keyword,
+        "keyword": task.keyword or (gsc_metric.query if gsc_metric else None),
         "priority": task.priority,
         "status": task.status,
         "suggested_title": task.suggested_title,
         "suggested_h1": task.suggested_h1,
         "meta_description": task.meta_description,
+        "gsc_primary_query": gsc_metric.query if gsc_metric else task.keyword,
+        "secondary_keywords": related_queries,
+        "gsc_keywords": [_metric_payload(row) for row in gsc_keyword_rows],
         "recommendation": _parse_task_recommendation(task),
     }
 
@@ -450,7 +645,7 @@ def _page_link_payload(page: PageAudit, task: SEOTask | None = None) -> dict[str
 
 
 def _build_internal_link_opportunities(
-    pages: list[PageAudit], tasks_by_url: dict[str, SEOTask]
+    pages: list[PageAudit], tasks_by_url: dict[str, SEOTask], gsc_by_url: dict[str, GSCKeywordMetric] | None = None
 ) -> list[dict[str, object]]:
     """Pair strong source pages with weak target pages and produce deterministic suggestions."""
     scored_pages = [
@@ -458,7 +653,11 @@ def _build_internal_link_opportunities(
             "page": page,
             "task": tasks_by_url.get(page.url),
             "authority_score": authority_score(page),
-            "opportunity_score": opportunity_score(page, tasks_by_url.get(page.url)),
+            "opportunity_score": max(
+                opportunity_score(page, tasks_by_url.get(page.url)),
+                _keyword_opportunity_score((gsc_by_url or {}).get(page.url)),
+            ),
+            "gsc_metric": (gsc_by_url or {}).get(page.url),
         }
         for page in pages
         if page.status_code < 400
@@ -477,20 +676,32 @@ def _build_internal_link_opportunities(
         for source in strong_pages:
             if source["page"].url == target["page"].url:
                 continue
-            anchor_text = best_anchor_text(target["page"], target["task"])
-            opportunities.append(
-                {
-                    "source_url": source["page"].url,
-                    "target_url": target["page"].url,
-                    "anchor_text": anchor_text,
-                    "reason": (
-                        "High-authority source page can pass relevance to a weaker page that needs more internal "
-                        "link support."
-                    ),
-                    "authority_score": source["authority_score"],
-                    "opportunity_score": target["opportunity_score"],
-                }
+            target_metric = target.get("gsc_metric")
+            anchor_text = target_metric.query if isinstance(target_metric, GSCKeywordMetric) else best_anchor_text(
+                target["page"], target["task"]
             )
+            opportunity = {
+                "source_url": source["page"].url,
+                "target_url": target["page"].url,
+                "anchor_text": anchor_text,
+                "reason": (
+                    "High-authority source page can pass relevance to a GSC keyword opportunity."
+                    if isinstance(target_metric, GSCKeywordMetric)
+                    else "High-authority source page can pass relevance to a weaker page that needs more internal "
+                    "link support."
+                ),
+                "authority_score": source["authority_score"],
+                "opportunity_score": target["opportunity_score"],
+            }
+            if isinstance(target_metric, GSCKeywordMetric):
+                opportunity.update(
+                    {
+                        "gsc_query": target_metric.query,
+                        "gsc_impressions": target_metric.impressions,
+                        "gsc_ctr": target_metric.ctr,
+                    }
+                )
+            opportunities.append(opportunity)
             break
     return opportunities[:25]
 
@@ -570,20 +781,35 @@ def _valid_topical_clusters(payload: dict[str, object]) -> bool:
     return True
 
 
-def _build_task_from_page(page: PageAudit) -> SEOTask:
+def _build_task_from_page(page: PageAudit, gsc_metric: GSCKeywordMetric | None = None) -> SEOTask:
     missing_fields = [field for field in page.missing_fields.split(",") if field]
+    keyword_opportunity_score = _keyword_opportunity_score(gsc_metric)
+    recommendations = [f"Add or improve {field.replace('_', ' ')}." for field in missing_fields] or [
+        "Improve on-page SEO signals for this low-scoring page."
+    ]
+    if gsc_metric:
+        recommendations.insert(
+            0,
+            f"Prioritize GSC query '{gsc_metric.query}' with {gsc_metric.impressions} impressions and "
+            f"{gsc_metric.ctr:.2%} CTR.",
+        )
     recommendation = {
-        "source": "latest_crawl",
+        "source": "latest_crawl_gsc_enriched" if gsc_metric else "latest_crawl",
         "page_audit_id": page.id,
         "seo_score": page.seo_score,
         "missing_fields": missing_fields,
-        "recommendations": [f"Add or improve {field.replace('_', ' ')}." for field in missing_fields]
-        or ["Improve on-page SEO signals for this low-scoring page."],
+        "primary_query": gsc_metric.query if gsc_metric else None,
+        "keyword_opportunity_score": keyword_opportunity_score,
+        "gsc_metric": _metric_payload(gsc_metric) if gsc_metric else None,
+        "recommendations": recommendations,
     }
+    priority = _priority_for_page(page)
+    if keyword_opportunity_score >= 55:
+        priority = "high"
     return SEOTask(
         page_url=page.url,
-        keyword=None,
-        priority=_priority_for_page(page),
+        keyword=gsc_metric.query if gsc_metric else None,
+        priority=priority,
         status="open",
         suggested_title=page.title or None,
         suggested_h1=page.h1 or None,
@@ -595,7 +821,8 @@ def _build_task_from_page(page: PageAudit) -> SEOTask:
 def _dashboard_metrics(db: Session, latest_pages: list[PageAudit]) -> dict[str, int]:
     """Return SEO workflow counts for dashboard cards."""
     tasks_by_url = _tasks_by_page_url(db, [page.url for page in latest_pages])
-    internal_link_opportunities_count = len(_build_internal_link_opportunities(latest_pages, tasks_by_url))
+    gsc_by_url = _gsc_metrics_by_url(db, [page.url for page in latest_pages])
+    internal_link_opportunities_count = len(_build_internal_link_opportunities(latest_pages, tasks_by_url, gsc_by_url))
     page_payloads = [_page_cluster_payload(page, tasks_by_url.get(page.url)) for page in latest_pages]
     return {
         "total_tasks": db.query(SEOTask).count(),
@@ -645,6 +872,109 @@ def dashboard(request: Request, db: DatabaseSession) -> HTMLResponse:
     )
 
 
+@router.post("/gsc/sync")
+def sync_gsc_keywords(db: DatabaseSession) -> dict[str, object]:
+    """Fetch Search Console keyword rows and upsert them into the local keyword intelligence table."""
+    try:
+        client = GSCClient.from_settings()
+        rows = client.fetch_top_queries(client.site_url, limit=250)
+    except (MissingGSCCredentialsError, GSCAPIError, RuntimeError, ValueError) as exc:
+        return {"success": False, "rows_synced": 0, "top_queries": [], "error": str(exc)}
+
+    rows_synced = 0
+    for row in rows:
+        if _upsert_gsc_metric(db, row):
+            rows_synced += 1
+    db.commit()
+    top_queries = (
+        db.query(GSCKeywordMetric)
+        .order_by(GSCKeywordMetric.impressions.desc(), GSCKeywordMetric.clicks.desc(), GSCKeywordMetric.id.desc())
+        .limit(10)
+        .all()
+    )
+    return {"success": True, "rows_synced": rows_synced, "top_queries": [_metric_payload(row) for row in top_queries]}
+
+
+@router.get("/gsc/keywords")
+def list_gsc_keywords(
+    db: DatabaseSession,
+    page_url: str | None = None,
+    query: str | None = None,
+    min_impressions: int | None = None,
+    max_position: float | None = None,
+    low_ctr_only: bool = False,
+) -> dict[str, object]:
+    """Return stored GSC keyword metrics with optional page, query, impression, position, and CTR filters."""
+    metrics = (
+        _gsc_keyword_query(db, page_url, query, min_impressions, max_position, low_ctr_only)
+        .order_by(GSCKeywordMetric.impressions.desc(), GSCKeywordMetric.clicks.desc(), GSCKeywordMetric.id.desc())
+        .limit(500)
+        .all()
+    )
+    return {"success": True, "keywords": [_metric_payload(metric) for metric in metrics]}
+
+
+@router.get("/gsc/opportunities")
+def gsc_opportunities(db: DatabaseSession) -> dict[str, object]:
+    """Return keyword opportunities from high-impression, low-CTR, mid-ranking GSC rows."""
+    return {"success": True, "opportunities": _gsc_opportunities(db)}
+
+
+@router.get("/gsc/keywords-view", response_class=HTMLResponse)
+def gsc_keywords_view(request: Request, db: DatabaseSession) -> HTMLResponse:
+    """Render GSC keyword dashboard tables."""
+    top_keywords = (
+        db.query(GSCKeywordMetric)
+        .order_by(GSCKeywordMetric.impressions.desc(), GSCKeywordMetric.clicks.desc(), GSCKeywordMetric.id.desc())
+        .limit(50)
+        .all()
+    )
+    low_ctr = (
+        db.query(GSCKeywordMetric)
+        .filter(GSCKeywordMetric.ctr < LOW_CTR_THRESHOLD, GSCKeywordMetric.impressions >= HIGH_IMPRESSIONS_THRESHOLD)
+        .order_by(GSCKeywordMetric.impressions.desc())
+        .limit(25)
+        .all()
+    )
+    rising_pages = (
+        db.query(GSCKeywordMetric)
+        .filter(GSCKeywordMetric.average_position <= 10)
+        .order_by(GSCKeywordMetric.clicks.desc(), GSCKeywordMetric.impressions.desc())
+        .limit(25)
+        .all()
+    )
+    weak_ranking_pages = (
+        db.query(GSCKeywordMetric)
+        .filter(
+            GSCKeywordMetric.average_position >= WEAK_RANKING_MIN,
+            GSCKeywordMetric.average_position <= WEAK_RANKING_MAX,
+        )
+        .order_by(GSCKeywordMetric.impressions.desc())
+        .limit(25)
+        .all()
+    )
+    return templates.TemplateResponse(
+        request,
+        "gsc_keywords.html",
+        {
+            "top_keywords": top_keywords,
+            "low_ctr": low_ctr,
+            "rising_pages": rising_pages,
+            "weak_ranking_pages": weak_ranking_pages,
+        },
+    )
+
+
+@router.get("/gsc/opportunities-view", response_class=HTMLResponse)
+def gsc_opportunities_view(request: Request, db: DatabaseSession) -> HTMLResponse:
+    """Render GSC opportunity recommendations for human review."""
+    return templates.TemplateResponse(
+        request,
+        "gsc_opportunities.html",
+        {"opportunities": _gsc_opportunities(db), "low_ctr_threshold": LOW_CTR_THRESHOLD},
+    )
+
+
 @router.get("/seo/tasks-view", response_class=HTMLResponse)
 def seo_tasks_view(request: Request, db: DatabaseSession) -> HTMLResponse:
     """Render saved SEO tasks for human review."""
@@ -689,11 +1019,12 @@ def internal_link_opportunities_view(request: Request, db: DatabaseSession) -> H
     """Render deterministic internal link opportunities from the latest crawl."""
     pages = _latest_crawl_pages(db)
     tasks_by_url = _tasks_by_page_url(db, [page.url for page in pages])
+    gsc_by_url = _gsc_metrics_by_url(db, [page.url for page in pages])
     return templates.TemplateResponse(
         request,
         "internal_link_opportunities.html",
         {
-            "opportunities": _build_internal_link_opportunities(pages, tasks_by_url),
+            "opportunities": _build_internal_link_opportunities(pages, tasks_by_url, gsc_by_url),
             "pages_analyzed": len(pages),
         },
     )
@@ -768,14 +1099,25 @@ def create_seo_tasks_from_latest_crawl(db: DatabaseSession) -> dict[str, int]:
         .order_by(PageAudit.seo_score.asc(), PageAudit.url.asc())
         .all()
     )
-    candidates = [page for page in pages if _seo_task_candidate(page)]
+    gsc_by_url = _gsc_metrics_by_url(db, [page.url for page in pages])
+    candidates = [
+        page
+        for page in pages
+        if _seo_task_candidate(page) or _keyword_opportunity_score(gsc_by_url.get(page.url)) >= 55
+    ]
+    candidates = sorted(
+        candidates,
+        key=lambda page: (-_keyword_opportunity_score(gsc_by_url.get(page.url)), page.seo_score, page.url),
+    )
     existing_urls = {
         page_url
         for (page_url,) in db.query(SEOTask.page_url)
         .filter(SEOTask.page_url.in_([page.url for page in candidates]))
         .all()
     }
-    new_tasks = [_build_task_from_page(page) for page in candidates if page.url not in existing_urls]
+    new_tasks = [
+        _build_task_from_page(page, gsc_by_url.get(page.url)) for page in candidates if page.url not in existing_urls
+    ]
     db.add_all(new_tasks)
     db.commit()
 
@@ -993,7 +1335,8 @@ def internal_link_opportunities(db: DatabaseSession) -> dict[str, object]:
     weak_pages_count = sum(
         1 for page in pages if page.status_code < 400 and opportunity_score(page, tasks_by_url.get(page.url)) >= 45
     )
-    opportunities = _build_internal_link_opportunities(pages, tasks_by_url)
+    gsc_by_url = _gsc_metrics_by_url(db, [page.url for page in pages])
+    opportunities = _build_internal_link_opportunities(pages, tasks_by_url, gsc_by_url)
 
     if opportunities and settings.openai_api_key:
         opportunity_payloads = []
@@ -1050,7 +1393,7 @@ def generate_seo_task_recommendation(task_id: int, db: DatabaseSession) -> dict[
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SEO task not found")
 
-    payload = _task_recommendation_payload(task)
+    payload = _task_recommendation_payload(task, db)
     try:
         recommendation = OpenAIClient().generate_seo_recommendation(page=payload)
     except RuntimeError as exc:
@@ -1075,7 +1418,7 @@ def generate_seo_task_article(task_id: int, db: DatabaseSession) -> dict[str, ob
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="SEO task recommendation is required")
 
     try:
-        article = OpenAIClient().generate_full_article(task=_task_article_payload(task))
+        article = OpenAIClient().generate_full_article(task=_task_article_payload(task, db))
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
