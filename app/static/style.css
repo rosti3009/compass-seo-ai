@@ -176,3 +176,24 @@ a {
 .cluster-card ul {
   margin-top: 8px;
 }
+
+.rtl-page {
+  direction: rtl;
+}
+
+.rtl-page th,
+.rtl-page td {
+  text-align: right;
+}
+
+.badge {
+  background: #e7f8ef;
+  border: 1px solid #a7e0bd;
+  border-radius: 999px;
+  color: #137333;
+  display: inline-block;
+  font-size: 0.78rem;
+  font-weight: 800;
+  margin-inline-start: 8px;
+  padding: 4px 10px;
+}

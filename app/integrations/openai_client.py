@@ -169,3 +169,38 @@ class OpenAIClient:
         if not isinstance(enrichment.get("recommendations"), list):
             raise RuntimeError("OpenAI returned SEO strategy enrichment without a recommendations array.")
         return enrichment
+
+    def generate_hebrew_seo_enrichment(self, insights: list[dict]) -> dict:
+        """Generate Hebrew-native SEO enrichment for Israeli ecommerce pages."""
+        response = self.client.chat.completions.create(
+            model=self.model,
+            response_format={"type": "json_object"},
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a Hebrew-native SEO strategist for Israeli ecommerce, with explicit knowledge of "
+                        "compassgrill.co.il grill, BBQ, outdoor kitchen, brand, category, and product-page SEO. "
+                        "Return only a JSON object with exactly one top-level key named recommendations. "
+                        "recommendations must be an array of objects with these keys: url (string), "
+                        "hebrew_priority (string), suggested_title (Hebrew string), suggested_meta (Hebrew string), "
+                        "keyword_plan (array of Hebrew strings), seasonality_note (Hebrew string), "
+                        "ecommerce_action (Hebrew string). Do not include markdown or extra top-level keys."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "Enrich these Hebrew SEO insights for Israeli grill ecommerce: " f"{json.dumps(insights)}"
+                    ),
+                },
+            ],
+        )
+        content = response.choices[0].message.content or "{}"
+        enrichment = json.loads(content)
+        if not isinstance(enrichment, dict):
+            raise RuntimeError("OpenAI returned an invalid Hebrew SEO enrichment payload.")
+        if not isinstance(enrichment.get("recommendations"), list):
+            raise RuntimeError("OpenAI returned Hebrew SEO enrichment without a recommendations array.")
+        return enrichment
+

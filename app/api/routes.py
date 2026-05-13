@@ -33,6 +33,7 @@ from app.integrations.gsc import GSCAPIError, GSCClient
 from app.integrations.gsc import MissingGoogleCredentialsError as MissingGSCCredentialsError
 from app.integrations.openai_client import OpenAIClient
 from app.services.crawler import SEOCrawler
+from app.services.hebrew_seo import analyze_page_hebrew_seo, israeli_seasonality, summarize_hebrew_insights
 from app.services.internal_links import authority_score, best_anchor_text, opportunity_score
 from app.services.seo_automation import run_seo_automation
 from app.services.seo_scheduler import (
@@ -1042,6 +1043,42 @@ def dashboard(request: Request, db: DatabaseSession) -> HTMLResponse:
             "metrics": _dashboard_metrics(db, metrics_pages),
         },
     )
+
+
+def _build_hebrew_insights_payload(db: Session, enrich: bool = False) -> dict[str, object]:
+    """Build Hebrew-native SEO intelligence for the latest compassgrill.co.il ecommerce crawl."""
+    pages = _latest_crawl_pages(db)
+    metrics_by_url = _gsc_metrics_by_url(db, [page.url for page in pages]) if pages else {}
+    insights = [analyze_page_hebrew_seo(page, metrics_by_url.get(page.url)) for page in pages]
+    ai_enrichment: dict[str, object] = {"enabled": False, "error": None, "recommendations": []}
+    if enrich and insights:
+        try:
+            ai_enrichment = OpenAIClient().generate_hebrew_seo_enrichment(insights=insights[:10])
+            ai_enrichment["enabled"] = True
+        except RuntimeError as exc:
+            ai_enrichment = {"enabled": False, "error": str(exc), "recommendations": []}
+    return {
+        "success": True,
+        "target_domain": settings.target_domain,
+        "supported_site": "compassgrill.co.il",
+        "summary": summarize_hebrew_insights(insights),
+        "seasonality": israeli_seasonality(),
+        "insights": insights,
+        "openai_enrichment": ai_enrichment,
+    }
+
+
+@router.get("/seo/hebrew-insights")
+def hebrew_seo_insights(db: DatabaseSession, enrich: bool = False) -> dict[str, object]:
+    """Return Hebrew SEO intelligence for Israeli ecommerce and compassgrill.co.il structures."""
+    return _build_hebrew_insights_payload(db, enrich=enrich)
+
+
+@router.get("/seo/hebrew-insights-view", response_class=HTMLResponse)
+def hebrew_seo_insights_view(request: Request, db: DatabaseSession) -> HTMLResponse:
+    """Render Hebrew SEO intelligence for Israeli ecommerce."""
+    payload = _build_hebrew_insights_payload(db, enrich=False)
+    return templates.TemplateResponse(request, "hebrew_insights.html", payload)
 
 
 @router.get("/seo/scheduler/configs")
