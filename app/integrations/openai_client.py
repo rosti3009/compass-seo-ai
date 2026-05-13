@@ -72,3 +72,37 @@ class OpenAIClient:
             raise RuntimeError("OpenAI returned an invalid SEO article payload.")
         return article
 
+
+    def generate_internal_link_suggestions(self, pages: list[dict]) -> dict:
+        """Improve internal link anchor text and topical relevance for candidate page pairs."""
+        response = self.client.chat.completions.create(
+            model=self.model,
+            response_format={"type": "json_object"},
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an SEO internal linking strategist. Return only a JSON object with exactly one "
+                        "top-level key named opportunities. opportunities must be an array of objects with these "
+                        "keys: source_url (string), target_url (string), anchor_text (string), reason (string). "
+                        "Use concise, natural anchor text that matches topical relevance. Do not add markdown or "
+                        "extra top-level keys."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "Refine anchor text and reasons for these internal link candidates: "
+                        f"{json.dumps(pages)}"
+                    ),
+                },
+            ],
+        )
+        content = response.choices[0].message.content or "{}"
+        suggestions = json.loads(content)
+        if not isinstance(suggestions, dict):
+            raise RuntimeError("OpenAI returned an invalid internal link suggestions payload.")
+        opportunities = suggestions.get("opportunities", [])
+        if not isinstance(opportunities, list):
+            raise RuntimeError("OpenAI returned internal link suggestions without an opportunities array.")
+        return suggestions
