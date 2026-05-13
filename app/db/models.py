@@ -75,6 +75,44 @@ class PageAudit(Base):
         }
 
 
+class GoogleOAuthToken(Base):
+    """Stored Google user OAuth token for Search Console and GA4 access."""
+
+    __tablename__ = "google_oauth_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    provider: Mapped[str] = mapped_column(String(64), default="google", nullable=False, index=True)
+    access_token: Mapped[str] = mapped_column(Text, nullable=False)
+    refresh_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    token_uri: Mapped[str] = mapped_column(String(1024), default="https://oauth2.googleapis.com/token", nullable=False)
+    client_id: Mapped[str] = mapped_column(String(1024), nullable=False)
+    client_secret: Mapped[str] = mapped_column(Text, nullable=False)
+    scopes_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    expiry: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+    )
+
+    @property
+    def scopes(self) -> list[str]:
+        try:
+            parsed = json.loads(self.scopes_json or "[]")
+        except json.JSONDecodeError:
+            return []
+        return [str(scope) for scope in parsed] if isinstance(parsed, list) else []
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "provider": self.provider,
+            "scopes": self.scopes,
+            "expiry": self.expiry.isoformat() if self.expiry else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
 class GSCKeywordMetric(Base):
     """Google Search Console keyword performance for a page/query/date."""
 

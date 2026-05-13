@@ -6,7 +6,7 @@ from importlib import import_module, util
 from typing import Any
 
 from app.core.config import settings
-from app.integrations.google_auth import MissingGoogleCredentialsError, require_service_account_file
+from app.integrations.google_auth import MissingGoogleCredentialsError, resolve_google_credentials
 
 GSC_SCOPES = ("https://www.googleapis.com/auth/webmasters.readonly",)
 
@@ -38,40 +38,44 @@ class GSCClient:
     callers only depend on the fetch_* methods and not on the credential construction details.
     """
 
-    credentials_file: str
+    credentials: Any
     site_url: str
+    auth_source: str
+    credentials_file: str | None = None
     service: Any | None = None
 
     @classmethod
-    def from_settings(cls) -> GSCClient:
-        credentials_file = require_service_account_file()
+    def from_settings(cls, db: Any | None = None) -> GSCClient:
+        google_credentials = resolve_google_credentials(db, GSC_SCOPES)
         if not settings.gsc_site_url:
             raise MissingGoogleCredentialsError(
                 "GSC_SITE_URL is not configured. Add your verified GSC property URL to .env."
             )
-        return cls(credentials_file=str(credentials_file), site_url=settings.gsc_site_url)
+        return cls(
+            credentials=google_credentials.credentials,
+            site_url=settings.gsc_site_url,
+            auth_source=google_credentials.source,
+            credentials_file=google_credentials.credentials_file,
+        )
 
     def status(self) -> dict[str, object]:
-        return {"configured": True, "site_url": self.site_url, "credentials_file": self.credentials_file}
+        payload: dict[str, object] = {"configured": True, "site_url": self.site_url, "auth_source": self.auth_source}
+        if self.credentials_file:
+            payload["credentials_file"] = self.credentials_file
+        return payload
 
     def _service(self) -> Any:
         if self.service is not None:
             return self.service
-        missing_service_account = util.find_spec("google.oauth2.service_account") is None
         missing_discovery = util.find_spec("googleapiclient.discovery") is None
-        if missing_service_account or missing_discovery:
+        if missing_discovery:
             raise GSCAPIError(
                 "Google Search Console dependencies are not installed. "
                 "Install google-api-python-client and google-auth."
             )
 
-        service_account = import_module("google.oauth2.service_account")
         discovery = import_module("googleapiclient.discovery")
-        credentials = service_account.Credentials.from_service_account_file(
-            self.credentials_file,
-            scopes=list(GSC_SCOPES),
-        )
-        return discovery.build("searchconsole", "v1", credentials=credentials, cache_discovery=False)
+        return discovery.build("searchconsole", "v1", credentials=self.credentials, cache_discovery=False)
 
     def _query(
         self,

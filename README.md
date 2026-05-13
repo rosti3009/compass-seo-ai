@@ -9,7 +9,7 @@ Compass SEO AI is a FastAPI SEO workflow app for crawling and auditing a configu
 - Bounded same-domain SEO crawler for titles, meta descriptions, H1s, canonicals, word count, links, missing fields, and SEO scores.
 - Dashboard pages for crawl health, SEO tasks, internal link opportunities, topical clusters, generated article previews, and CMS export payloads.
 - OpenAI integration for SEO recommendations, article packages, internal link refinements, and topical clusters when `OPENAI_API_KEY` is configured.
-- Google Search Console and GA4 configuration checks using service account credentials.
+- Google Search Console and GA4 configuration checks using connected Google OAuth first, with service account credentials as fallback.
 - Container-ready Dockerfile and Docker Compose setup.
 - Pytest, Ruff, and compile checks for deployment readiness.
 
@@ -23,7 +23,10 @@ Copy `.env.example` to `.env` for local development and configure these values i
 | `TARGET_DOMAIN` | Yes | Domain the crawler audits. | `https://compassgrill.co.il` |
 | `OPENAI_API_KEY` | Yes for AI generation endpoints | OpenAI API key used by SEO recommendation and content generation flows. | Set as a secret env var; do not commit it. |
 | `OPENAI_MODEL` | Yes for AI generation endpoints | OpenAI model name used by the app. | `gpt-4o-mini` |
-| `GOOGLE_APPLICATION_CREDENTIALS_JSON` | Yes for Render Google checks | Complete Google service account JSON stored directly as an env var. | Preferred on Render because it avoids committing or mounting secret files. |
+| `GOOGLE_APPLICATION_CREDENTIALS_JSON` | Optional Google fallback | Complete Google service account JSON stored directly as an env var. | Used only when no Google OAuth token is connected. Preferred on Render for service-account fallback because it avoids committing or mounting secret files. |
+| `GOOGLE_OAUTH_CLIENT_ID` | Yes for user OAuth | Google Cloud OAuth web client ID. | Required for `/auth/google/start`. |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | Yes for user OAuth | Google Cloud OAuth web client secret. | Store as a secret env var; do not commit it. |
+| `GOOGLE_OAUTH_REDIRECT_URI` | Yes for user OAuth | Authorized redirect URI configured in Google Cloud. | Render example: `https://your-service.onrender.com/auth/google/callback`; local example: `http://127.0.0.1:8000/auth/google/callback`. |
 | `GSC_SITE_URL` | Yes for GSC status | Verified Google Search Console property URL. | `https://compassgrill.co.il/` |
 | `GA4_PROPERTY_ID` | Yes for GA4 status | Numeric GA4 property ID. | `123456789` |
 
@@ -77,8 +80,9 @@ Use these settings for a Render Web Service deployment:
 2. Use the Python runtime or deploy from the included Dockerfile.
 3. Set all required environment variables listed above in the Render dashboard.
 4. For SQLite persistence, add a Render persistent disk and set `DATABASE_URL` to a disk-backed absolute path such as `sqlite:////var/data/compass_seo.db`. Without a persistent disk, SQLite data can be lost when instances restart or redeploy.
-5. Store Google credentials in `GOOGLE_APPLICATION_CREDENTIALS_JSON` as the full service account JSON value. Do not commit credentials to the repository.
-6. Deploy and verify `GET /health` returns `{"status":"ok"}`.
+5. Set `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, and `GOOGLE_OAUTH_REDIRECT_URI` for user OAuth.
+6. Optionally store service-account fallback credentials in `GOOGLE_APPLICATION_CREDENTIALS_JSON` as the full service account JSON value. Do not commit credentials to the repository.
+7. Deploy, verify `GET /health` returns `{"status":"ok"}`, then open `/auth/google/start` to connect a Google account.
 
 Recommended Render start command:
 
@@ -91,6 +95,24 @@ The app was also verified locally with the fixed-port command:
 ```bash
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
+
+## Google OAuth setup
+
+Use user OAuth when service-account access to Search Console is hard to grant. The app prefers a stored Google OAuth token for Search Console and GA4 calls, then falls back to `GOOGLE_APPLICATION_CREDENTIALS_JSON` or `GOOGLE_SERVICE_ACCOUNT_FILE` when no user token is connected.
+
+1. In Google Cloud Console, select or create the project that has access to Search Console and GA4.
+2. Configure the OAuth consent screen for the project. Add the user account that will connect the app as a test user if the app is in testing mode.
+3. Enable the Google Search Console API and Google Analytics Data API for the project.
+4. Create an OAuth client ID with application type **Web application**.
+5. Add the authorized redirect URI exactly as it will be sent by the app, for example `https://your-service.onrender.com/auth/google/callback` in Render or `http://127.0.0.1:8000/auth/google/callback` locally.
+6. Copy the OAuth client ID, client secret, and redirect URI into `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, and `GOOGLE_OAUTH_REDIRECT_URI`.
+7. Deploy or restart the app, then open `/auth/google/start` and approve the requested scopes: Search Console readonly and Analytics readonly.
+8. Confirm `GET /auth/google/status` returns `connected: true` with the granted scopes.
+
+Required OAuth scopes:
+
+- `https://www.googleapis.com/auth/webmasters.readonly`
+- `https://www.googleapis.com/auth/analytics.readonly`
 
 ## Main API endpoints
 
@@ -108,6 +130,9 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | `GET` | `/seo/tasks/{task_id}/export` | Return CMS-copyable article export JSON. |
 | `GET` | `/seo/internal-link-opportunities` | Return internal linking opportunities from the latest crawl. |
 | `GET` | `/seo/topical-clusters` | Return topical cluster suggestions from the latest crawl. |
+| `GET` | `/auth/google/start` | Redirect to Google OAuth consent for Search Console and GA4 readonly scopes. |
+| `GET` | `/auth/google/callback` | Store the Google OAuth token returned by Google. |
+| `GET` | `/auth/google/status` | Report whether Google OAuth is connected and list stored scopes. |
 | `GET` | `/integrations/gsc/status` | Validate Search Console configuration. |
 | `GET` | `/integrations/ga4/status` | Validate GA4 configuration. |
 | `GET` | `/sitemap/discover` | Discover sitemap URLs for the configured target domain. |
@@ -120,6 +145,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | `/seo/tasks-view` | HTML SEO task review and generation workflow. |
 | `/seo/internal-link-opportunities-view` | HTML internal linking opportunities. |
 | `/seo/topical-clusters-view` | HTML topical cluster strategy. |
+| `/auth/google/start` | Connect a Google account for Search Console and GA4 OAuth access. |
 | `/seo/tasks/{task_id}/preview` | Rendered preview for a generated article. |
 | `/seo/tasks/{task_id}/export-view` | CMS-copyable export view for generated article HTML and schema payloads. |
 

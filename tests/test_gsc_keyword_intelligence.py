@@ -66,7 +66,8 @@ def test_gsc_sync_upserts_mocked_rows(client: TestClient, db_session: Session, m
         site_url = "sc-domain:example.com"
 
         @classmethod
-        def from_settings(cls) -> "MockGSCClient":
+        def from_settings(cls, db: Session | None = None) -> "MockGSCClient":
+            assert db is not None
             return cls()
 
         def fetch_top_queries(self, site_url: str, limit: int = 250) -> list[dict[str, object]]:
@@ -103,7 +104,8 @@ def test_gsc_sync_upserts_mocked_rows(client: TestClient, db_session: Session, m
 def test_gsc_sync_handles_missing_credentials_gracefully(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     class MockGSCClient:
         @classmethod
-        def from_settings(cls) -> "MockGSCClient":
+        def from_settings(cls, db: Session | None = None) -> "MockGSCClient":
+            assert db is not None
             raise RuntimeError("credentials missing")
 
     monkeypatch.setattr("app.api.routes.GSCClient", MockGSCClient)
