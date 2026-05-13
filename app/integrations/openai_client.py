@@ -72,7 +72,6 @@ class OpenAIClient:
             raise RuntimeError("OpenAI returned an invalid SEO article payload.")
         return article
 
-
     def generate_internal_link_suggestions(self, pages: list[dict]) -> dict:
         """Improve internal link anchor text and topical relevance for candidate page pairs."""
         response = self.client.chat.completions.create(
@@ -92,8 +91,7 @@ class OpenAIClient:
                 {
                     "role": "user",
                     "content": (
-                        "Refine anchor text and reasons for these internal link candidates: "
-                        f"{json.dumps(pages)}"
+                        "Refine anchor text and reasons for these internal link candidates: " f"{json.dumps(pages)}"
                     ),
                 },
             ],
@@ -126,8 +124,7 @@ class OpenAIClient:
                 {
                     "role": "user",
                     "content": (
-                        "Build topical SEO clusters from these crawled pages and task statuses: "
-                        f"{json.dumps(pages)}"
+                        "Build topical SEO clusters from these crawled pages and task statuses: " f"{json.dumps(pages)}"
                     ),
                 },
             ],
@@ -139,3 +136,36 @@ class OpenAIClient:
         if not isinstance(clusters.get("clusters"), list):
             raise RuntimeError("OpenAI returned topical clusters without a clusters array.")
         return clusters
+
+    def generate_seo_strategy_enrichment(self, recommendations: list[dict]) -> dict:
+        """Generate AI summaries, actions, and reasoning for SEO strategy recommendations."""
+        response = self.client.chat.completions.create(
+            model=self.model,
+            response_format={"type": "json_object"},
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a business-focused SEO strategy engine. Return only a JSON object with exactly one "
+                        "top-level key named recommendations. recommendations must be an array of objects with these "
+                        "keys: page_url (string), recommendation_type (string), ai_summary (string), "
+                        "recommended_action (string), and reasoning (string). Keep all text concise and operational. "
+                        "Do not include markdown or extra top-level keys."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "Enrich these scored SEO strategy recommendations with summaries, actions, and reasoning: "
+                        f"{json.dumps(recommendations)}"
+                    ),
+                },
+            ],
+        )
+        content = response.choices[0].message.content or "{}"
+        enrichment = json.loads(content)
+        if not isinstance(enrichment, dict):
+            raise RuntimeError("OpenAI returned an invalid SEO strategy enrichment payload.")
+        if not isinstance(enrichment.get("recommendations"), list):
+            raise RuntimeError("OpenAI returned SEO strategy enrichment without a recommendations array.")
+        return enrichment

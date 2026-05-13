@@ -19,6 +19,8 @@
           <a class="button-link" href="/seo/tasks-view">View SEO tasks</a>
           <a class="button-link" href="/seo/fixes-view">Review SEO fixes</a>
           <a class="button-link" href="/seo/publishing-packages-view">Publishing packages</a>
+          <a class="button-link" href="/seo/strategy-view">SEO strategy engine</a>
+          <a class="button-link" href="/seo/strategy-summary-view">Strategy summary</a>
           <form method="post" action="/seo/tasks/from-latest-crawl">
             <button type="submit" class="secondary-button">Create tasks from latest crawl</button>
           </form>
@@ -60,6 +62,10 @@
         <article class="card">
           <span class="label">Topical clusters</span>
           <strong>{{ metrics.topical_clusters }}</strong>
+        </article>
+        <article class="card">
+          <span class="label">Strategy recommendations</span>
+          <strong>{{ metrics.strategy_recommendations }}</strong>
         </article>
       </section>
 

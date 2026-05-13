@@ -271,3 +271,64 @@ class PublishingPackage(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+class SEOStrategyRecommendation(Base):
+    """Prioritized AI SEO strategy recommendation across crawl, GSC, content, and publishing signals."""
+
+    __tablename__ = "seo_strategy_recommendations"
+
+    VALID_STATUSES = {"pending", "accepted", "ignored", "completed"}
+    VALID_RECOMMENDATION_TYPES = {
+        "rewrite_title",
+        "rewrite_meta",
+        "generate_article",
+        "improve_internal_links",
+        "create_cluster_content",
+        "improve_ctr",
+        "expand_content",
+        "publish_fix_package",
+        "merge_content",
+        "noindex_page",
+    }
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    page_url: Mapped[str] = mapped_column(String(1024), nullable=False, index=True)
+    recommendation_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    priority_score: Mapped[float] = mapped_column(Float, default=0.0, index=True)
+    traffic_potential_score: Mapped[float] = mapped_column(Float, default=0.0)
+    ctr_opportunity_score: Mapped[float] = mapped_column(Float, default=0.0)
+    ranking_opportunity_score: Mapped[float] = mapped_column(Float, default=0.0)
+    internal_link_score: Mapped[float] = mapped_column(Float, default=0.0)
+    topical_authority_score: Mapped[float] = mapped_column(Float, default=0.0)
+    content_gap_score: Mapped[float] = mapped_column(Float, default=0.0)
+    publishing_readiness_score: Mapped[float] = mapped_column(Float, default=0.0)
+    ai_summary: Mapped[str] = mapped_column(Text, default="")
+    recommended_action: Mapped[str] = mapped_column(Text, default="")
+    reasoning: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+    )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "page_url": self.page_url,
+            "recommendation_type": self.recommendation_type,
+            "priority_score": self.priority_score,
+            "traffic_potential_score": self.traffic_potential_score,
+            "ctr_opportunity_score": self.ctr_opportunity_score,
+            "ranking_opportunity_score": self.ranking_opportunity_score,
+            "internal_link_score": self.internal_link_score,
+            "topical_authority_score": self.topical_authority_score,
+            "content_gap_score": self.content_gap_score,
+            "publishing_readiness_score": self.publishing_readiness_score,
+            "ai_summary": self.ai_summary,
+            "recommended_action": self.recommended_action,
+            "reasoning": self.reasoning,
+            "status": self.status,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }

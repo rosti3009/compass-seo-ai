@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SEO Strategy Summary</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <main class="container">
+      <section class="hero">
+        <p class="eyebrow">AI SEO Strategy Engine</p>
+        <h1>Site strategy summary</h1>
+        <p>Next actions grouped by impact, speed, traffic growth, publishing readiness, and topical authority.</p>
+        <div class="actions">
+          <a class="button-link" href="/seo/strategy-view">All recommendations</a>
+          <a class="button-link" href="/">Back to dashboard</a>
+        </div>
+      </section>
+
+      {% for label, items in [
+        ('Highest priority pages', summary.highest_priority_pages),
+        ('Quick wins', summary.quick_wins),
+        ('Traffic growth opportunities', summary.traffic_growth_opportunities),
+        ('Pages ready to publish', summary.pages_ready_to_publish),
+        ('Weak clusters', summary.weak_clusters),
+        ('Recommended next actions', summary.recommended_next_actions)
+      ] %}
+      <section class="panel">
+        <h2>{{ label }}</h2>
+        {% if items %}
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Priority</th><th>Type</th><th>URL</th><th>Action</th></tr>
+            </thead>
+            <tbody>
+              {% for item in items %}
+              <tr>
+                <td>{{ item.priority_score }}</td>
+                <td>{{ item.recommendation_type }}</td>
+                <td>{{ item.page_url }}</td>
+                <td>{{ item.recommended_action }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="empty">No items in this group yet.</p>
+        {% endif %}
+      </section>
+      {% endfor %}
+    </main>
+  </body>
+</html>

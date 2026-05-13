@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SEO Strategy Recommendations</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <main class="container">
+      <section class="hero">
+        <p class="eyebrow">AI SEO Strategy Engine</p>
+        <h1>Prioritized SEO recommendations</h1>
+        <p>Rank crawl, GSC, internal link, topical cluster, content, and publishing opportunities by business SEO impact.</p>
+        <div class="actions">
+          <form method="post" action="/seo/strategy/run">
+            <button type="submit">Run strategy engine</button>
+          </form>
+          <a class="button-link" href="/seo/strategy-summary-view">View strategy summary</a>
+          <a class="button-link" href="/">Back to dashboard</a>
+        </div>
+      </section>
+
+      <section class="cards" aria-label="Strategy summary">
+        <article class="card"><span class="label">Highest priority</span><strong>{{ summary.highest_priority_pages|length }}</strong></article>
+        <article class="card"><span class="label">Quick wins</span><strong>{{ summary.quick_wins|length }}</strong></article>
+        <article class="card"><span class="label">Traffic opportunities</span><strong>{{ summary.traffic_growth_opportunities|length }}</strong></article>
+        <article class="card"><span class="label">Ready to publish</span><strong>{{ summary.pages_ready_to_publish|length }}</strong></article>
+      </section>
+
+      <section class="panel">
+        <h2>Recommendations</h2>
+        {% if recommendations %}
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Priority</th>
+                <th>Type</th>
+                <th>URL</th>
+                <th>Status</th>
+                <th>AI summary</th>
+                <th>Recommended action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for recommendation in recommendations %}
+              <tr>
+                <td>{{ '%.1f'|format(recommendation.priority_score) }}</td>
+                <td>{{ recommendation.recommendation_type }}</td>
+                <td><a href="{{ recommendation.page_url }}" target="_blank" rel="noreferrer">{{ recommendation.page_url }}</a></td>
+                <td>{{ recommendation.status }}</td>
+                <td>{{ recommendation.ai_summary }}</td>
+                <td>{{ recommendation.recommended_action }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="empty">No strategy recommendations yet. Run the strategy engine to generate prioritized work.</p>
+        {% endif %}
+      </section>
+    </main>
+  </body>
+</html>

@@ -13,7 +13,16 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.database import get_db
-from app.db.models import CrawlRun, GoogleOAuthToken, GSCKeywordMetric, PageAudit, PublishingPackage, SEOFix, SEOTask
+from app.db.models import (
+    CrawlRun,
+    GoogleOAuthToken,
+    GSCKeywordMetric,
+    PageAudit,
+    PublishingPackage,
+    SEOFix,
+    SEOStrategyRecommendation,
+    SEOTask,
+)
 from app.integrations.ga4 import GA4Client
 from app.integrations.ga4 import MissingGoogleCredentialsError as MissingGA4CredentialsError
 from app.integrations.google_auth import GOOGLE_OAUTH_SCOPES, oauth_status, utc_expiry_from_seconds
@@ -22,6 +31,7 @@ from app.integrations.gsc import MissingGoogleCredentialsError as MissingGSCCred
 from app.integrations.openai_client import OpenAIClient
 from app.services.crawler import SEOCrawler
 from app.services.internal_links import authority_score, best_anchor_text, opportunity_score
+from app.services.seo_strategy_engine import generate_strategy_recommendations, summarize_site_strategy
 from app.services.sitemap import discover_sitemap_urls
 from app.services.topical_clusters import build_cluster_summary
 
@@ -41,6 +51,20 @@ SEO_FIX_TYPES = {
 }
 SEO_FIX_STATUSES = {"draft", "ready_for_review", "approved", "rejected", "exported", "applied_manually"}
 PUBLISHING_PACKAGE_STATUSES = {"draft", "ready", "exported", "applied_manually", "failed"}
+
+SEO_STRATEGY_STATUSES = {"pending", "accepted", "ignored", "completed"}
+SEO_STRATEGY_RECOMMENDATION_TYPES = {
+    "rewrite_title",
+    "rewrite_meta",
+    "generate_article",
+    "improve_internal_links",
+    "create_cluster_content",
+    "improve_ctr",
+    "expand_content",
+    "publish_fix_package",
+    "merge_content",
+    "noindex_page",
+}
 
 
 LOW_CTR_THRESHOLD = 0.03
@@ -728,8 +752,10 @@ def _build_internal_link_opportunities(
             if source["page"].url == target["page"].url:
                 continue
             target_metric = target.get("gsc_metric")
-            anchor_text = target_metric.query if isinstance(target_metric, GSCKeywordMetric) else best_anchor_text(
-                target["page"], target["task"]
+            anchor_text = (
+                target_metric.query
+                if isinstance(target_metric, GSCKeywordMetric)
+                else best_anchor_text(target["page"], target["task"])
             )
             opportunity = {
                 "source_url": source["page"].url,
@@ -881,6 +907,9 @@ def _dashboard_metrics(db: Session, latest_pages: list[PageAudit]) -> dict[str, 
         "generated_articles": db.query(SEOTask).filter(SEOTask.article_status == "generated").count(),
         "internal_link_opportunities": internal_link_opportunities_count,
         "topical_clusters": len(build_cluster_summary(page_payloads)),
+        "strategy_recommendations": db.query(SEOStrategyRecommendation)
+        .filter(SEOStrategyRecommendation.status == "pending")
+        .count(),
     }
 
 
@@ -1081,6 +1110,43 @@ def gsc_opportunities_view(request: Request, db: DatabaseSession) -> HTMLRespons
     )
 
 
+@router.post("/seo/strategy/run")
+def run_seo_strategy_engine(db: DatabaseSession) -> dict[str, object]:
+    """Analyze the current SEO state and generate/update prioritized strategy recommendations."""
+    return generate_strategy_recommendations(db)
+
+
+@router.get("/seo/strategy/recommendations")
+def list_seo_strategy_recommendations(
+    db: DatabaseSession,
+    status: str | None = None,
+    recommendation_type: str | None = None,
+    min_priority: float | None = None,
+) -> dict[str, object]:
+    """Return SEO strategy recommendations with status, type, and minimum-priority filters."""
+    query = db.query(SEOStrategyRecommendation)
+    if status:
+        if status not in SEO_STRATEGY_STATUSES:
+            raise HTTPException(status_code=400, detail="Invalid SEO strategy recommendation status")
+        query = query.filter(SEOStrategyRecommendation.status == status)
+    if recommendation_type:
+        if recommendation_type not in SEO_STRATEGY_RECOMMENDATION_TYPES:
+            raise HTTPException(status_code=400, detail="Invalid SEO strategy recommendation type")
+        query = query.filter(SEOStrategyRecommendation.recommendation_type == recommendation_type)
+    if min_priority is not None:
+        query = query.filter(SEOStrategyRecommendation.priority_score >= min_priority)
+    recommendations = query.order_by(
+        SEOStrategyRecommendation.priority_score.desc(), SEOStrategyRecommendation.id.desc()
+    ).all()
+    return {"success": True, "recommendations": [recommendation.to_dict() for recommendation in recommendations]}
+
+
+@router.get("/seo/strategy/summary")
+def seo_strategy_summary(db: DatabaseSession) -> dict[str, object]:
+    """Return the summarized site-level SEO strategy from pending recommendations."""
+    return {"success": True, "summary": summarize_site_strategy(db)}
+
+
 @router.get("/seo/tasks-view", response_class=HTMLResponse)
 def seo_tasks_view(request: Request, db: DatabaseSession) -> HTMLResponse:
     """Render saved SEO tasks for human review."""
@@ -1118,6 +1184,28 @@ def publishing_packages_view(request: Request, db: DatabaseSession) -> HTMLRespo
             "fixes_by_id": fixes_by_id,
         },
     )
+
+
+@router.get("/seo/strategy-view", response_class=HTMLResponse)
+def seo_strategy_view(request: Request, db: DatabaseSession) -> HTMLResponse:
+    """Render the prioritized SEO strategy recommendations dashboard."""
+    recommendations = (
+        db.query(SEOStrategyRecommendation)
+        .order_by(SEOStrategyRecommendation.priority_score.desc(), SEOStrategyRecommendation.id.desc())
+        .limit(100)
+        .all()
+    )
+    return templates.TemplateResponse(
+        request,
+        "seo_strategy.html",
+        {"recommendations": recommendations, "summary": summarize_site_strategy(db)},
+    )
+
+
+@router.get("/seo/strategy-summary-view", response_class=HTMLResponse)
+def seo_strategy_summary_view(request: Request, db: DatabaseSession) -> HTMLResponse:
+    """Render the site-level SEO strategy summary dashboard."""
+    return templates.TemplateResponse(request, "seo_strategy_summary.html", {"summary": summarize_site_strategy(db)})
 
 
 @router.get("/seo/internal-link-opportunities-view", response_class=HTMLResponse)
