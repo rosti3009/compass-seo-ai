@@ -730,3 +730,195 @@ def test_topical_clusters_endpoint_returns_clusters_with_mocked_data(
             }
         ],
     }
+
+
+def test_dashboard_shows_seo_ai_workflow_metrics_and_actions(client: TestClient, db_session: Session) -> None:
+    crawl_run = CrawlRun(target_domain="https://example.com", status="completed", pages_crawled=2, average_score=68)
+    db_session.add(crawl_run)
+    db_session.flush()
+    db_session.add_all(
+        [
+            PageAudit(
+                crawl_run_id=crawl_run.id,
+                url="https://example.com/grill-guides",
+                status_code=200,
+                title="Complete Grill Guides",
+                meta_description="Helpful grill guides.",
+                h1="Complete Grill Guides",
+                word_count=1800,
+                internal_links=45,
+                missing_fields="",
+                seo_score=94,
+            ),
+            PageAudit(
+                crawl_run_id=crawl_run.id,
+                url="https://example.com/portable-grills",
+                status_code=200,
+                title="Portable Grills",
+                h1="Portable Grills",
+                word_count=400,
+                internal_links=1,
+                missing_fields="meta_description",
+                seo_score=42,
+            ),
+        ]
+    )
+    db_session.add_all(
+        [
+            SEOTask(
+                page_url="https://example.com/portable-grills",
+                keyword="portable grills",
+                priority="high",
+                status="recommended",
+                suggested_h1="Best Portable Grills",
+                article_html="<article>Generated article</article>",
+                article_status="generated",
+            ),
+            SEOTask(page_url="https://example.com/extra-task", priority="medium", status="open"),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Latest crawl status" in response.text
+    assert "completed" in response.text
+    assert "Total SEO tasks" in response.text
+    assert "Recommended tasks" in response.text
+    assert "Generated articles" in response.text
+    assert "Internal link opportunities" in response.text
+    assert "Topical clusters" in response.text
+    assert response.text.count("<strong>2</strong>") >= 2
+    assert "<strong>1</strong>" in response.text
+    assert 'href="/seo/tasks-view"' in response.text
+    assert 'action="/seo/tasks/from-latest-crawl"' in response.text
+    assert 'href="/seo/internal-link-opportunities-view"' in response.text
+    assert 'href="/seo/topical-clusters-view"' in response.text
+
+
+def test_seo_tasks_view_renders_saved_tasks(client: TestClient, db_session: Session) -> None:
+    db_session.add(
+        SEOTask(
+            page_url="https://example.com/task-view",
+            keyword="task view keyword",
+            priority="high",
+            status="recommended",
+            suggested_title="Task View Title",
+            article_status="generated",
+        )
+    )
+    db_session.commit()
+
+    response = client.get("/seo/tasks-view")
+
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "SEO tasks" in response.text
+    assert "https://example.com/task-view" in response.text
+    assert "Task View Title" in response.text
+    assert "generated" in response.text
+
+
+def test_internal_link_opportunities_view_renders_latest_crawl_opportunities(
+    client: TestClient, db_session: Session
+) -> None:
+    crawl_run = CrawlRun(target_domain="https://example.com", status="completed", pages_crawled=2, average_score=70)
+    db_session.add(crawl_run)
+    db_session.flush()
+    db_session.add_all(
+        [
+            PageAudit(
+                crawl_run_id=crawl_run.id,
+                url="https://example.com/grill-guides",
+                status_code=200,
+                title="Complete Grill Guides",
+                meta_description="Helpful grill guides.",
+                h1="Complete Grill Guides",
+                word_count=1800,
+                internal_links=45,
+                missing_fields="",
+                seo_score=94,
+            ),
+            PageAudit(
+                crawl_run_id=crawl_run.id,
+                url="https://example.com/portable-grills",
+                status_code=200,
+                title="Portable Grills",
+                h1="Portable Grills",
+                word_count=400,
+                internal_links=1,
+                missing_fields="meta_description",
+                seo_score=42,
+            ),
+        ]
+    )
+    db_session.add(
+        SEOTask(
+            page_url="https://example.com/portable-grills",
+            keyword="portable grills",
+            priority="high",
+            status="recommended",
+        )
+    )
+    db_session.commit()
+
+    response = client.get("/seo/internal-link-opportunities-view")
+
+    assert response.status_code == 200
+    assert "Internal link opportunities" in response.text
+    assert "https://example.com/grill-guides" in response.text
+    assert "https://example.com/portable-grills" in response.text
+    assert "portable grills" in response.text
+
+
+def test_topical_clusters_view_renders_latest_crawl_clusters(client: TestClient, db_session: Session) -> None:
+    crawl_run = CrawlRun(target_domain="https://example.com", status="completed", pages_crawled=2, average_score=78)
+    db_session.add(crawl_run)
+    db_session.flush()
+    db_session.add_all(
+        [
+            PageAudit(
+                crawl_run_id=crawl_run.id,
+                url="https://example.com/guides/portable-grills",
+                status_code=200,
+                title="Portable Grill Guide",
+                meta_description="Choose portable grills.",
+                h1="Portable Grill Guide",
+                word_count=1800,
+                internal_links=20,
+                missing_fields="",
+                seo_score=88,
+            ),
+            PageAudit(
+                crawl_run_id=crawl_run.id,
+                url="https://example.com/guides/portable-grill-cleaning",
+                status_code=200,
+                title="Portable Grill Cleaning",
+                meta_description="Clean portable grills.",
+                h1="Portable Grill Cleaning",
+                word_count=500,
+                internal_links=3,
+                missing_fields="",
+                seo_score=62,
+            ),
+        ]
+    )
+    db_session.add(
+        SEOTask(
+            page_url="https://example.com/guides/portable-grill-cleaning",
+            keyword="portable grills",
+            priority="high",
+            status="recommended",
+        )
+    )
+    db_session.commit()
+
+    response = client.get("/seo/topical-clusters-view")
+
+    assert response.status_code == 200
+    assert "Topical clusters" in response.text
+    assert "Portable Grills" in response.text
+    assert "https://example.com/guides/portable-grills" in response.text
+    assert "https://example.com/guides/portable-grill-cleaning" in response.text
+    assert "Create or expand supporting article" in response.text

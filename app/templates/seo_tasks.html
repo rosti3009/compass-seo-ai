@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SEO Tasks</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <main class="container">
+      <section class="hero compact">
+        <p class="eyebrow">SEO workflow</p>
+        <h1>SEO tasks</h1>
+        <p><a href="/">Back to dashboard</a></p>
+      </section>
+
+      <section class="panel">
+        {% if tasks %}
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Page</th>
+                <th>Priority</th>
+                <th>Status</th>
+                <th>Article</th>
+                <th>Recommendation</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for task in tasks %}
+              <tr>
+                <td>{{ task.id }}</td>
+                <td><a href="{{ task.page_url }}" target="_blank" rel="noreferrer">{{ task.page_url }}</a></td>
+                <td>{{ task.priority }}</td>
+                <td>{{ task.status }}</td>
+                <td>{{ task.article_status }}</td>
+                <td>{{ task.suggested_title or task.suggested_h1 or task.meta_description or '—' }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="empty">No SEO tasks yet. Create tasks from the latest crawl on the dashboard.</p>
+        {% endif %}
+      </section>
+    </main>
+  </body>
+</html>
