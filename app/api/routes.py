@@ -1,4 +1,5 @@
 import json
+from html import escape
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -65,6 +66,60 @@ def _apply_recommendation_to_task(task: SEOTask, recommendation: dict[str, objec
         if isinstance(value, str) and value:
             setattr(task, field_name, value)
     task.status = "recommended"
+
+
+def _parse_task_recommendation(task: SEOTask) -> dict[str, object]:
+    """Return the saved recommendation payload for a task, or an empty object when absent/invalid."""
+    if not task.recommendation_json:
+        return {}
+    try:
+        recommendation = json.loads(task.recommendation_json)
+    except json.JSONDecodeError:
+        return {}
+    return recommendation if isinstance(recommendation, dict) else {}
+
+
+def _task_article_payload(task: SEOTask) -> dict[str, object]:
+    """Build the complete payload used for full article generation."""
+    return {
+        "task_id": task.id,
+        "page_url": task.page_url,
+        "keyword": task.keyword,
+        "priority": task.priority,
+        "status": task.status,
+        "suggested_title": task.suggested_title,
+        "suggested_h1": task.suggested_h1,
+        "meta_description": task.meta_description,
+        "recommendation": _parse_task_recommendation(task),
+    }
+
+
+def _apply_article_to_task(task: SEOTask, article: dict[str, object]) -> None:
+    """Persist generated article content and schema payloads on a task."""
+    article_html = article.get("article_html")
+    task.article_html = article_html if isinstance(article_html, str) else ""
+    task.article_schema_json = json.dumps(article.get("article_schema_json") or {}, ensure_ascii=False)
+    task.faq_schema_json = json.dumps(article.get("faq_schema_json") or {}, ensure_ascii=False)
+    task.article_status = "generated"
+
+
+def _task_article_preview_html(task: SEOTask) -> str:
+    """Render a simple standalone HTML article preview."""
+    title = task.suggested_title or task.suggested_h1 or f"SEO Task {task.id} Article Preview"
+    article_html = task.article_html or "<p>No article has been generated for this SEO task yet.</p>"
+    return (
+        "<!doctype html>"
+        '<html lang="en">'
+        "<head>"
+        '<meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        f"<title>{escape(title)}</title>"
+        "</head>"
+        "<body>"
+        f"<main>{article_html}</main>"
+        "</body>"
+        "</html>"
+    )
 
 
 def _build_task_from_page(page: PageAudit) -> SEOTask:
@@ -210,6 +265,38 @@ def generate_seo_task_recommendation(task_id: int, db: DatabaseSession) -> dict[
     db.refresh(task)
 
     return {"success": True, "task_id": task.id, "recommendation": recommendation}
+
+
+@router.post("/seo/tasks/{task_id}/generate-article")
+def generate_seo_task_article(task_id: int, db: DatabaseSession) -> dict[str, object]:
+    """Generate and persist a complete SEO article for a recommended SEO task."""
+    task = db.get(SEOTask, task_id)
+    if not task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SEO task not found")
+
+    if not _parse_task_recommendation(task):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="SEO task recommendation is required")
+
+    try:
+        article = OpenAIClient().generate_full_article(task=_task_article_payload(task))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+    _apply_article_to_task(task, article)
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+
+    return {"success": True, "task_id": task.id, "article": article}
+
+
+@router.get("/seo/tasks/{task_id}/preview", response_class=HTMLResponse)
+def preview_seo_task_article(task_id: int, db: DatabaseSession) -> HTMLResponse:
+    """Return a simple HTML preview for a generated SEO task article."""
+    task = db.get(SEOTask, task_id)
+    if not task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SEO task not found")
+    return HTMLResponse(content=_task_article_preview_html(task))
 
 
 @router.get("/integrations/gsc/status")
