@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GSC Opportunities</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="container">
+    <h1>GSC Opportunities</h1>
+    <p>Pages with strong impressions, weak CTR, and rankings in positions 4-20.</p>
+    <section class="card">
+      <h2>Low CTR and internal link opportunities</h2>
+      {% if opportunities %}
+        <table>
+          <thead>
+            <tr>
+              <th>Query</th>
+              <th>Page</th>
+              <th>Clicks</th>
+              <th>Impressions</th>
+              <th>CTR</th>
+              <th>Avg. position</th>
+              <th>Reason</th>
+              <th>Recommended action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for opportunity in opportunities %}
+              <tr>
+                <td>{{ opportunity.query }}</td>
+                <td><a href="{{ opportunity.page_url }}">{{ opportunity.page_url }}</a></td>
+                <td>{{ opportunity.clicks }}</td>
+                <td>{{ opportunity.impressions }}</td>
+                <td>{{ "%.2f"|format(opportunity.ctr * 100) }}%</td>
+                <td>{{ "%.1f"|format(opportunity.average_position) }}</td>
+                <td>{{ opportunity.opportunity_reason }}</td>
+                <td>{{ opportunity.recommended_action }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p>No matching opportunities yet. Current low CTR threshold: {{ "%.2f"|format(low_ctr_threshold * 100) }}%.</p>
+      {% endif %}
+    </section>
+  </main>
+</body>
+</html>

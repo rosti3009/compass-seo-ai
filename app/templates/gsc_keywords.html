@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GSC Keyword Intelligence</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="container">
+    <h1>GSC Keyword Intelligence</h1>
+    <p>Real Google Search Console query data used to enrich SEO tasks, fixes, articles, and internal links.</p>
+
+    {% macro keyword_table(title, rows) %}
+      <section class="card">
+        <h2>{{ title }}</h2>
+        {% if rows %}
+          <table>
+            <thead>
+              <tr>
+                <th>Query</th>
+                <th>Page</th>
+                <th>Clicks</th>
+                <th>Impressions</th>
+                <th>CTR</th>
+                <th>Avg. position</th>
+                <th>Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in rows %}
+                <tr>
+                  <td>{{ row.query }}</td>
+                  <td><a href="{{ row.page_url }}">{{ row.page_url }}</a></td>
+                  <td>{{ row.clicks }}</td>
+                  <td>{{ row.impressions }}</td>
+                  <td>{{ "%.2f"|format(row.ctr * 100) }}%</td>
+                  <td>{{ "%.1f"|format(row.average_position) }}</td>
+                  <td>{{ row.date }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p>No GSC rows available yet. Run <code>POST /gsc/sync</code> after configuring credentials.</p>
+        {% endif %}
+      </section>
+    {% endmacro %}
+
+    {{ keyword_table("Top keywords", top_keywords) }}
+    {{ keyword_table("Low CTR opportunities", low_ctr) }}
+    {{ keyword_table("Rising pages", rising_pages) }}
+    {{ keyword_table("Weak ranking pages", weak_ranking_pages) }}
+  </main>
+</body>
+</html>
