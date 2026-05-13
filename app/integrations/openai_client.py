@@ -106,3 +106,36 @@ class OpenAIClient:
         if not isinstance(opportunities, list):
             raise RuntimeError("OpenAI returned internal link suggestions without an opportunities array.")
         return suggestions
+
+    def generate_topical_clusters(self, pages: list[dict]) -> dict:
+        """Generate topical cluster strategy from crawled page and SEO task context."""
+        response = self.client.chat.completions.create(
+            model=self.model,
+            response_format={"type": "json_object"},
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an SEO topical authority strategist. Return only a JSON object with exactly one "
+                        "top-level key named clusters. clusters must be an array of objects with these keys: "
+                        "cluster_name (string), pillar_page (string URL), supporting_pages (array of string URLs), "
+                        "missing_articles (array of strings), internal_link_strategy (array of strings). "
+                        "Do not include markdown or extra top-level keys."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "Build topical SEO clusters from these crawled pages and task statuses: "
+                        f"{json.dumps(pages)}"
+                    ),
+                },
+            ],
+        )
+        content = response.choices[0].message.content or "{}"
+        clusters = json.loads(content)
+        if not isinstance(clusters, dict):
+            raise RuntimeError("OpenAI returned an invalid topical clusters payload.")
+        if not isinstance(clusters.get("clusters"), list):
+            raise RuntimeError("OpenAI returned topical clusters without a clusters array.")
+        return clusters
