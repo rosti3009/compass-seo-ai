@@ -16,6 +16,7 @@ from app.integrations.gsc import GSCClient
 from app.integrations.gsc import MissingGoogleCredentialsError as MissingGSCCredentialsError
 from app.integrations.openai_client import OpenAIClient
 from app.services.crawler import SEOCrawler
+from app.services.internal_links import authority_score, best_anchor_text, opportunity_score
 from app.services.sitemap import discover_sitemap_urls
 
 router = APIRouter()
@@ -120,6 +121,114 @@ def _task_article_preview_html(task: SEOTask) -> str:
         "</body>"
         "</html>"
     )
+
+
+def _latest_crawl_pages(db: Session) -> list[PageAudit]:
+    """Return all pages from the latest crawl run, or an empty list when no crawl exists."""
+    crawl_run = db.query(CrawlRun).order_by(CrawlRun.started_at.desc()).first()
+    if not crawl_run:
+        return []
+    return (
+        db.query(PageAudit)
+        .filter(PageAudit.crawl_run_id == crawl_run.id)
+        .order_by(PageAudit.seo_score.desc(), PageAudit.url.asc())
+        .all()
+    )
+
+
+def _tasks_by_page_url(db: Session, page_urls: list[str]) -> dict[str, SEOTask]:
+    """Return SEO tasks keyed by page URL for the supplied crawl URLs."""
+    if not page_urls:
+        return {}
+    return {task.page_url: task for task in db.query(SEOTask).filter(SEOTask.page_url.in_(page_urls)).all()}
+
+
+def _page_link_payload(page: PageAudit, task: SEOTask | None = None) -> dict[str, object]:
+    """Build the compact payload used to score and enrich internal link opportunities."""
+    page_payload = page.to_dict()
+    page_payload["authority_score"] = authority_score(page)
+    page_payload["opportunity_score"] = opportunity_score(page, task)
+    page_payload["article_generated"] = task.article_status == "generated" if task else False
+    if task:
+        page_payload["task"] = {
+            "id": task.id,
+            "keyword": task.keyword,
+            "priority": task.priority,
+            "status": task.status,
+            "article_status": task.article_status,
+            "suggested_title": task.suggested_title,
+            "suggested_h1": task.suggested_h1,
+        }
+    return page_payload
+
+
+def _build_internal_link_opportunities(
+    pages: list[PageAudit], tasks_by_url: dict[str, SEOTask]
+) -> list[dict[str, object]]:
+    """Pair strong source pages with weak target pages and produce deterministic suggestions."""
+    scored_pages = [
+        {
+            "page": page,
+            "task": tasks_by_url.get(page.url),
+            "authority_score": authority_score(page),
+            "opportunity_score": opportunity_score(page, tasks_by_url.get(page.url)),
+        }
+        for page in pages
+        if page.status_code < 400
+    ]
+    strong_pages = sorted(
+        [item for item in scored_pages if item["authority_score"] >= 60],
+        key=lambda item: (-item["authority_score"], item["page"].url),
+    )
+    weak_pages = sorted(
+        [item for item in scored_pages if item["opportunity_score"] >= 45],
+        key=lambda item: (-item["opportunity_score"], item["page"].url),
+    )
+
+    opportunities = []
+    for target in weak_pages:
+        for source in strong_pages:
+            if source["page"].url == target["page"].url:
+                continue
+            anchor_text = best_anchor_text(target["page"], target["task"])
+            opportunities.append(
+                {
+                    "source_url": source["page"].url,
+                    "target_url": target["page"].url,
+                    "anchor_text": anchor_text,
+                    "reason": (
+                        "High-authority source page can pass relevance to a weaker page that needs more internal "
+                        "link support."
+                    ),
+                    "authority_score": source["authority_score"],
+                    "opportunity_score": target["opportunity_score"],
+                }
+            )
+            break
+    return opportunities[:25]
+
+
+def _merge_openai_internal_link_suggestions(
+    opportunities: list[dict[str, object]], suggestions: dict[str, object]
+) -> list[dict[str, object]]:
+    """Overlay OpenAI-provided anchor text and reasons on deterministic opportunities."""
+    suggested_items = suggestions.get("opportunities", [])
+    if not isinstance(suggested_items, list):
+        return opportunities
+    by_pair = {
+        (item.get("source_url"), item.get("target_url")): item for item in suggested_items if isinstance(item, dict)
+    }
+    merged = []
+    for opportunity in opportunities:
+        updated = opportunity.copy()
+        suggestion = by_pair.get((opportunity["source_url"], opportunity["target_url"]))
+        if suggestion:
+            for field in ("anchor_text", "reason"):
+                value = suggestion.get(field)
+                if isinstance(value, str) and value.strip():
+                    updated[field] = value.strip()
+        merged.append(updated)
+    return merged
 
 
 def _build_task_from_page(page: PageAudit) -> SEOTask:
@@ -244,6 +353,46 @@ def list_seo_tasks(db: DatabaseSession) -> dict[str, object]:
     """Return saved SEO tasks ordered by creation date."""
     tasks = db.query(SEOTask).order_by(SEOTask.created_at.desc(), SEOTask.id.desc()).all()
     return {"tasks": [task.to_dict() for task in tasks]}
+
+
+@router.get("/seo/internal-link-opportunities")
+def internal_link_opportunities(db: DatabaseSession) -> dict[str, object]:
+    """Return internal link opportunities from the latest crawl and saved SEO task context."""
+    pages = _latest_crawl_pages(db)
+    tasks_by_url = _tasks_by_page_url(db, [page.url for page in pages])
+    strong_pages_count = sum(1 for page in pages if page.status_code < 400 and authority_score(page) >= 60)
+    weak_pages_count = sum(
+        1 for page in pages if page.status_code < 400 and opportunity_score(page, tasks_by_url.get(page.url)) >= 45
+    )
+    opportunities = _build_internal_link_opportunities(pages, tasks_by_url)
+
+    if opportunities and settings.openai_api_key:
+        opportunity_payloads = []
+        pages_by_url = {page.url: page for page in pages}
+        for opportunity in opportunities:
+            source_page = pages_by_url.get(str(opportunity["source_url"]))
+            target_page = pages_by_url.get(str(opportunity["target_url"]))
+            opportunity_payload = opportunity.copy()
+            if source_page:
+                opportunity_payload["source_page"] = _page_link_payload(source_page, tasks_by_url.get(source_page.url))
+            if target_page:
+                opportunity_payload["target_page"] = _page_link_payload(target_page, tasks_by_url.get(target_page.url))
+            opportunity_payloads.append(opportunity_payload)
+        try:
+            suggestions = OpenAIClient().generate_internal_link_suggestions(pages=opportunity_payloads)
+        except (RuntimeError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+            suggestions = {}
+        opportunities = _merge_openai_internal_link_suggestions(opportunities, suggestions)
+
+    return {
+        "success": True,
+        "summary": {
+            "strong_pages": strong_pages_count,
+            "weak_pages": weak_pages_count,
+            "link_opportunities": len(opportunities),
+        },
+        "opportunities": opportunities,
+    }
 
 
 @router.post("/seo/tasks/{task_id}/generate-recommendation")
