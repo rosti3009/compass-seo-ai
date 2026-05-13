@@ -12,14 +12,22 @@
         <p class="eyebrow">SEO MVP</p>
         <h1>Compass SEO AI Dashboard</h1>
         <p>Monitor crawler health and on-page SEO opportunities for <strong>{{ target_domain }}</strong>.</p>
-        <form method="post" action="/crawler/run">
-          <button type="submit">Run crawler</button>
-        </form>
+        <div class="actions">
+          <form method="post" action="/crawler/run">
+            <button type="submit">Run crawler</button>
+          </form>
+          <a class="button-link" href="/seo/tasks-view">View SEO tasks</a>
+          <form method="post" action="/seo/tasks/from-latest-crawl">
+            <button type="submit" class="secondary-button">Create tasks from latest crawl</button>
+          </form>
+          <a class="button-link" href="/seo/internal-link-opportunities-view">Internal link opportunities</a>
+          <a class="button-link" href="/seo/topical-clusters-view">Topical clusters</a>
+        </div>
       </section>
 
-      <section class="cards">
+      <section class="cards" aria-label="SEO AI workflow summary">
         <article class="card">
-          <span class="label">Latest status</span>
+          <span class="label">Latest crawl status</span>
           <strong>{{ latest_run.status if latest_run else 'No runs yet' }}</strong>
         </article>
         <article class="card">
@@ -29,6 +37,26 @@
         <article class="card">
           <span class="label">Average score</span>
           <strong>{{ latest_run.average_score if latest_run else 0 }}</strong>
+        </article>
+        <article class="card">
+          <span class="label">Total SEO tasks</span>
+          <strong>{{ metrics.total_tasks }}</strong>
+        </article>
+        <article class="card">
+          <span class="label">Recommended tasks</span>
+          <strong>{{ metrics.recommended_tasks }}</strong>
+        </article>
+        <article class="card">
+          <span class="label">Generated articles</span>
+          <strong>{{ metrics.generated_articles }}</strong>
+        </article>
+        <article class="card">
+          <span class="label">Internal link opportunities</span>
+          <strong>{{ metrics.internal_link_opportunities }}</strong>
+        </article>
+        <article class="card">
+          <span class="label">Topical clusters</span>
+          <strong>{{ metrics.topical_clusters }}</strong>
         </article>
       </section>
 

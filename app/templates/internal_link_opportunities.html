@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Internal Link Opportunities</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <main class="container">
+      <section class="hero compact">
+        <p class="eyebrow">SEO workflow</p>
+        <h1>Internal link opportunities</h1>
+        <p>{{ opportunities|length }} opportunities from {{ pages_analyzed }} latest crawl pages.</p>
+        <p><a href="/">Back to dashboard</a></p>
+      </section>
+
+      <section class="panel">
+        {% if opportunities %}
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Source URL</th>
+                <th>Target URL</th>
+                <th>Anchor text</th>
+                <th>Reason</th>
+                <th>Scores</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for opportunity in opportunities %}
+              <tr>
+                <td><a href="{{ opportunity.source_url }}" target="_blank" rel="noreferrer">{{ opportunity.source_url }}</a></td>
+                <td><a href="{{ opportunity.target_url }}" target="_blank" rel="noreferrer">{{ opportunity.target_url }}</a></td>
+                <td>{{ opportunity.anchor_text }}</td>
+                <td>{{ opportunity.reason }}</td>
+                <td>Authority {{ opportunity.authority_score }} / Opportunity {{ opportunity.opportunity_score }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="empty">No internal link opportunities found for the latest crawl.</p>
+        {% endif %}
+      </section>
+    </main>
+  </body>
+</html>

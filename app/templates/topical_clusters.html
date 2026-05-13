@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Topical Clusters</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <main class="container">
+      <section class="hero compact">
+        <p class="eyebrow">SEO workflow</p>
+        <h1>Topical clusters</h1>
+        <p>{{ clusters|length }} clusters from {{ pages_analyzed }} latest crawl pages.</p>
+        <p><a href="/">Back to dashboard</a></p>
+      </section>
+
+      {% if clusters %}
+      <section class="cluster-list">
+        {% for cluster in clusters %}
+        <article class="panel cluster-card">
+          <h2>{{ cluster.cluster_name }}</h2>
+          <p><strong>Pillar page:</strong> <a href="{{ cluster.pillar_page }}" target="_blank" rel="noreferrer">{{ cluster.pillar_page }}</a></p>
+
+          <h3>Supporting pages</h3>
+          {% if cluster.supporting_pages %}
+          <ul>
+            {% for page in cluster.supporting_pages %}
+            <li><a href="{{ page }}" target="_blank" rel="noreferrer">{{ page }}</a></li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <p class="empty">No supporting pages identified yet.</p>
+          {% endif %}
+
+          <h3>Missing articles</h3>
+          {% if cluster.missing_articles %}
+          <ul>
+            {% for article in cluster.missing_articles %}
+            <li>{{ article }}</li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <p class="empty">No missing article ideas identified.</p>
+          {% endif %}
+
+          <h3>Internal link strategy</h3>
+          {% if cluster.internal_link_strategy %}
+          <ul>
+            {% for link_strategy in cluster.internal_link_strategy %}
+            <li>{{ link_strategy }}</li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <p class="empty">No link strategy generated.</p>
+          {% endif %}
+        </article>
+        {% endfor %}
+      </section>
+      {% else %}
+      <section class="panel">
+        <p class="empty">No topical clusters found for the latest crawl.</p>
+      </section>
+      {% endif %}
+    </main>
+  </body>
+</html>

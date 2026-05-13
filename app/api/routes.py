@@ -433,6 +433,36 @@ def _build_task_from_page(page: PageAudit) -> SEOTask:
     )
 
 
+def _dashboard_metrics(db: Session, latest_pages: list[PageAudit]) -> dict[str, int]:
+    """Return SEO workflow counts for dashboard cards."""
+    tasks_by_url = _tasks_by_page_url(db, [page.url for page in latest_pages])
+    internal_link_opportunities_count = len(_build_internal_link_opportunities(latest_pages, tasks_by_url))
+    page_payloads = [_page_cluster_payload(page, tasks_by_url.get(page.url)) for page in latest_pages]
+    return {
+        "total_tasks": db.query(SEOTask).count(),
+        "recommended_tasks": db.query(SEOTask).filter(SEOTask.status == "recommended").count(),
+        "generated_articles": db.query(SEOTask).filter(SEOTask.article_status == "generated").count(),
+        "internal_link_opportunities": internal_link_opportunities_count,
+        "topical_clusters": len(build_cluster_summary(page_payloads)),
+    }
+
+
+def _latest_crawl_context(db: Session, limit: int | None = None) -> tuple[CrawlRun | None, list[PageAudit]]:
+    """Return latest crawl run and ordered pages, optionally limited for dashboard tables."""
+    latest_run = db.query(CrawlRun).order_by(CrawlRun.started_at.desc()).first()
+    if not latest_run:
+        return None, []
+
+    query = (
+        db.query(PageAudit)
+        .filter(PageAudit.crawl_run_id == latest_run.id)
+        .order_by(PageAudit.seo_score.asc(), PageAudit.url.asc())
+    )
+    if limit is not None:
+        query = query.limit(limit)
+    return latest_run, query.all()
+
+
 @router.get("/health")
 def health() -> dict[str, str]:
     """Return a lightweight health check response."""
@@ -442,19 +472,52 @@ def health() -> dict[str, str]:
 @router.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, db: DatabaseSession) -> HTMLResponse:
     """Render the SEO dashboard."""
-    latest_run = db.query(CrawlRun).order_by(CrawlRun.started_at.desc()).first()
-    latest_pages = []
-    if latest_run:
-        latest_pages = (
-            db.query(PageAudit)
-            .filter(PageAudit.crawl_run_id == latest_run.id)
-            .order_by(PageAudit.seo_score.asc(), PageAudit.url.asc())
-            .limit(25)
-            .all()
-        )
+    latest_run, latest_pages = _latest_crawl_context(db, limit=25)
+    metrics_pages = _latest_crawl_pages(db)
     return templates.TemplateResponse(
+        request,
         "dashboard.html",
-        {"request": request, "target_domain": settings.target_domain, "latest_run": latest_run, "pages": latest_pages},
+        {
+            "target_domain": settings.target_domain,
+            "latest_run": latest_run,
+            "pages": latest_pages,
+            "metrics": _dashboard_metrics(db, metrics_pages),
+        },
+    )
+
+
+@router.get("/seo/tasks-view", response_class=HTMLResponse)
+def seo_tasks_view(request: Request, db: DatabaseSession) -> HTMLResponse:
+    """Render saved SEO tasks for human review."""
+    tasks = db.query(SEOTask).order_by(SEOTask.created_at.desc(), SEOTask.id.desc()).all()
+    return templates.TemplateResponse(request, "seo_tasks.html", {"tasks": tasks})
+
+
+@router.get("/seo/internal-link-opportunities-view", response_class=HTMLResponse)
+def internal_link_opportunities_view(request: Request, db: DatabaseSession) -> HTMLResponse:
+    """Render deterministic internal link opportunities from the latest crawl."""
+    pages = _latest_crawl_pages(db)
+    tasks_by_url = _tasks_by_page_url(db, [page.url for page in pages])
+    return templates.TemplateResponse(
+        request,
+        "internal_link_opportunities.html",
+        {
+            "opportunities": _build_internal_link_opportunities(pages, tasks_by_url),
+            "pages_analyzed": len(pages),
+        },
+    )
+
+
+@router.get("/seo/topical-clusters-view", response_class=HTMLResponse)
+def topical_clusters_view(request: Request, db: DatabaseSession) -> HTMLResponse:
+    """Render topical cluster summaries from the latest crawl."""
+    pages = _latest_crawl_pages(db)
+    tasks_by_url = _tasks_by_page_url(db, [page.url for page in pages])
+    page_payloads = [_page_cluster_payload(page, tasks_by_url.get(page.url)) for page in pages]
+    return templates.TemplateResponse(
+        request,
+        "topical_clusters.html",
+        {"clusters": build_cluster_summary(page_payloads), "pages_analyzed": len(page_payloads)},
     )
 
 
