@@ -19,6 +19,7 @@ from app.db.models import (
     GSCKeywordMetric,
     PageAudit,
     PublishingPackage,
+    SEOAutomationRun,
     SEOFix,
     SEOStrategyRecommendation,
     SEOTask,
@@ -31,6 +32,7 @@ from app.integrations.gsc import MissingGoogleCredentialsError as MissingGSCCred
 from app.integrations.openai_client import OpenAIClient
 from app.services.crawler import SEOCrawler
 from app.services.internal_links import authority_score, best_anchor_text, opportunity_score
+from app.services.seo_automation import run_seo_automation
 from app.services.seo_strategy_engine import generate_strategy_recommendations, summarize_site_strategy
 from app.services.sitemap import discover_sitemap_urls
 from app.services.topical_clusters import build_cluster_summary
@@ -1005,6 +1007,46 @@ def dashboard(request: Request, db: DatabaseSession) -> HTMLResponse:
             "metrics": _dashboard_metrics(db, metrics_pages),
         },
     )
+
+
+@router.post("/seo/automation/run", status_code=status.HTTP_201_CREATED)
+def run_seo_automation_endpoint(
+    db: DatabaseSession,
+    max_tasks: int = 10,
+    generate_articles: bool = False,
+    sync_gsc: bool = True,
+) -> dict[str, object]:
+    """Run the safe SEO automation workflow without approving, applying, or publishing changes."""
+    automation_run = run_seo_automation(db, max_tasks=max_tasks, generate_articles=generate_articles, sync_gsc=sync_gsc)
+    return {"success": automation_run.status != "failed", "run": automation_run.to_dict()}
+
+
+@router.get("/seo/automation/runs")
+def list_seo_automation_runs(db: DatabaseSession) -> dict[str, object]:
+    """Return previous safe SEO automation workflow runs."""
+    runs = db.query(SEOAutomationRun).order_by(SEOAutomationRun.started_at.desc(), SEOAutomationRun.id.desc()).all()
+    return {"runs": [run.to_dict() for run in runs]}
+
+
+@router.get("/seo/automation/runs/{run_id}")
+def get_seo_automation_run(run_id: int, db: DatabaseSession) -> dict[str, object]:
+    """Return full details for one safe SEO automation workflow run."""
+    automation_run = db.get(SEOAutomationRun, run_id)
+    if not automation_run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SEO automation run not found")
+    return {"run": automation_run.to_dict()}
+
+
+@router.get("/seo/automation-view", response_class=HTMLResponse)
+def seo_automation_view(request: Request, db: DatabaseSession) -> HTMLResponse:
+    """Render the safe one-click SEO automation dashboard."""
+    runs = (
+        db.query(SEOAutomationRun)
+        .order_by(SEOAutomationRun.started_at.desc(), SEOAutomationRun.id.desc())
+        .limit(25)
+        .all()
+    )
+    return templates.TemplateResponse(request, "seo_automation.html", {"runs": runs})
 
 
 @router.post("/gsc/sync")

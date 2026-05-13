@@ -273,6 +273,65 @@ class PublishingPackage(Base):
         }
 
 
+class SEOAutomationRun(Base):
+    """A safe, human-reviewed SEO automation workflow execution."""
+
+    __tablename__ = "seo_automation_runs"
+
+    VALID_STATUSES = {"running", "completed", "failed", "completed_with_warnings"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="running", nullable=False, index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    crawl_run_id: Mapped[int | None] = mapped_column(ForeignKey("crawl_runs.id"), nullable=True, index=True)
+    gsc_synced_rows: Mapped[int] = mapped_column(Integer, default=0)
+    seo_tasks_created: Mapped[int] = mapped_column(Integer, default=0)
+    recommendations_generated: Mapped[int] = mapped_column(Integer, default=0)
+    articles_generated: Mapped[int] = mapped_column(Integer, default=0)
+    fixes_created: Mapped[int] = mapped_column(Integer, default=0)
+    publishing_packages_created: Mapped[int] = mapped_column(Integer, default=0)
+    strategy_recommendations_created: Mapped[int] = mapped_column(Integer, default=0)
+    errors_json: Mapped[str] = mapped_column(Text, default="[]")
+    summary_json: Mapped[str] = mapped_column(Text, default="{}")
+
+    crawl_run: Mapped[CrawlRun | None] = relationship()
+
+    @property
+    def errors(self) -> list[object]:
+        try:
+            parsed = json.loads(self.errors_json or "[]")
+        except json.JSONDecodeError:
+            return [self.errors_json]
+        return parsed if isinstance(parsed, list) else [parsed]
+
+    @property
+    def summary(self) -> dict[str, object]:
+        try:
+            parsed = json.loads(self.summary_json or "{}")
+        except json.JSONDecodeError:
+            return {"raw": self.summary_json}
+        return parsed if isinstance(parsed, dict) else {"raw": parsed}
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "status": self.status,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "crawl_run_id": self.crawl_run_id,
+            "gsc_synced_rows": self.gsc_synced_rows,
+            "seo_tasks_created": self.seo_tasks_created,
+            "recommendations_generated": self.recommendations_generated,
+            "articles_generated": self.articles_generated,
+            "fixes_created": self.fixes_created,
+            "publishing_packages_created": self.publishing_packages_created,
+            "strategy_recommendations_created": self.strategy_recommendations_created,
+            "errors": self.errors,
+            "summary": self.summary,
+        }
+
+
 class SEOStrategyRecommendation(Base):
     """Prioritized AI SEO strategy recommendation across crawl, GSC, content, and publishing signals."""
 
