@@ -32,7 +32,7 @@ class CrawlRun(Base):
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "pages_crawled": self.pages_crawled,
             "average_score": self.average_score,
-            "status": self.status,
+            "status": self.status or "running",
             "error_message": self.error_message,
         }
 
@@ -54,9 +54,13 @@ class PageAudit(Base):
     internal_links: Mapped[int] = mapped_column(Integer, default=0)
     missing_fields: Mapped[str] = mapped_column(String(512), default="")
     seo_score: Mapped[float] = mapped_column(Float, default=0.0)
+    seo_score_delta: Mapped[float] = mapped_column(Float, default=0.0)
     crawled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
     crawl_run: Mapped[CrawlRun] = relationship(back_populates="pages")
+    score_snapshots: Mapped[list["PageScoreSnapshot"]] = relationship(
+        back_populates="page_audit", cascade="all, delete-orphan"
+    )
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -71,9 +75,39 @@ class PageAudit(Base):
             "word_count": self.word_count,
             "internal_links": self.internal_links,
             "missing_fields": [field for field in self.missing_fields.split(",") if field],
-            "seo_score": self.seo_score,
+            "seo_score": self.seo_score or 0.0,
+            "seo_score_delta": self.seo_score_delta or 0.0,
             "crawled_at": self.crawled_at.isoformat() if self.crawled_at else None,
             "excluded_reason": get_url_exclusion_reason(self.url),
+        }
+
+
+class PageScoreSnapshot(Base):
+    """Point-in-time SEO score for a crawled page URL."""
+
+    __tablename__ = "page_score_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    page_audit_id: Mapped[int] = mapped_column(ForeignKey("page_audits.id"), nullable=False, index=True)
+    crawl_run_id: Mapped[int] = mapped_column(ForeignKey("crawl_runs.id"), nullable=False, index=True)
+    url: Mapped[str] = mapped_column(String(1024), nullable=False, index=True)
+    seo_score: Mapped[float] = mapped_column(Float, default=0.0)
+    previous_seo_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    seo_score_delta: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
+
+    page_audit: Mapped[PageAudit] = relationship(back_populates="score_snapshots")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "page_audit_id": self.page_audit_id,
+            "crawl_run_id": self.crawl_run_id,
+            "url": self.url,
+            "seo_score": self.seo_score or 0.0,
+            "previous_seo_score": self.previous_seo_score,
+            "seo_score_delta": self.seo_score_delta or 0.0,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
 
@@ -230,7 +264,7 @@ class SEOTask(Base):
             "page_url": self.page_url,
             "keyword": self.keyword,
             "priority": self.priority,
-            "status": self.status,
+            "status": self.status or "open",
             "suggested_title": self.suggested_title,
             "suggested_h1": self.suggested_h1,
             "meta_description": self.meta_description,
@@ -278,7 +312,7 @@ class SEOFix(Base):
             "fix_type": self.fix_type,
             "current_value": self.current_value,
             "proposed_value": self.proposed_value,
-            "status": self.status,
+            "status": self.status or "draft",
             "confidence_score": self.confidence_score,
             "source": self.source,
             "notes_json": self.notes_json,
@@ -318,7 +352,7 @@ class PublishingPackage(Base):
             "page_url": self.page_url,
             "cms_type": self.cms_type,
             "payload_json": payload,
-            "status": self.status,
+            "status": self.status or "draft",
             "notes": self.notes,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
@@ -369,7 +403,7 @@ class SEOAutomationRun(Base):
     def to_dict(self) -> dict[str, object]:
         return {
             "id": self.id,
-            "status": self.status,
+            "status": self.status or "running",
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "crawl_run_id": self.crawl_run_id,
@@ -429,18 +463,18 @@ class SEOStrategyRecommendation(Base):
             "id": self.id,
             "page_url": self.page_url,
             "recommendation_type": self.recommendation_type,
-            "priority_score": self.priority_score,
-            "traffic_potential_score": self.traffic_potential_score,
-            "ctr_opportunity_score": self.ctr_opportunity_score,
-            "ranking_opportunity_score": self.ranking_opportunity_score,
-            "internal_link_score": self.internal_link_score,
-            "topical_authority_score": self.topical_authority_score,
-            "content_gap_score": self.content_gap_score,
-            "publishing_readiness_score": self.publishing_readiness_score,
-            "ai_summary": self.ai_summary,
-            "recommended_action": self.recommended_action,
-            "reasoning": self.reasoning,
-            "status": self.status,
+            "priority_score": self.priority_score or 0.0,
+            "traffic_potential_score": self.traffic_potential_score or 0.0,
+            "ctr_opportunity_score": self.ctr_opportunity_score or 0.0,
+            "ranking_opportunity_score": self.ranking_opportunity_score or 0.0,
+            "internal_link_score": self.internal_link_score or 0.0,
+            "topical_authority_score": self.topical_authority_score or 0.0,
+            "content_gap_score": self.content_gap_score or 0.0,
+            "publishing_readiness_score": self.publishing_readiness_score or 0.0,
+            "ai_summary": self.ai_summary or "",
+            "recommended_action": self.recommended_action or "",
+            "reasoning": self.reasoning or "",
+            "status": self.status or "pending",
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

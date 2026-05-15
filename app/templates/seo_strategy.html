@@ -46,12 +46,12 @@
             <tbody>
               {% for recommendation in recommendations %}
               <tr>
-                <td>{{ '%.1f'|format(recommendation.priority_score) }}</td>
+                <td>{{ '%.1f'|format(recommendation.priority_score or 0) }}</td>
                 <td>{{ recommendation.recommendation_type }}</td>
                 <td><a href="{{ recommendation.page_url }}" target="_blank" rel="noreferrer">{{ recommendation.page_url }}</a></td>
-                <td>{{ recommendation.status }}</td>
-                <td>{{ recommendation.ai_summary }}</td>
-                <td>{{ recommendation.recommended_action }}</td>
+                <td>{{ recommendation.status or 'pending' }}</td>
+                <td>{{ recommendation.ai_summary or '' }}</td>
+                <td>{{ recommendation.recommended_action or '' }}</td>
               </tr>
               {% endfor %}
             </tbody>

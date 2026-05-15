@@ -41,6 +41,15 @@ def _clamp(value: float, minimum: float = 0.0, maximum: float = 100.0) -> float:
     return round(max(minimum, min(maximum, value)), 2)
 
 
+def _number(value: Any, default: float = 0.0) -> float:
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _missing_fields(page: PageAudit | None) -> set[str]:
     if page is None:
         return set()
@@ -81,8 +90,8 @@ def _page_cluster_payload(page: PageAudit, task: SEOTask | None) -> dict[str, An
         "title": page.title or "",
         "h1": page.h1 or "",
         "meta": page.meta_description or "",
-        "word_count": page.word_count,
-        "seo_score": page.seo_score,
+        "word_count": _number(page.word_count),
+        "seo_score": _number(page.seo_score),
         "keyword": task.keyword if task else None,
         "priority": task.priority if task else None,
         "article_status": task.article_status if task else "not_generated",
@@ -113,9 +122,9 @@ def calculate_priority_scores(
     publishing_package: PublishingPackage | None = None,
 ) -> dict[str, float]:
     """Calculate normalized SEO strategy impact scores from all available signals."""
-    impressions = gsc_metric.impressions if gsc_metric else 0
-    ctr = gsc_metric.ctr if gsc_metric else 0.0
-    position = gsc_metric.average_position if gsc_metric else 0.0
+    impressions = _number(gsc_metric.impressions) if gsc_metric else 0.0
+    ctr = _number(gsc_metric.ctr) if gsc_metric else 0.0
+    position = _number(gsc_metric.average_position) if gsc_metric else 0.0
     traffic_potential_score = _clamp((min(impressions, 5000) / 5000) * 100)
     ctr_opportunity_score = (
         _clamp(((LOW_CTR_THRESHOLD - ctr) / LOW_CTR_THRESHOLD) * 100)
@@ -140,8 +149,8 @@ def calculate_priority_scores(
         content_gap_score = 70.0 if task and task.article_status != "generated" else 0.0
     else:
         missing_component = len(_missing_fields(page)) / 3 * 55
-        thin_component = (1 - min(max(page.word_count, 0), 1000) / 1000) * 30
-        low_score_component = max(0.0, 70 - page.seo_score) / 70 * 15
+        thin_component = (1 - min(max(_number(page.word_count), 0), 1000) / 1000) * 30
+        low_score_component = max(0.0, 70 - _number(page.seo_score)) / 70 * 15
         content_gap_score = _clamp(missing_component + thin_component + low_score_component)
 
     publishing_readiness_score = 0.0
@@ -193,17 +202,17 @@ def _recommendation_type(
         return "rewrite_title"
     if "meta_description" in missing:
         return "rewrite_meta"
-    if gsc_metric and gsc_metric.impressions >= 50 and gsc_metric.ctr < LOW_CTR_THRESHOLD:
+    if gsc_metric and _number(gsc_metric.impressions) >= 50 and _number(gsc_metric.ctr) < LOW_CTR_THRESHOLD:
         return "improve_ctr"
     if internal_link_score >= 55:
         return "improve_internal_links"
     if topical_gap >= 60:
         return "create_cluster_content"
-    if page and page.word_count < 700:
+    if page and _number(page.word_count) < 700:
         return "expand_content"
     if task and task.article_status != "generated":
         return "generate_article"
-    if page and page.status_code >= 400:
+    if page and _number(page.status_code) >= 400:
         return "noindex_page"
     return "expand_content"
 
@@ -349,9 +358,9 @@ def generate_strategy_recommendations(db: Session) -> dict[str, Any]:
             "excluded_reason": get_url_exclusion_reason(page.url),
             "task": _task_payload(task),
             "gsc_query": gsc_metric.query if gsc_metric else None,
-            "gsc_impressions": gsc_metric.impressions if gsc_metric else 0,
-            "gsc_ctr": gsc_metric.ctr if gsc_metric else 0,
-            "gsc_position": gsc_metric.average_position if gsc_metric else 0,
+            "gsc_impressions": _number(gsc_metric.impressions) if gsc_metric else 0,
+            "gsc_ctr": _number(gsc_metric.ctr) if gsc_metric else 0,
+            "gsc_position": _number(gsc_metric.average_position) if gsc_metric else 0,
             "has_fix": fix is not None,
             "has_publishing_package": package is not None,
         }
@@ -435,17 +444,19 @@ def summarize_site_strategy(db: Session) -> dict[str, list[dict[str, Any]]]:
     quick_wins = [
         item.to_dict()
         for item in recommendations
-        if item.publishing_readiness_score >= 60
+        if _number(item.publishing_readiness_score) >= 60
         or item.recommendation_type in {"rewrite_title", "rewrite_meta", "improve_ctr"}
     ][:5]
-    traffic_growth = [item.to_dict() for item in recommendations if item.traffic_potential_score >= 40][:5]
-    ready_to_publish = [item.to_dict() for item in recommendations if item.publishing_readiness_score >= 70][:5]
-    weak_clusters = [item.to_dict() for item in recommendations if item.topical_authority_score >= 60][:5]
+    traffic_growth = [item.to_dict() for item in recommendations if _number(item.traffic_potential_score) >= 40][:5]
+    ready_to_publish = [
+        item.to_dict() for item in recommendations if _number(item.publishing_readiness_score) >= 70
+    ][:5]
+    weak_clusters = [item.to_dict() for item in recommendations if _number(item.topical_authority_score) >= 60][:5]
     next_actions = [
         {
             "page_url": item.page_url,
             "recommendation_type": item.recommendation_type,
-            "priority_score": item.priority_score,
+            "priority_score": _number(item.priority_score),
             "recommended_action": item.recommended_action,
         }
         for item in recommendations[:5]
