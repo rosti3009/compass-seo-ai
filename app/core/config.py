@@ -19,7 +19,8 @@ class Settings(BaseSettings):
     google_service_account_file: str | None = None
     gsc_site_url: str | None = None
     ga4_property_id: str | None = None
-
+    openai_api_key: str | None = None
+    openai_model: str = "gpt-5.5"
 
 @lru_cache
 def get_settings() -> Settings:

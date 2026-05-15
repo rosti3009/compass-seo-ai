@@ -7,3 +7,5 @@ pytest==8.3.4
 ruff==0.8.4
 sqlalchemy==2.0.36
 uvicorn[standard]==0.34.0
+google-analytics-data==0.18.19
+openai>=1.30.0

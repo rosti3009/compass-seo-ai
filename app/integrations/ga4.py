@@ -1,28 +1,37 @@
-from dataclasses import dataclass
+from google.analytics.data_v1beta import BetaAnalyticsDataClient
+from google.analytics.data_v1beta.types import RunReportRequest
 
 from app.core.config import settings
-from app.integrations.google_auth import MissingGoogleCredentialsError, require_service_account_file
+from app.integrations.oauth_credentials import load_oauth_credentials
 
 
-@dataclass(frozen=True)
 class GA4Client:
-    """Small GA4 wrapper with explicit configuration validation."""
+    def __init__(self) -> None:
+        credentials = load_oauth_credentials()
 
-    credentials_file: str
-    property_id: str
+        self.client = BetaAnalyticsDataClient(
+            credentials=credentials,
+        )
+
+        self.property_id = settings.ga4_property_id
 
     @classmethod
     def from_settings(cls) -> "GA4Client":
-        credentials_file = require_service_account_file()
-        if not settings.ga4_property_id:
-            raise MissingGoogleCredentialsError(
-                "GA4_PROPERTY_ID is not configured. Add your GA4 numeric property ID to .env."
-            )
-        return cls(credentials_file=str(credentials_file), property_id=settings.ga4_property_id)
+        return cls()
 
-    def status(self) -> dict[str, object]:
-        return {"configured": True, "property_id": self.property_id, "credentials_file": self.credentials_file}
+    def status(self) -> dict:
+        request = RunReportRequest(
+            property=f"properties/{self.property_id}",
+            dimensions=[{"name": "country"}],
+            metrics=[{"name": "activeUsers"}],
+            date_ranges=[{"start_date": "7daysAgo", "end_date": "today"}],
+            limit=1,
+        )
 
-    def run_report(self) -> dict[str, object]:
-        """Placeholder for production GA4 Data API calls once credentials are supplied."""
-        return {"message": "GA4 client configured. Install google-analytics-data to run live reports."}
+        response = self.client.run_report(request)
+
+        return {
+            "connected": True,
+            "property_id": self.property_id,
+            "rows_returned": len(response.rows),
+        }
