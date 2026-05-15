@@ -29,6 +29,9 @@ Copy `.env.example` to `.env` for local development and configure these values i
 | `GOOGLE_OAUTH_REDIRECT_URI` | Yes for user OAuth | Authorized redirect URI configured in Google Cloud. | Render example: `https://your-service.onrender.com/auth/google/callback`; local example: `http://127.0.0.1:8000/auth/google/callback`. |
 | `GSC_SITE_URL` | Yes for GSC status | Verified Google Search Console property URL. | `https://compassgrill.co.il/` |
 | `GA4_PROPERTY_ID` | Yes for GA4 status | Numeric GA4 property ID. | `123456789` |
+| `ISTORE_BASE_URL` | Yes for ISTORE endpoints | Base URL for the ISTORE read-only API. | `https://example.istore.local/api/` |
+| `ISTORE_COMPANY_ID` | Yes for ISTORE endpoints | Company identifier sent with ISTORE product reads. | `12345` |
+| `ISTORE_X_TOKEN` | Yes for ISTORE endpoints | ISTORE API token sent as `X-Token`; responses redact it. | Set as a secret env var; do not commit it. |
 
 Additional supported settings:
 
@@ -40,6 +43,7 @@ Additional supported settings:
 | `CRAWLER_MAX_PAGES` | Maximum pages per crawl. | `25` |
 | `CRAWLER_TIMEOUT_SECONDS` | Per-request crawler timeout. | `10` |
 | `GOOGLE_SERVICE_ACCOUNT_FILE` | Optional local file-path alternative to `GOOGLE_APPLICATION_CREDENTIALS_JSON`. | Empty |
+| `ISTORE_TIMEOUT_SECONDS` | Timeout for ISTORE read-only API calls. | `10` |
 
 ## Local run instructions
 
@@ -135,6 +139,9 @@ Required OAuth scopes:
 | `GET` | `/auth/google/status` | Report whether Google OAuth is connected and list stored scopes. |
 | `GET` | `/integrations/gsc/status` | Validate Search Console configuration. |
 | `GET` | `/integrations/ga4/status` | Validate GA4 configuration. |
+| `GET` | `/integrations/istore/status` | Validate ISTORE read-only configuration with token redacted. |
+| `GET` | `/integrations/istore/products` | Fetch ISTORE products with a GET-only read. |
+| `GET` | `/integrations/istore/products/{product_id}` | Fetch one ISTORE product with a GET-only read. |
 | `GET` | `/sitemap/discover` | Discover sitemap URLs for the configured target domain. |
 
 ## Dashboard URLs

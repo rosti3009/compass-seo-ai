@@ -31,6 +31,7 @@ from app.integrations.ga4 import MissingGoogleCredentialsError as MissingGA4Cred
 from app.integrations.google_auth import GOOGLE_OAUTH_SCOPES, oauth_status, utc_expiry_from_seconds
 from app.integrations.gsc import GSCAPIError, GSCClient
 from app.integrations.gsc import MissingGoogleCredentialsError as MissingGSCCredentialsError
+from app.integrations.istore import IStoreAPIError, IStoreClient, MissingIStoreSettingsError
 from app.integrations.openai_client import OpenAIClient
 from app.services.crawler import SEOCrawler
 from app.services.hebrew_seo import analyze_page_hebrew_seo, israeli_seasonality, summarize_hebrew_insights
@@ -1894,6 +1895,37 @@ def ga4_status(db: DatabaseSession) -> dict[str, object]:
         return GA4Client.from_settings(db).status()
     except MissingGA4CredentialsError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+
+@router.get("/integrations/istore/status")
+def istore_status() -> dict[str, object]:
+    """Validate read-only ISTORE integration configuration without exposing secrets."""
+    try:
+        return IStoreClient.from_settings().status()
+    except MissingIStoreSettingsError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+
+@router.get("/integrations/istore/products")
+def istore_products() -> dict[str, object]:
+    """Return ISTORE products through the read-only client."""
+    try:
+        return {"products": IStoreClient.from_settings().list_products()}
+    except MissingIStoreSettingsError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except IStoreAPIError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+
+@router.get("/integrations/istore/products/{product_id}")
+def istore_product(product_id: str) -> dict[str, object]:
+    """Return one ISTORE product through the read-only client."""
+    try:
+        return {"product": IStoreClient.from_settings().get_product(product_id)}
+    except MissingIStoreSettingsError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except IStoreAPIError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
 
 @router.get("/sitemap/discover")
