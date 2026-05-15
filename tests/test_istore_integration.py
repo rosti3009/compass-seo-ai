@@ -152,3 +152,55 @@ def test_istore_product_endpoint_is_get_only(client: TestClient, monkeypatch: py
     assert response.status_code == 200
     assert response.json() == {"product": {"id": "sku-1"}}
     assert client.put("/integrations/istore/products/sku-1").status_code == 405
+
+
+def test_istore_product_seo_analysis_endpoint_is_read_only(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeIStoreClient:
+        def get_product(self, product_id: str) -> dict[str, Any]:
+            return {
+                "id": product_id,
+                "name": "גריל גז מקצועי",
+                "description": "<p>גריל איכותי לגינה עם מבערי נירוסטה, משטח צלייה רחב ואחריות יבואן.</p>",
+                "price": 2490,
+                "category": "גרילים",
+                "images": ["front.jpg"],
+            }
+
+    monkeypatch.setattr("app.api.routes.IStoreClient.from_settings", lambda: FakeIStoreClient())
+
+    response = client.get("/integrations/istore/products/sku-1/seo-analysis.json")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["product"]["id"] == "sku-1"
+    assert body["analysis"]["product_id"] == "sku-1"
+    assert body["analysis"]["suggested_h1"] == "גריל גז מקצועי"
+    assert "Missing SEO title" in body["analysis"]["issues"]
+    assert client.put("/integrations/istore/products/sku-1/seo-analysis.json").status_code == 405
+
+
+def test_istore_product_seo_analysis_view_renders_template(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeIStoreClient:
+        def get_product(self, product_id: str) -> dict[str, Any]:
+            return {
+                "id": product_id,
+                "name": "מעשנת פחם",
+                "meta_title": "מעשנת פחם מקצועית לגינה | Compass",
+                "meta_description": (
+                    "מעשנת פחם איכותית עם שטח צלייה גדול, שליטה בחום "
+                    "ואביזרים משלימים לחוויית ברביקיו ביתית."
+                ),
+                "description": "מעשנת פחם עמידה שמיועדת לבישול ארוך, צלייה ועישון בשרים בבית ובגינה.",
+                "category": "מעשנות",
+                "url": "https://example.test/products/smoker",
+                "images": ["smoker.jpg", "smoker-side.jpg"],
+            }
+
+    monkeypatch.setattr("app.api.routes.IStoreClient.from_settings", lambda: FakeIStoreClient())
+
+    response = client.get("/integrations/istore/products/smoker-1/seo-analysis")
+
+    assert response.status_code == 200
+    assert "Product SEO analysis" in response.text
+    assert "מעשנת פחם" in response.text
+    assert "View JSON" in response.text

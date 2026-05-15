@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ISTORE Product SEO Analysis</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <main class="container compact">
+      <section class="hero">
+        <p class="eyebrow">ISTORE read-only SEO</p>
+        <h1>Product SEO analysis</h1>
+        <p>Review safe, read-only SEO recommendations for an ISTORE product without changing store data.</p>
+        <div class="actions">
+          <a class="button-link" href="/">Back to dashboard</a>
+          <a class="button-link secondary-button" href="/integrations/istore/products/{{ analysis.product_id }}/seo-analysis.json">View JSON</a>
+        </div>
+      </section>
+
+      <section class="cards istore-scorecards" aria-label="ISTORE product SEO summary">
+        <article class="card">
+          <span class="label">Product ID</span>
+          <strong>{{ analysis.product_id }}</strong>
+        </article>
+        <article class="card">
+          <span class="label">SEO score</span>
+          <strong>{{ analysis.score }}</strong>
+        </article>
+        <article class="card">
+          <span class="label">Images detected</span>
+          <strong>{{ analysis.image_count }}</strong>
+        </article>
+        <article class="card">
+          <span class="label">Category</span>
+          <strong>{{ analysis.category or '—' }}</strong>
+        </article>
+      </section>
+
+      <section class="panel istore-product-panel">
+        <div class="panel-heading-row">
+          <div>
+            <p class="eyebrow">Product</p>
+            <h2>{{ analysis.name }}</h2>
+          </div>
+          {% if analysis.url %}
+          <a class="button-link secondary-button" href="{{ analysis.url }}" target="_blank" rel="noreferrer">Open product</a>
+          {% endif %}
+        </div>
+
+        <div class="istore-seo-grid">
+          <article class="istore-seo-box">
+            <span class="label">Current SEO title</span>
+            <p>{{ analysis.title or 'Missing' }}</p>
+          </article>
+          <article class="istore-seo-box">
+            <span class="label">Suggested SEO title</span>
+            <p>{{ analysis.suggested_title }}</p>
+          </article>
+          <article class="istore-seo-box">
+            <span class="label">Current meta description</span>
+            <p>{{ analysis.meta_description or 'Missing' }}</p>
+          </article>
+          <article class="istore-seo-box">
+            <span class="label">Suggested meta description</span>
+            <p>{{ analysis.suggested_meta_description }}</p>
+          </article>
+          <article class="istore-seo-box">
+            <span class="label">Suggested H1</span>
+            <p>{{ analysis.suggested_h1 }}</p>
+          </article>
+          <article class="istore-seo-box">
+            <span class="label">Price</span>
+            <p>{{ analysis.price or '—' }}</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Issues and recommendations</h2>
+        {% if analysis.issues %}
+        <div class="istore-recommendations">
+          <div>
+            <h3>Detected issues</h3>
+            <ul>
+              {% for issue in analysis.issues %}
+              <li>{{ issue }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+          <div>
+            <h3>Recommended fixes</h3>
+            <ul>
+              {% for recommendation in analysis.recommendations %}
+              <li>{{ recommendation }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+        </div>
+        {% else %}
+        <p class="empty">No major product SEO issues were detected.</p>
+        {% endif %}
+      </section>
+
+      <section class="panel">
+        <h2>Product description preview</h2>
+        {% if analysis.description_text %}
+        <p class="description-preview">{{ analysis.description_text }}</p>
+        {% else %}
+        <p class="empty">No product description was detected.</p>
+        {% endif %}
+      </section>
+    </main>
+  </body>
+</html>
