@@ -1240,3 +1240,70 @@ def test_publishing_packages_view_loads(client: TestClient, db_session: Session)
     assert response.status_code == 200
     assert "Publishing packages" in response.text
     assert "https://example.com/publish-me" in response.text
+
+
+def test_account_never_becomes_seo_task(client: TestClient, db_session: Session) -> None:
+    crawl_run = CrawlRun(target_domain="https://example.com", status="completed", pages_crawled=1, average_score=20)
+    db_session.add(crawl_run)
+    db_session.flush()
+    db_session.add(
+        PageAudit(
+            crawl_run_id=crawl_run.id,
+            url="https://example.com/account",
+            status_code=200,
+            missing_fields="title,meta_description,h1",
+            seo_score=10,
+        )
+    )
+    db_session.commit()
+
+    response = client.post("/seo/tasks/from-latest-crawl")
+
+    assert response.status_code == 201
+    assert response.json() == {"created_count": 0, "total_candidates": 0}
+    assert db_session.query(SEOTask).count() == 0
+
+
+def test_login_never_becomes_seo_task(client: TestClient, db_session: Session) -> None:
+    crawl_run = CrawlRun(target_domain="https://example.com", status="completed", pages_crawled=1, average_score=20)
+    db_session.add(crawl_run)
+    db_session.flush()
+    db_session.add(
+        PageAudit(
+            crawl_run_id=crawl_run.id,
+            url="https://example.com/login",
+            status_code=200,
+            missing_fields="title,meta_description,h1",
+            seo_score=10,
+        )
+    )
+    db_session.commit()
+
+    response = client.post("/seo/tasks/from-latest-crawl")
+
+    assert response.status_code == 201
+    assert response.json() == {"created_count": 0, "total_candidates": 0}
+    assert db_session.query(SEOTask).count() == 0
+
+
+def test_publishing_package_cannot_be_created_for_excluded_system_url(
+    client: TestClient, db_session: Session
+) -> None:
+    task = SEOTask(page_url="https://example.com/account", priority="high", status="recommended")
+    db_session.add(task)
+    db_session.flush()
+    fix = SEOFix(
+        task_id=task.id,
+        page_url=task.page_url,
+        fix_type="meta_title",
+        proposed_value="Account SEO title",
+        status="approved",
+    )
+    db_session.add(fix)
+    db_session.commit()
+
+    response = client.post(f"/seo/fixes/{fix.id}/create-publishing-package")
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["excluded_reason"] == "system_page"
+    assert db_session.query(PublishingPackage).count() == 0

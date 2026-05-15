@@ -240,3 +240,30 @@ def test_calculate_priority_scores_weights_gsc_and_readiness() -> None:
     assert scores["ctr_opportunity_score"] > 80
     assert scores["ranking_opportunity_score"] > 80
     assert scores["priority_score"] > 50
+
+
+def test_cart_never_becomes_strategy_recommendation(client: TestClient, db_session: Session) -> None:
+    crawl_run = CrawlRun(target_domain="https://example.com", status="completed", pages_crawled=1, average_score=25)
+    db_session.add(crawl_run)
+    db_session.flush()
+    db_session.add(
+        PageAudit(
+            crawl_run_id=crawl_run.id,
+            url="https://example.com/cart",
+            status_code=200,
+            title="Cart",
+            h1="Cart",
+            meta_description="",
+            missing_fields="meta_description",
+            word_count=80,
+            internal_links=0,
+            seo_score=20,
+        )
+    )
+    db_session.commit()
+
+    response = client.post("/seo/strategy/run")
+
+    assert response.status_code == 200
+    assert response.json()["total_candidates"] == 0
+    assert db_session.query(SEOStrategyRecommendation).count() == 0

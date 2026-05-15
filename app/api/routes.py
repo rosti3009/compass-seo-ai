@@ -43,6 +43,7 @@ from app.services.seo_scheduler import (
     set_schedule_enabled,
 )
 from app.services.seo_strategy_engine import generate_strategy_recommendations, summarize_site_strategy
+from app.services.seo_url_filters import get_url_exclusion_reason, is_seo_eligible_url
 from app.services.sitemap import discover_sitemap_urls
 from app.services.topical_clusters import build_cluster_summary
 
@@ -93,6 +94,14 @@ HIGH_IMPRESSIONS_THRESHOLD = 50
 WEAK_RANKING_MIN = 4
 WEAK_RANKING_MAX = 20
 
+
+def _raise_if_url_excluded(page_url: str) -> None:
+    reason = get_url_exclusion_reason(page_url)
+    if reason:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"message": "URL is excluded from SEO content workflows", "excluded_reason": reason},
+        )
 
 def _get_schedule_config_or_404(db: Session, config_id: int) -> SEOScheduleConfig:
     config = db.get(SEOScheduleConfig, config_id)
@@ -773,7 +782,7 @@ def _build_internal_link_opportunities(
             "gsc_metric": (gsc_by_url or {}).get(page.url),
         }
         for page in pages
-        if page.status_code < 400
+        if page.status_code < 400 and is_seo_eligible_url(page.url)
     ]
     strong_pages = sorted(
         [item for item in scored_pages if item["authority_score"] >= 60],
@@ -875,6 +884,7 @@ def _page_cluster_payload(page: PageAudit, task: SEOTask | None = None) -> dict[
         "article_status": task.article_status if task else "not_generated",
         "keyword": task.keyword if task else None,
         "priority": task.priority if task else None,
+        "excluded_reason": get_url_exclusion_reason(page.url),
     }
 
 
@@ -1047,7 +1057,13 @@ def dashboard(request: Request, db: DatabaseSession) -> HTMLResponse:
 
 def _build_hebrew_insights_payload(db: Session, enrich: bool = False) -> dict[str, object]:
     """Build Hebrew-native SEO intelligence for the latest compassgrill.co.il ecommerce crawl."""
-    pages = _latest_crawl_pages(db)
+    crawled_pages = _latest_crawl_pages(db)
+    excluded_pages = [
+        {"url": page.url, "excluded_reason": get_url_exclusion_reason(page.url)}
+        for page in crawled_pages
+        if get_url_exclusion_reason(page.url)
+    ]
+    pages = [page for page in crawled_pages if is_seo_eligible_url(page.url)]
     metrics_by_url = _gsc_metrics_by_url(db, [page.url for page in pages]) if pages else {}
     insights = [analyze_page_hebrew_seo(page, metrics_by_url.get(page.url)) for page in pages]
     ai_enrichment: dict[str, object] = {"enabled": False, "error": None, "recommendations": []}
@@ -1064,6 +1080,7 @@ def _build_hebrew_insights_payload(db: Session, enrich: bool = False) -> dict[st
         "summary": summarize_hebrew_insights(insights),
         "seasonality": israeli_seasonality(),
         "insights": insights,
+        "excluded_pages": excluded_pages,
         "openai_enrichment": ai_enrichment,
     }
 
@@ -1407,7 +1424,7 @@ def seo_strategy_summary_view(request: Request, db: DatabaseSession) -> HTMLResp
 @router.get("/seo/internal-link-opportunities-view", response_class=HTMLResponse)
 def internal_link_opportunities_view(request: Request, db: DatabaseSession) -> HTMLResponse:
     """Render deterministic internal link opportunities from the latest crawl."""
-    pages = _latest_crawl_pages(db)
+    pages = [page for page in _latest_crawl_pages(db) if is_seo_eligible_url(page.url)]
     tasks_by_url = _tasks_by_page_url(db, [page.url for page in pages])
     gsc_by_url = _gsc_metrics_by_url(db, [page.url for page in pages])
     return templates.TemplateResponse(
@@ -1423,7 +1440,7 @@ def internal_link_opportunities_view(request: Request, db: DatabaseSession) -> H
 @router.get("/seo/topical-clusters-view", response_class=HTMLResponse)
 def topical_clusters_view(request: Request, db: DatabaseSession) -> HTMLResponse:
     """Render topical cluster summaries from the latest crawl."""
-    pages = _latest_crawl_pages(db)
+    pages = [page for page in _latest_crawl_pages(db) if is_seo_eligible_url(page.url)]
     tasks_by_url = _tasks_by_page_url(db, [page.url for page in pages])
     page_payloads = [_page_cluster_payload(page, tasks_by_url.get(page.url)) for page in pages]
     return templates.TemplateResponse(
@@ -1493,7 +1510,8 @@ def create_seo_tasks_from_latest_crawl(db: DatabaseSession) -> dict[str, int]:
     candidates = [
         page
         for page in pages
-        if _seo_task_candidate(page) or _keyword_opportunity_score(gsc_by_url.get(page.url)) >= 55
+        if is_seo_eligible_url(page.url)
+        and (_seo_task_candidate(page) or _keyword_opportunity_score(gsc_by_url.get(page.url)) >= 55)
     ]
     candidates = sorted(
         candidates,
@@ -1527,6 +1545,7 @@ def create_seo_fixes_for_task(task_id: int, db: DatabaseSession) -> dict[str, ob
     task = db.get(SEOTask, task_id)
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SEO task not found")
+    _raise_if_url_excluded(task.page_url)
     if not _parse_task_recommendation(task) and not _task_has_generated_article(task):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1636,6 +1655,7 @@ def create_publishing_package_for_fix(fix_id: int, response: Response, db: Datab
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SEO fix not found")
     if fix.status != "approved":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only approved SEO fixes can be packaged")
+    _raise_if_url_excluded(fix.page_url)
 
     existing_package = (
         db.query(PublishingPackage)
@@ -1719,7 +1739,7 @@ def mark_publishing_package_applied(package_id: int, db: DatabaseSession) -> dic
 @router.get("/seo/internal-link-opportunities")
 def internal_link_opportunities(db: DatabaseSession) -> dict[str, object]:
     """Return internal link opportunities from the latest crawl and saved SEO task context."""
-    pages = _latest_crawl_pages(db)
+    pages = [page for page in _latest_crawl_pages(db) if is_seo_eligible_url(page.url)]
     tasks_by_url = _tasks_by_page_url(db, [page.url for page in pages])
     strong_pages_count = sum(1 for page in pages if page.status_code < 400 and authority_score(page) >= 60)
     weak_pages_count = sum(
@@ -1760,7 +1780,7 @@ def internal_link_opportunities(db: DatabaseSession) -> dict[str, object]:
 @router.get("/seo/topical-clusters")
 def topical_clusters(db: DatabaseSession) -> dict[str, object]:
     """Return topical SEO clusters from the latest crawl and saved SEO task context."""
-    pages = _latest_crawl_pages(db)
+    pages = [page for page in _latest_crawl_pages(db) if is_seo_eligible_url(page.url)]
     tasks_by_url = _tasks_by_page_url(db, [page.url for page in pages])
     page_payloads = [_page_cluster_payload(page, tasks_by_url.get(page.url)) for page in pages]
     clusters = build_cluster_summary(page_payloads)
@@ -1782,6 +1802,7 @@ def generate_seo_task_recommendation(task_id: int, db: DatabaseSession) -> dict[
     task = db.get(SEOTask, task_id)
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SEO task not found")
+    _raise_if_url_excluded(task.page_url)
 
     payload = _task_recommendation_payload(task, db)
     try:
@@ -1803,6 +1824,7 @@ def generate_seo_task_article(task_id: int, db: DatabaseSession) -> dict[str, ob
     task = db.get(SEOTask, task_id)
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SEO task not found")
+    _raise_if_url_excluded(task.page_url)
 
     if not _parse_task_recommendation(task):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="SEO task recommendation is required")
@@ -1826,6 +1848,7 @@ def export_seo_task_article(task_id: int, db: DatabaseSession) -> dict[str, obje
     task = db.get(SEOTask, task_id)
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SEO task not found")
+    _raise_if_url_excluded(task.page_url)
     if not _task_has_generated_article(task):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Generated article is required")
 
@@ -1838,6 +1861,7 @@ def export_seo_task_article_view(task_id: int, db: DatabaseSession) -> HTMLRespo
     task = db.get(SEOTask, task_id)
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SEO task not found")
+    _raise_if_url_excluded(task.page_url)
     if not _task_has_generated_article(task):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Generated article is required")
 
@@ -1850,6 +1874,7 @@ def preview_seo_task_article(task_id: int, db: DatabaseSession) -> HTMLResponse:
     task = db.get(SEOTask, task_id)
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SEO task not found")
+    _raise_if_url_excluded(task.page_url)
     return HTMLResponse(content=_task_article_preview_html(task))
 
 

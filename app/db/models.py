@@ -5,6 +5,7 @@ from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, Stri
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+from app.services.seo_url_filters import get_url_exclusion_reason
 
 
 class CrawlRun(Base):
@@ -72,6 +73,7 @@ class PageAudit(Base):
             "missing_fields": [field for field in self.missing_fields.split(",") if field],
             "seo_score": self.seo_score,
             "crawled_at": self.crawled_at.isoformat() if self.crawled_at else None,
+            "excluded_reason": get_url_exclusion_reason(self.url),
         }
 
 
@@ -239,6 +241,7 @@ class SEOTask(Base):
             "article_status": self.article_status,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "excluded_reason": get_url_exclusion_reason(self.page_url),
         }
 
 
@@ -281,6 +284,7 @@ class SEOFix(Base):
             "notes_json": self.notes_json,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "excluded_reason": get_url_exclusion_reason(self.page_url),
         }
 
 
@@ -318,6 +322,7 @@ class PublishingPackage(Base):
             "notes": self.notes,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "excluded_reason": get_url_exclusion_reason(self.page_url),
         }
 
 

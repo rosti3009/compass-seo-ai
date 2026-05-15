@@ -157,3 +157,37 @@ def test_hebrew_insights_can_request_openai_enrichment(
     enrichment = response.json()["openai_enrichment"]
     assert enrichment["enabled"] is True
     assert enrichment["recommendations"][0]["hebrew_priority"] == "גבוה"
+
+
+def test_accessibility_statement_excluded_from_hebrew_insights(client: TestClient, db_session: Session) -> None:
+    crawl_run = CrawlRun(
+        target_domain="https://compassgrill.co.il",
+        status="completed",
+        pages_crawled=1,
+        average_score=20,
+    )
+    db_session.add(crawl_run)
+    db_session.flush()
+    db_session.add(
+        PageAudit(
+            crawl_run_id=crawl_run.id,
+            url="https://compassgrill.co.il/accessibility-statement-1",
+            status_code=200,
+            title="הצהרת נגישות",
+            h1="הצהרת נגישות",
+            meta_description="עמוד נגישות",
+            missing_fields="",
+            seo_score=30,
+        )
+    )
+    db_session.commit()
+
+    response = client.get("/seo/hebrew-insights")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["pages_analyzed"] == 0
+    assert payload["insights"] == []
+    assert payload["excluded_pages"] == [
+        {"url": "https://compassgrill.co.il/accessibility-statement-1", "excluded_reason": "system_page"}
+    ]
