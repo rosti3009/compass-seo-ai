@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.models import CrawlRun, PageAudit
+from app.db.models import CrawlRun, PageAudit, PageScoreSnapshot
 from app.services.browser_fetcher import fetch_rendered_html
 
 
@@ -56,6 +56,14 @@ class SEOCrawler:
                 else:
                     missing_fields.append(f"page_type:{result.page_type}")
 
+                previous_snapshot = (
+                    db.query(PageScoreSnapshot)
+                    .filter(PageScoreSnapshot.url == result.url)
+                    .order_by(PageScoreSnapshot.created_at.desc(), PageScoreSnapshot.id.desc())
+                    .first()
+                )
+                previous_score = previous_snapshot.seo_score if previous_snapshot else None
+                score_delta = round(result.seo_score - previous_score, 2) if previous_score is not None else 0.0
                 audit = PageAudit(
                     crawl_run_id=crawl_run.id,
                     url=result.url,
@@ -68,8 +76,20 @@ class SEOCrawler:
                     internal_links=result.internal_links,
                     missing_fields=",".join(missing_fields),
                     seo_score=result.seo_score,
+                    seo_score_delta=score_delta,
                 )
                 db.add(audit)
+                db.flush()
+                db.add(
+                    PageScoreSnapshot(
+                        page_audit_id=audit.id,
+                        crawl_run_id=crawl_run.id,
+                        url=result.url,
+                        seo_score=result.seo_score,
+                        previous_seo_score=previous_score,
+                        seo_score_delta=score_delta,
+                    )
+                )
                 audits.append(audit)
 
             crawl_run.pages_crawled = len(audits)

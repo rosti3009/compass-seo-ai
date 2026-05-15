@@ -91,7 +91,7 @@
               <tr>
                 <td><a href="{{ page.url }}" target="_blank" rel="noreferrer">{{ page.url }}</a></td>
                 <td>{{ page.status_code }}</td>
-                <td>{{ page.seo_score }}</td>
+                <td>{{ page.seo_score or 0 }}</td>
                 <td>{{ page.title or '—' }}</td>
                 <td>{{ page.missing_fields or '—' }}</td>
               </tr>
