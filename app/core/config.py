@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     google_oauth_redirect_uri: str | None = None
     gsc_site_url: str | None = None
     ga4_property_id: str | None = None
+    istore_base_url: str | None = None
+    istore_company_id: str | None = None
+    istore_x_token: str | None = None
+    istore_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
 
