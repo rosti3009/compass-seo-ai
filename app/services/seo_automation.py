@@ -19,6 +19,7 @@ from app.integrations.gsc import MissingGoogleCredentialsError as MissingGSCCred
 from app.integrations.openai_client import OpenAIClient
 from app.services.crawler import SEOCrawler
 from app.services.seo_strategy_engine import generate_strategy_recommendations, summarize_site_strategy
+from app.services.seo_url_filters import get_url_exclusion_reason, is_seo_eligible_url
 
 LOW_CTR_THRESHOLD = 0.03
 HIGH_IMPRESSIONS_THRESHOLD = 50
@@ -201,7 +202,8 @@ def _create_tasks_from_latest_crawl(db: Session, max_tasks: int) -> list[SEOTask
     candidates = [
         page
         for page in pages
-        if _seo_task_candidate(page) or _keyword_opportunity_score(gsc_by_url.get(page.url)) >= 55
+        if is_seo_eligible_url(page.url)
+        and (_seo_task_candidate(page) or _keyword_opportunity_score(gsc_by_url.get(page.url)) >= 55)
     ]
     candidates = sorted(
         candidates,
@@ -237,6 +239,7 @@ def _task_recommendation_payload(task: SEOTask, db: Session) -> dict[str, object
         "gsc_metric": _metric_payload(gsc_metric) if gsc_metric else None,
         "related_gsc_queries": _related_gsc_queries(db, task.page_url),
         "existing_recommendation": _json_object(task.recommendation_json),
+        "excluded_reason": get_url_exclusion_reason(task.page_url),
     }
 
 
@@ -262,6 +265,7 @@ def _task_article_payload(task: SEOTask, db: Session) -> dict[str, object]:
         "meta_description": task.meta_description,
         "secondary_keywords": _related_gsc_queries(db, task.page_url),
         "recommendation": _json_object(task.recommendation_json),
+        "excluded_reason": get_url_exclusion_reason(task.page_url),
     }
 
 
@@ -349,6 +353,8 @@ def _seo_fix_candidate_specs(task: SEOTask, current_page: PageAudit | None) -> l
 def _create_fixes_for_tasks(db: Session, tasks: list[SEOTask]) -> list[SEOFix]:
     new_fixes: list[SEOFix] = []
     for task in tasks:
+        if not is_seo_eligible_url(task.page_url):
+            continue
         if not _json_object(task.recommendation_json) and not _task_has_generated_article(task):
             continue
         existing_draft_types = {
@@ -422,6 +428,8 @@ def _create_publishing_packages_for_approved_fixes(db: Session) -> list[Publishi
     approved_fixes = db.query(SEOFix).filter(SEOFix.status == "approved").order_by(SEOFix.id.asc()).all()
     packages: list[PublishingPackage] = []
     for fix in approved_fixes:
+        if not is_seo_eligible_url(fix.page_url):
+            continue
         existing_package = (
             db.query(PublishingPackage)
             .filter(PublishingPackage.fix_id == fix.id, PublishingPackage.status.in_(["draft", "ready"]))
@@ -495,7 +503,11 @@ def run_seo_automation(
 
         new_tasks = _create_tasks_from_latest_crawl(db, max_tasks)
         run.seo_tasks_created = len(new_tasks)
-        all_tasks = db.query(SEOTask).order_by(SEOTask.updated_at.desc(), SEOTask.id.desc()).all()
+        all_tasks = [
+            task
+            for task in db.query(SEOTask).order_by(SEOTask.updated_at.desc(), SEOTask.id.desc()).all()
+            if is_seo_eligible_url(task.page_url)
+        ]
         priority_order = {"high": 0, "medium": 1, "low": 2}
         processed_tasks = sorted(all_tasks, key=lambda task: (priority_order.get(task.priority, 3), -task.id))[
             :max_tasks
@@ -510,6 +522,8 @@ def run_seo_automation(
                 warn("openai", exc)
             if openai_client is not None:
                 for task in high_priority_tasks:
+                    if not is_seo_eligible_url(task.page_url):
+                        continue
                     try:
                         recommendation = openai_client.generate_seo_recommendation(
                             _task_recommendation_payload(task, db)
@@ -525,6 +539,8 @@ def run_seo_automation(
 
                 if generate_articles:
                     for task in high_priority_tasks:
+                        if not is_seo_eligible_url(task.page_url):
+                            continue
                         if not _json_object(task.recommendation_json):
                             continue
                         try:

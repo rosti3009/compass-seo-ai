@@ -18,6 +18,7 @@ from app.db.models import (
 )
 from app.integrations.openai_client import OpenAIClient
 from app.services.internal_links import opportunity_score
+from app.services.seo_url_filters import get_url_exclusion_reason, is_seo_eligible_url
 from app.services.topical_clusters import build_cluster_summary
 
 LOW_CTR_THRESHOLD = 0.03
@@ -57,7 +58,8 @@ def _latest_crawl_pages(db: Session) -> list[PageAudit]:
     crawl_run = db.query(CrawlRun).order_by(CrawlRun.started_at.desc(), CrawlRun.id.desc()).first()
     if not crawl_run:
         return []
-    return db.query(PageAudit).filter(PageAudit.crawl_run_id == crawl_run.id).all()
+    pages = db.query(PageAudit).filter(PageAudit.crawl_run_id == crawl_run.id).all()
+    return [page for page in pages if is_seo_eligible_url(page.url)]
 
 
 def _best_gsc_by_url(db: Session, page_urls: list[str]) -> dict[str, GSCKeywordMetric]:
@@ -84,6 +86,7 @@ def _page_cluster_payload(page: PageAudit, task: SEOTask | None) -> dict[str, An
         "keyword": task.keyword if task else None,
         "priority": task.priority if task else None,
         "article_status": task.article_status if task else "not_generated",
+        "excluded_reason": get_url_exclusion_reason(page.url),
     }
 
 
@@ -307,15 +310,17 @@ def generate_strategy_recommendations(db: Session) -> dict[str, Any]:
     """Generate or update pending strategy recommendations while avoiding duplicate pending rows."""
     pages = _latest_crawl_pages(db)
     page_urls = [page.url for page in pages]
-    tasks = db.query(SEOTask).all()
+    tasks = [task for task in db.query(SEOTask).all() if is_seo_eligible_url(task.page_url)]
     tasks_by_url = {task.page_url: task for task in tasks}
     gsc_by_url = _best_gsc_by_url(db, list(set(page_urls + [task.page_url for task in tasks])))
     fixes_by_url: dict[str, SEOFix] = {}
     for fix in db.query(SEOFix).order_by(SEOFix.confidence_score.desc(), SEOFix.id.desc()).all():
-        fixes_by_url.setdefault(fix.page_url, fix)
+        if is_seo_eligible_url(fix.page_url):
+            fixes_by_url.setdefault(fix.page_url, fix)
     packages_by_url: dict[str, PublishingPackage] = {}
     for package in db.query(PublishingPackage).order_by(PublishingPackage.id.desc()).all():
-        packages_by_url.setdefault(package.page_url, package)
+        if is_seo_eligible_url(package.page_url):
+            packages_by_url.setdefault(package.page_url, package)
 
     page_payloads = [_page_cluster_payload(page, tasks_by_url.get(page.url)) for page in pages]
     clusters = build_cluster_summary(page_payloads)
@@ -341,6 +346,7 @@ def generate_strategy_recommendations(db: Session) -> dict[str, Any]:
         )
         payload = {
             "page": page.to_dict(),
+            "excluded_reason": get_url_exclusion_reason(page.url),
             "task": _task_payload(task),
             "gsc_query": gsc_metric.query if gsc_metric else None,
             "gsc_impressions": gsc_metric.impressions if gsc_metric else 0,
@@ -367,6 +373,7 @@ def generate_strategy_recommendations(db: Session) -> dict[str, Any]:
         recommendation_type = _recommendation_type(None, gsc_metric, task, fix, package, 45.0, 30.0)
         payload = {
             "task": _task_payload(task),
+            "excluded_reason": get_url_exclusion_reason(task.page_url),
             "keyword": task.keyword,
             "gsc_query": gsc_metric.query if gsc_metric else None,
         }

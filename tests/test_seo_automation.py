@@ -235,3 +235,46 @@ def test_automation_run_details_endpoint_works(client: TestClient, db_session: S
     assert response.status_code == 200
     assert response.json()["run"]["id"] == run.id
     assert response.json()["run"]["summary"] == {"example": True}
+
+
+class SystemPageCrawler:
+    def __init__(self, target_domain: str, max_pages: int) -> None:
+        self.target_domain = target_domain
+        self.max_pages = max_pages
+
+    def run(self, db: Session) -> tuple[CrawlRun, list[PageAudit]]:
+        crawl_run = CrawlRun(target_domain=self.target_domain, status="completed", pages_crawled=1, average_score=20)
+        db.add(crawl_run)
+        db.flush()
+        page = PageAudit(
+            crawl_run_id=crawl_run.id,
+            url="https://example.com/account",
+            status_code=200,
+            title="Account",
+            h1="Account",
+            meta_description="",
+            missing_fields="meta_description",
+            seo_score=20,
+        )
+        db.add(page)
+        db.commit()
+        db.refresh(page)
+        db.refresh(crawl_run)
+        return crawl_run, [page]
+
+
+def test_automation_skips_system_urls(client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.services.seo_automation.SEOCrawler", SystemPageCrawler)
+    monkeypatch.setattr("app.services.seo_automation.GSCClient", MissingGSCClient)
+    monkeypatch.setattr("app.services.seo_automation.OpenAIClient", MockOpenAIClient)
+    monkeypatch.setattr(
+        "app.services.seo_automation.generate_strategy_recommendations", lambda db: {"created_count": 0}
+    )
+
+    response = client.post("/seo/automation/run?sync_gsc=false")
+
+    assert response.status_code == 201
+    payload = response.json()["run"]
+    assert payload["seo_tasks_created"] == 0
+    assert payload["recommendations_generated"] == 0
+    assert db_session.query(SEOTask).count() == 0

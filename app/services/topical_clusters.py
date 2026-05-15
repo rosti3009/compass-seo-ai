@@ -5,6 +5,8 @@ from collections import defaultdict
 from typing import Any
 from urllib.parse import urlparse
 
+from app.services.seo_url_filters import is_seo_eligible_url
+
 FALLBACK_TOPIC = "General"
 LOW_VALUE_SEGMENTS = {
     "",
@@ -105,6 +107,8 @@ def group_pages_by_topic(pages: list[dict]) -> dict[str, list[dict]]:
     """Group crawled page payloads by inferred topic with deterministic ordering."""
     grouped: dict[str, list[dict]] = defaultdict(list)
     for page in pages:
+        if not is_seo_eligible_url(_text(_get(page, "url"))):
+            continue
         grouped[infer_topic(page)].append(page)
     return {
         topic: sorted(topic_pages, key=lambda item: (-_number(_get(item, "seo_score")), _text(_get(item, "url"))))
