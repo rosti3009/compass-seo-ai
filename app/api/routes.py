@@ -36,6 +36,7 @@ from app.integrations.openai_client import OpenAIClient
 from app.services.crawler import SEOCrawler
 from app.services.hebrew_seo import analyze_page_hebrew_seo, israeli_seasonality, summarize_hebrew_insights
 from app.services.internal_links import authority_score, best_anchor_text, opportunity_score
+from app.services.istore_product_seo import analyze_istore_product_seo
 from app.services.seo_automation import run_seo_automation
 from app.services.seo_scheduler import (
     create_schedule_config,
@@ -1915,6 +1916,44 @@ def istore_products() -> dict[str, object]:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except IStoreAPIError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+@router.get("/integrations/istore/products/{product_id}/seo-analysis")
+def istore_product_seo_analysis_view(product_id: str, request: Request) -> HTMLResponse:
+    """Render read-only SEO recommendations for one ISTORE product."""
+    try:
+        product = IStoreClient.from_settings().get_product(product_id)
+    except MissingIStoreSettingsError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except IStoreAPIError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    if not isinstance(product, dict):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="ISTORE product response must be an object.",
+        )
+    analysis = analyze_istore_product_seo(product)
+    return templates.TemplateResponse(
+        request,
+        "istore_product_seo_analysis.html",
+        {"analysis": analysis.as_dict(), "product": product},
+    )
+
+
+@router.get("/integrations/istore/products/{product_id}/seo-analysis.json")
+def istore_product_seo_analysis(product_id: str) -> dict[str, object]:
+    """Return read-only SEO recommendations for one ISTORE product."""
+    try:
+        product = IStoreClient.from_settings().get_product(product_id)
+    except MissingIStoreSettingsError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except IStoreAPIError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    if not isinstance(product, dict):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="ISTORE product response must be an object.",
+        )
+    return {"product": product, "analysis": analyze_istore_product_seo(product).as_dict()}
 
 
 @router.get("/integrations/istore/products/{product_id}")

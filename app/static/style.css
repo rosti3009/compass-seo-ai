@@ -197,3 +197,43 @@ a {
   margin-inline-start: 8px;
   padding: 4px 10px;
 }
+
+
+.istore-scorecards .card strong {
+  overflow-wrap: anywhere;
+}
+
+.panel-heading-row {
+  align-items: flex-start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.istore-product-panel h2 {
+  margin-top: 0;
+}
+
+.istore-seo-grid,
+.istore-recommendations {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  margin-top: 20px;
+}
+
+.istore-seo-box {
+  background: #f8fbff;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 16px;
+}
+
+.istore-seo-box p,
+.description-preview {
+  line-height: 1.65;
+}
+
+.istore-recommendations h3 {
+  margin-top: 0;
+}
