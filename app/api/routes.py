@@ -18,6 +18,7 @@ from app.db.models import (
     CrawlRun,
     GoogleOAuthToken,
     GSCKeywordMetric,
+    IStoreSEOApproval,
     PageAudit,
     PublishingPackage,
     SEOAutomationRun,
@@ -36,6 +37,18 @@ from app.integrations.openai_client import OpenAIClient
 from app.services.crawler import SEOCrawler
 from app.services.hebrew_seo import analyze_page_hebrew_seo, israeli_seasonality, summarize_hebrew_insights
 from app.services.internal_links import authority_score, best_anchor_text, opportunity_score
+from app.services.istore_approval import (
+    approve_fix as approve_istore_approval_fix,
+)
+from app.services.istore_approval import (
+    publish_approved_fix,
+    rollback_preview,
+    scan_istore_seo_opportunities,
+    validate_istore_payload,
+)
+from app.services.istore_approval import (
+    reject_fix as reject_istore_approval_fix,
+)
 from app.services.istore_product_seo import analyze_istore_product_seo
 from app.services.seo_automation import run_seo_automation
 from app.services.seo_scheduler import (
@@ -52,6 +65,20 @@ from app.services.topical_clusters import build_cluster_summary
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 DatabaseSession = Annotated[Session, Depends(get_db)]
+
+class IStoreApprovalAction(BaseModel):
+    approved_by: str | None = None
+    metadata: dict[str, object] | None = None
+
+
+class IStorePublishRequest(BaseModel):
+    approval: bool = False
+    dry_run: bool = False
+
+
+class IStorePayloadValidationRequest(BaseModel):
+    payload: dict[str, object]
+
 
 class SEOScheduleConfigCreate(BaseModel):
     name: str = "Daily SEO Automation"
@@ -120,6 +147,13 @@ def _scheduled_automation_runs(db: Session, limit: int = 25) -> list[SEOAutomati
         .limit(limit)
         .all()
     )
+
+
+def _get_istore_approval_or_404(db: Session, fix_id: int) -> IStoreSEOApproval:
+    approval = db.get(IStoreSEOApproval, fix_id)
+    if not approval:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ISTORE SEO approval fix not found")
+    return approval
 
 
 def _require_google_oauth_settings() -> tuple[str, str, str]:
@@ -1736,6 +1770,98 @@ def mark_publishing_package_applied(package_id: int, db: DatabaseSession) -> dic
     db.commit()
     db.refresh(package)
     return {"success": True, "package": package.to_dict()}
+
+
+@router.post("/integrations/istore/seo-approvals/scan", status_code=status.HTTP_201_CREATED)
+def scan_istore_seo_approvals(db: DatabaseSession, limit: int = 50) -> dict[str, object]:
+    """Scan ISTORE products and latest crawled pages, storing proposed fixes as pending drafts only."""
+    try:
+        return scan_istore_seo_opportunities(db, limit=limit)
+    except (MissingIStoreSettingsError, IStoreAPIError) as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+
+@router.get("/integrations/istore/seo-approvals")
+def list_istore_seo_approvals(db: DatabaseSession, status_filter: str | None = None) -> dict[str, object]:
+    """Return semi-automatic ISTORE SEO fixes awaiting review or publication."""
+    query = db.query(IStoreSEOApproval)
+    if status_filter:
+        query = query.filter(IStoreSEOApproval.status == status_filter)
+    fixes = query.order_by(IStoreSEOApproval.created_at.desc(), IStoreSEOApproval.id.desc()).all()
+    return {"fixes": [fix.to_dict() for fix in fixes]}
+
+
+@router.get("/integrations/istore/seo-approvals-view", response_class=HTMLResponse)
+def istore_seo_approvals_view(request: Request, db: DatabaseSession) -> HTMLResponse:
+    """Render the human approval dashboard for ISTORE SEO changes."""
+    fixes = db.query(IStoreSEOApproval).order_by(IStoreSEOApproval.created_at.desc(), IStoreSEOApproval.id.desc()).all()
+    return templates.TemplateResponse(request, "istore_seo_approvals.html", {"fixes": fixes})
+
+
+@router.get("/integrations/istore/seo-approvals/{fix_id}/preview")
+def preview_istore_seo_approval(fix_id: int, db: DatabaseSession) -> dict[str, object]:
+    """Preview one proposed ISTORE SEO change without publishing."""
+    fix = _get_istore_approval_or_404(db, fix_id)
+    return {"fix": fix.to_dict(), "rollback_preview": rollback_preview(fix)}
+
+
+@router.post("/integrations/istore/seo-approvals/{fix_id}/approve")
+def approve_istore_seo_approval(
+    fix_id: int, db: DatabaseSession, payload: Annotated[IStoreApprovalAction | None, Body()] = None
+) -> dict[str, object]:
+    """Approve a pending ISTORE SEO fix without publishing it."""
+    action = payload or IStoreApprovalAction()
+    fix = approve_istore_approval_fix(
+        db, _get_istore_approval_or_404(db, fix_id), approved_by=action.approved_by, metadata=action.metadata
+    )
+    return {"success": True, "fix": fix.to_dict()}
+
+
+@router.post("/integrations/istore/seo-approvals/{fix_id}/reject")
+def reject_istore_seo_approval(
+    fix_id: int, db: DatabaseSession, payload: Annotated[IStoreApprovalAction | None, Body()] = None
+) -> dict[str, object]:
+    """Reject a pending ISTORE SEO fix without publishing it."""
+    action = payload or IStoreApprovalAction()
+    fix = reject_istore_approval_fix(
+        db, _get_istore_approval_or_404(db, fix_id), approved_by=action.approved_by, metadata=action.metadata
+    )
+    return {"success": True, "fix": fix.to_dict()}
+
+
+@router.post("/integrations/istore/seo-approvals/{fix_id}/publish")
+def publish_istore_seo_approval(
+    fix_id: int, db: DatabaseSession, payload: Annotated[IStorePublishRequest | None, Body()] = None
+) -> dict[str, object]:
+    """Publish exactly one approved ISTORE SEO fix after explicit approval and safety gates."""
+    request_payload = payload or IStorePublishRequest()
+    try:
+        return publish_approved_fix(
+            db,
+            _get_istore_approval_or_404(db, fix_id),
+            approval_confirmed=request_payload.approval,
+            dry_run=request_payload.dry_run,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/integrations/istore/seo-approvals/{fix_id}/rollback-preview")
+def istore_seo_rollback_preview(fix_id: int, db: DatabaseSession) -> dict[str, object]:
+    """Return a rollback payload preview; rollback is never executed automatically."""
+    return rollback_preview(_get_istore_approval_or_404(db, fix_id))
+
+
+@router.post("/integrations/istore/seo-approvals/validate-payload")
+def validate_istore_seo_payload(payload: IStorePayloadValidationRequest) -> dict[str, object]:
+    """Validate that an ISTORE update payload contains only allowed SEO fields."""
+    try:
+        validate_istore_payload(payload.payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return {"valid": True}
 
 
 @router.get("/seo/internal-link-opportunities")

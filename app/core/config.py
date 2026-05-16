@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     istore_company_id: str | None = None
     istore_x_token: str | None = None
     istore_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+    istore_publish_enabled: bool = False
+    istore_safe_mode: bool = True
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
 

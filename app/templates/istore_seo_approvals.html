@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ISTORE SEO approval dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <main class="container">
+      <section class="hero">
+        <p class="eyebrow">Semi-automatic SEO workflow</p>
+        <h1>ISTORE SEO approval dashboard</h1>
+        <p>Review product/page, current value, proposed value, SEO reason, and risk before explicit one-at-a-time publishing.</p>
+      </section>
+      <section class="panel">
+        <table>
+          <thead>
+            <tr>
+              <th>Product/Page</th>
+              <th>Field</th>
+              <th>Current value</th>
+              <th>Proposed value</th>
+              <th>SEO reason</th>
+              <th>Risk</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for fix in fixes %}
+            <tr>
+              <td>{{ fix.target_url or fix.target_id }}</td>
+              <td><code>{{ fix.field_path }}</code></td>
+              <td>{{ fix.current_value }}</td>
+              <td>{{ fix.proposed_value }}</td>
+              <td>{{ fix.seo_reason }}</td>
+              <td>{{ fix.risk_level }}</td>
+              <td>{{ fix.status }}</td>
+              <td>
+                <a href="/integrations/istore/seo-approvals/{{ fix.id }}/preview">Preview</a>
+                <form method="post" action="/integrations/istore/seo-approvals/{{ fix.id }}/approve"><button type="submit">Approve</button></form>
+                <form method="post" action="/integrations/istore/seo-approvals/{{ fix.id }}/reject"><button type="submit">Reject</button></form>
+              </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="8">No SEO approval drafts yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </body>
+</html>

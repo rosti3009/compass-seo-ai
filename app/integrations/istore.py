@@ -75,8 +75,8 @@ class IStoreClient:
             "company_id": self.company_id,
             "x_token": REDACTED_TOKEN,
             "timeout_seconds": self.timeout_seconds,
-            "mode": "read_only",
-            "allowed_methods": ["GET"],
+            "mode": "safe_write_gated" if settings.istore_publish_enabled else "read_only",
+            "allowed_methods": ["GET", "PUT"] if settings.istore_publish_enabled else ["GET"],
         }
 
     def list_products(self) -> Any:
@@ -86,6 +86,10 @@ class IStoreClient:
     def get_product(self, product_id: str) -> Any:
         """Fetch a single product from ISTORE without mutating remote state."""
         return self._get(f"products/{quote(product_id, safe='')}")
+
+ def update_product(self, product_id: str, payload: dict[str, Any]) -> Any:
+        """PUT a tightly-scoped, pre-approved SEO payload to one ISTORE product."""
+        return self._put(f"products/{quote(product_id, safe='')}", payload)
 
     def _get(self, path: str) -> Any:
         url = urljoin(self.base_url, path.lstrip("/"))
@@ -104,3 +108,24 @@ class IStoreClient:
             return response.json()
         except ValueError as exc:
             raise IStoreAPIError("ISTORE API returned a non-JSON response.") from exc
+
+ def _put(self, path: str, payload: dict[str, Any]) -> Any:
+        url = urljoin(self.base_url, path.lstrip("/"))
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "X-Token": self.x_token,
+        }
+        params = {"company_id": self.company_id}
+        try:
+            response = self.session.put(
+                url, headers=headers, params=params, json=payload, timeout=self.timeout_seconds
+            )
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            raise IStoreAPIError(f"ISTORE API request failed: {_redact_token(exc, self.x_token)}") from exc
+
+        try:
+            return response.json()
+        except ValueError:
+            return {"status_code": response.status_code, "text": _redact_token(response.text, self.x_token)}

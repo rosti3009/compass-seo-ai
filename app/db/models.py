@@ -8,6 +8,16 @@ from app.db.database import Base
 from app.services.seo_url_filters import get_url_exclusion_reason
 
 
+def _json_load(value: str | None) -> object:
+    """Safely parse a JSON model field for API responses."""
+    if not value:
+        return {}
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+
+
 class CrawlRun(Base):
     """A single crawler execution."""
 
@@ -475,6 +485,58 @@ class SEOStrategyRecommendation(Base):
             "recommended_action": self.recommended_action or "",
             "reasoning": self.reasoning or "",
             "status": self.status or "pending",
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+class IStoreSEOApproval(Base):
+    """Human-approved ISTORE SEO change draft with publish/rollback audit data."""
+
+    __tablename__ = "istore_seo_approvals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    target_type: Mapped[str] = mapped_column(String(32), default="product", nullable=False, index=True)
+    target_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    target_url: Mapped[str | None] = mapped_column(String(1024), nullable=True, index=True)
+    field_path: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    current_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    proposed_value: Mapped[str] = mapped_column(Text, default="")
+    seo_reason: Mapped[str] = mapped_column(Text, default="")
+    risk_level: Mapped[str] = mapped_column(String(32), default="low", nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="PENDING_APPROVAL", nullable=False, index=True)
+    before_snapshot_json: Mapped[str] = mapped_column(Text, default="{}")
+    proposed_payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    rollback_payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    publish_response_json: Mapped[str] = mapped_column(Text, default="{}")
+    publish_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    approved_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    approval_action: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    approval_metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+    )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "target_type": self.target_type,
+            "target_id": self.target_id,
+            "target_url": self.target_url,
+            "field_path": self.field_path,
+            "current_value": self.current_value,
+            "proposed_value": self.proposed_value,
+            "seo_reason": self.seo_reason,
+            "risk_level": self.risk_level,
+            "status": self.status,
+            "before_snapshot": _json_load(self.before_snapshot_json),
+            "proposed_payload": _json_load(self.proposed_payload_json),
+            "rollback_payload": _json_load(self.rollback_payload_json),
+            "publish_response": _json_load(self.publish_response_json),
+            "publish_timestamp": self.publish_timestamp.isoformat() if self.publish_timestamp else None,
+            "approved_by": self.approved_by,
+            "approval_action": self.approval_action,
+            "approval_metadata": _json_load(self.approval_metadata_json),
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
