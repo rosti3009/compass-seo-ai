@@ -274,13 +274,27 @@ def _image_count(product: dict[str, Any]) -> int:
 def _count_images(value: Any) -> int:
     if isinstance(value, str):
         return 1 if value.strip() else 0
+
     if isinstance(value, dict):
-          image_keys = ("url", "src", "image", "image_url", "main_image", "thumbnail", "path")
-    if any(_text_value(value.get(key)) for key in image_keys):
+        if any(
+            _text_value(value.get(key))
+            for key in (
+                "url",
+                "src",
+                "image",
+                "image_url",
+                "main_image",
+                "thumbnail",
+                "path",
+            )
+        ):
             return 1
+
         return sum(_count_images(item) for item in value.values())
+
     if isinstance(value, list):
         return sum(_count_images(item) for item in value)
+
     return 0
 
 
