@@ -109,7 +109,7 @@ class IStoreClient:
         except ValueError as exc:
             raise IStoreAPIError("ISTORE API returned a non-JSON response.") from exc
 
-     def _put(self, path: str, payload: dict[str, Any]) -> Any:
+    def _put(self, path: str, payload: dict[str, Any]) -> Any:
         url = urljoin(self.base_url, path.lstrip("/"))
         headers = {
             "Accept": "application/json",
