@@ -87,7 +87,7 @@ class IStoreClient:
         """Fetch a single product from ISTORE without mutating remote state."""
         return self._get(f"products/{quote(product_id, safe='')}")
 
- def update_product(self, product_id: str, payload: dict[str, Any]) -> Any:
+    def update_product(self, product_id: str, payload: dict[str, Any]) -> Any:
         """PUT a tightly-scoped, pre-approved SEO payload to one ISTORE product."""
         return self._put(f"products/{quote(product_id, safe='')}", payload)
 
