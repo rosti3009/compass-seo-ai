@@ -41,8 +41,10 @@ from app.services.istore_approval import (
     approve_fix as approve_istore_approval_fix,
 )
 from app.services.istore_approval import (
+    preview_generated_content,
     publish_approved_fix,
     rollback_preview,
+    rollback_published_fix,
     scan_istore_seo_opportunities,
     validate_istore_payload,
 )
@@ -1802,7 +1804,11 @@ def istore_seo_approvals_view(request: Request, db: DatabaseSession) -> HTMLResp
 def preview_istore_seo_approval(fix_id: int, db: DatabaseSession) -> dict[str, object]:
     """Preview one proposed ISTORE SEO change without publishing."""
     fix = _get_istore_approval_or_404(db, fix_id)
-    return {"fix": fix.to_dict(), "rollback_preview": rollback_preview(fix)}
+    return {
+        "fix": fix.to_dict(),
+        "preview": preview_generated_content(fix, db),
+        "rollback_preview": rollback_preview(fix),
+    }
 
 
 @router.post("/integrations/istore/seo-approvals/{fix_id}/approve")
@@ -1837,6 +1843,25 @@ def publish_istore_seo_approval(
     request_payload = payload or IStorePublishRequest()
     try:
         return publish_approved_fix(
+            db,
+            _get_istore_approval_or_404(db, fix_id),
+            approval_confirmed=request_payload.approval,
+            dry_run=request_payload.dry_run,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/integrations/istore/seo-approvals/{fix_id}/rollback")
+def rollback_istore_seo_approval(
+    fix_id: int, db: DatabaseSession, payload: Annotated[IStorePublishRequest | None, Body()] = None
+) -> dict[str, object]:
+    """Rollback exactly one published ISTORE SEO fix after explicit approval and safety gates."""
+    request_payload = payload or IStorePublishRequest()
+    try:
+        return rollback_published_fix(
             db,
             _get_istore_approval_or_404(db, fix_id),
             approval_confirmed=request_payload.approval,

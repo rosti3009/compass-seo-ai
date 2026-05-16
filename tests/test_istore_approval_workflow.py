@@ -187,3 +187,83 @@ def test_token_is_never_exposed_in_publish_response(db_session: Session, monkeyp
 
     assert token_value not in json.dumps(result)
     assert "[redacted]" in json.dumps(result)
+
+def test_generated_product_description_contains_hebrew_faq_and_schema_preview(db_session: Session) -> None:
+    result = scan_istore_seo_opportunities(db_session, client=MockIStoreClient())
+    description_fix = next(
+        fix for fix in db_session.query(IStoreSEOApproval).all() if fix.field_path.endswith(".description")
+    )
+
+    assert result["drafts_created"] >= 4
+    assert "שאלות נפוצות" in description_fix.proposed_value
+    assert "מחיר" in description_fix.proposed_value
+    assert "מלאי" in description_fix.proposed_value
+    assert "price" not in json.dumps(json.loads(description_fix.proposed_payload_json))
+    assert json.loads(description_fix.publish_log_json)[0]["message"].startswith("Draft created")
+
+
+def test_page_content_draft_includes_hebrew_article_faq_links_and_schema(db_session: Session) -> None:
+    from app.db.models import CrawlRun, PageAudit
+
+    crawl = CrawlRun(target_domain="https://example.test", status="completed")
+    db_session.add(crawl)
+    db_session.commit()
+    db_session.add_all(
+        [
+            PageAudit(
+                crawl_run_id=crawl.id,
+                url="https://example.test/category/grills",
+                status_code=200,
+                title="גרילים לגינה",
+                h1="גרילים לגינה",
+                meta_description="קטגוריית גרילים",
+                word_count=120,
+                internal_links=0,
+                seo_score=55,
+            ),
+            PageAudit(
+                crawl_run_id=crawl.id,
+                url="https://example.test/guides/bbq",
+                status_code=200,
+                title="מדריך ברביקיו",
+                h1="מדריך ברביקיו",
+                word_count=800,
+                internal_links=6,
+                seo_score=88,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    scan_istore_seo_opportunities(db_session, client=MockIStoreClient())
+    draft = db_session.query(IStoreSEOApproval).filter(IStoreSEOApproval.field_path == "content_draft").first()
+
+    assert draft is not None
+    payload = json.loads(draft.proposed_value)
+    assert "מדריך קנייה" in payload["hebrew_article"]
+    assert payload["faq"][0]["question"].startswith("למי מתאים")
+    assert payload["internal_links"][0]["url"] == "https://example.test/guides/bbq"
+    assert {schema["@type"] for schema in payload["schema_suggestions"]} >= {"FAQPage", "Article"}
+    assert json.loads(draft.proposed_payload_json) == {}
+
+
+def test_rollback_published_fix_is_gated_and_seo_only(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.services.istore_approval import rollback_published_fix
+
+    fix = _approved_fix(db_session)
+    fix.status = "PUBLISHED"
+    db_session.add(fix)
+    db_session.commit()
+    db_session.refresh(fix)
+    client = MockIStoreClient(verified_value="Bad")
+    monkeypatch.setattr("app.services.istore_approval.settings.istore_publish_enabled", True)
+    monkeypatch.setattr("app.services.istore_approval.settings.istore_safe_mode", False)
+
+    with pytest.raises(ValueError, match="approval=true"):
+        rollback_published_fix(db_session, fix, approval_confirmed=False, client=client)
+
+    result = rollback_published_fix(db_session, fix, approval_confirmed=True, client=client)
+
+    assert result["verified"] is True
+    assert result["fix"]["status"] == "ROLLED_BACK"
+    assert client.put_payloads == [{"meta_title": "Bad"}]

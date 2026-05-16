@@ -508,6 +508,7 @@ class IStoreSEOApproval(Base):
     proposed_payload_json: Mapped[str] = mapped_column(Text, default="{}")
     rollback_payload_json: Mapped[str] = mapped_column(Text, default="{}")
     publish_response_json: Mapped[str] = mapped_column(Text, default="{}")
+    publish_log_json: Mapped[str] = mapped_column(Text, default="[]")
     publish_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     approved_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     approval_action: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -533,6 +534,7 @@ class IStoreSEOApproval(Base):
             "proposed_payload": _json_load(self.proposed_payload_json),
             "rollback_payload": _json_load(self.rollback_payload_json),
             "publish_response": _json_load(self.publish_response_json),
+            "publish_log": _json_load(self.publish_log_json),
             "publish_timestamp": self.publish_timestamp.isoformat() if self.publish_timestamp else None,
             "approved_by": self.approved_by,
             "approval_action": self.approval_action,

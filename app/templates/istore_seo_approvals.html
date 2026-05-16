@@ -11,7 +11,7 @@
       <section class="hero">
         <p class="eyebrow">Semi-automatic SEO workflow</p>
         <h1>ISTORE SEO approval dashboard</h1>
-        <p>Review product/page, current value, proposed value, SEO reason, and risk before explicit one-at-a-time publishing.</p>
+        <p>Review Hebrew article previews, SEO-only field changes, schema/FAQ suggestions, rollback previews, and human-readable publish logs before explicit one-at-a-time publishing.</p>
       </section>
       <section class="panel">
         <table>
@@ -24,6 +24,7 @@
               <th>SEO reason</th>
               <th>Risk</th>
               <th>Status</th>
+              <th>Publish log</th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -38,13 +39,21 @@
               <td>{{ fix.risk_level }}</td>
               <td>{{ fix.status }}</td>
               <td>
+                {% for entry in fix.to_dict().publish_log[-3:] %}
+                <div><strong>{{ entry.timestamp }}</strong>: {{ entry.message }}</div>
+                {% else %}
+                <span>No publish activity yet.</span>
+                {% endfor %}
+              </td>
+              <td>
                 <a href="/integrations/istore/seo-approvals/{{ fix.id }}/preview">Preview</a>
                 <form method="post" action="/integrations/istore/seo-approvals/{{ fix.id }}/approve"><button type="submit">Approve</button></form>
                 <form method="post" action="/integrations/istore/seo-approvals/{{ fix.id }}/reject"><button type="submit">Reject</button></form>
+                <a href="/integrations/istore/seo-approvals/{{ fix.id }}/rollback-preview">Rollback preview</a>
               </td>
             </tr>
             {% else %}
-            <tr><td colspan="8">No SEO approval drafts yet.</td></tr>
+            <tr><td colspan="9">No SEO approval drafts yet.</td></tr>
             {% endfor %}
           </tbody>
         </table>
