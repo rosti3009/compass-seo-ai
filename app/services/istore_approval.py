@@ -172,13 +172,13 @@ def publish_approved_fix(
         approval.publish_timestamp = datetime.now(UTC)
         fetched = client.get_product(approval.target_id)
     except IStoreAPIError as exc:
-        approval.status = "FAILED_REVIEW_REQUIRED"
-        approval.publish_response_json = json.dumps({"error": _redact_token(str(exc))}, ensure_ascii=False)
-        _append_publish_log(approval, "ISTORE publish failed and requires human review", metadata={"error": str(exc)})
-        db.add(approval)
-        db.commit()
-        db.refresh(approval)
-        return {"success": False, "verified": False, "fix": approval.to_dict()}
+           approval.status = "FAILED_REVIEW_REQUIRED"
+           approval.publish_response_json = json.dumps({"error": _redact_token(str(exc))}, ensure_ascii=False)
+           _append_publish_log(approval, "ISTORE publish failed and requires human review", metadata={"error": str(exc)})
+           db.add(approval)
+           db.commit()
+           db.refresh(approval)
+           return {"success": False, "verified": False, "fix": approval.to_dict()}
 
     if _field_value(fetched, approval.field_path) == approval.proposed_value:
         approval.status = "PUBLISHED"
@@ -230,13 +230,13 @@ def rollback_published_fix(
         approval.publish_response_json = json.dumps(_redacted_json(response), ensure_ascii=False)
         fetched = client.get_product(approval.target_id)
     except IStoreAPIError as exc:
-        approval.status = "ROLLBACK_FAILED_REVIEW_REQUIRED"
-        approval.publish_response_json = json.dumps({"error": _redact_token(str(exc))}, ensure_ascii=False)
-        _append_publish_log(approval, "ISTORE rollback failed and requires human review", metadata={"error": str(exc)})
-        db.add(approval)
-        db.commit()
-        db.refresh(approval)
-        return {"success": False, "verified": False, "fix": approval.to_dict()}
+           approval.status = "ROLLBACK_FAILED_REVIEW_REQUIRED"
+           approval.publish_response_json = json.dumps({"error": _redact_token(str(exc))}, ensure_ascii=False)
+           _append_publish_log(approval, "ISTORE rollback failed and requires human review", metadata={"error": str(exc)})
+           db.add(approval)
+           db.commit()
+           db.refresh(approval)
+           return {"success": False, "verified": False, "fix": approval.to_dict()}
 
     if _field_value(fetched, approval.field_path) == (approval.current_value or ""):
         approval.status = "ROLLED_BACK"
