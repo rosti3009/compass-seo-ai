@@ -175,7 +175,7 @@ def test_istore_product_seo_analysis_endpoint_is_read_only(client: TestClient, m
     assert body["product"]["id"] == "sku-1"
     assert body["analysis"]["product_id"] == "sku-1"
     assert body["analysis"]["suggested_h1"] == "גריל גז מקצועי"
-    assert "Missing SEO title" in body["analysis"]["issues"]
+    assert "חסרה כותרת SEO" in body["analysis"]["issues"]
     assert client.put("/integrations/istore/products/sku-1/seo-analysis.json").status_code == 405
 
 
@@ -185,7 +185,7 @@ def test_istore_product_seo_analysis_view_renders_template(client: TestClient, m
             return {
                 "id": product_id,
                 "name": "מעשנת פחם",
-                "meta_title": "מעשנת פחם מקצועית לגינה | Compass",
+                "meta_title": "מעשנת פחם מקצועית לגינה | קומפס",
                 "meta_description": (
                     "מעשנת פחם איכותית עם שטח צלייה גדול, שליטה בחום "
                     "ואביזרים משלימים לחוויית ברביקיו ביתית."

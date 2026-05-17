@@ -41,6 +41,8 @@ from app.services.istore_approval import (
     approve_fix as approve_istore_approval_fix,
 )
 from app.services.istore_approval import (
+    export_content_draft_for_manual_publish,
+    mark_english_fallback_drafts_stale,
     preview_generated_content,
     publish_approved_fix,
     rollback_preview,
@@ -1783,6 +1785,12 @@ def scan_istore_seo_approvals(db: DatabaseSession, limit: int = 50) -> dict[str,
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
 
+@router.post("/integrations/istore/seo-approvals/cleanup-english-fallbacks")
+def cleanup_istore_english_fallback_drafts(db: DatabaseSession) -> dict[str, object]:
+    """Mark pending English fallback drafts stale without deleting or publishing records."""
+    return mark_english_fallback_drafts_stale(db)
+
+
 @router.get("/integrations/istore/seo-approvals")
 def list_istore_seo_approvals(db: DatabaseSession, status_filter: str | None = None) -> dict[str, object]:
     """Return semi-automatic ISTORE SEO fixes awaiting review or publication."""
@@ -1833,6 +1841,15 @@ def reject_istore_seo_approval(
         db, _get_istore_approval_or_404(db, fix_id), approved_by=action.approved_by, metadata=action.metadata
     )
     return {"success": True, "fix": fix.to_dict()}
+
+
+@router.post("/integrations/istore/seo-approvals/{fix_id}/export")
+def export_istore_content_draft(fix_id: int, db: DatabaseSession) -> dict[str, object]:
+    """Export one approved article/content draft for manual publishing; no ISTORE publish is sent."""
+    try:
+        return export_content_draft_for_manual_publish(db, _get_istore_approval_or_404(db, fix_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.post("/integrations/istore/seo-approvals/{fix_id}/publish")

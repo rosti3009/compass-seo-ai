@@ -8,8 +8,13 @@ from sqlalchemy.pool import StaticPool
 
 from app.db.database import Base
 from app.db.models import IStoreSEOApproval
-from app.services.istore_approval import publish_approved_fix, scan_istore_seo_opportunities, validate_istore_payload
-
+from app.services.istore_approval import (
+    export_content_draft_for_manual_publish,
+    mark_english_fallback_drafts_stale,
+    publish_approved_fix,
+    scan_istore_seo_opportunities,
+    validate_istore_payload,
+)
 
 @pytest.fixture
 def db_session() -> Generator[Session, None, None]:
@@ -199,7 +204,7 @@ def test_generated_product_description_contains_hebrew_faq_and_schema_preview(db
     assert "מחיר" in description_fix.proposed_value
     assert "מלאי" in description_fix.proposed_value
     assert "price" not in json.dumps(json.loads(description_fix.proposed_payload_json))
-    assert json.loads(description_fix.publish_log_json)[0]["message"].startswith("Draft created")
+    assert json.loads(description_fix.publish_log_json)[0]["message"].startswith("טיוטה נוצרה")
 
 
 def test_page_content_draft_includes_hebrew_article_faq_links_and_schema(db_session: Session) -> None:
@@ -266,4 +271,129 @@ def test_rollback_published_fix_is_gated_and_seo_only(db_session: Session, monke
 
     assert result["verified"] is True
     assert result["fix"]["status"] == "ROLLED_BACK"
-    assert client.put_payloads == [{"meta_title": "Bad"}]
+     assert client.put_payloads == [{"meta_title": "Bad"}]
+
+def test_generated_product_drafts_have_no_english_fallback_text(db_session: Session) -> None:
+    scan_istore_seo_opportunities(db_session, client=MockIStoreClient())
+    forbidden = ("is available from Compass", "Explore", "Discover", "available from", "Portable Grill")
+
+    for fix in db_session.query(IStoreSEOApproval).all():
+        generated = "\n".join([fix.proposed_value, fix.proposed_payload_json, fix.seo_reason])
+        assert all(phrase not in generated for phrase in forbidden)
+
+
+def test_product_description_draft_is_hebrew_only_when_source_name_is_english(db_session: Session) -> None:
+    scan_istore_seo_opportunities(db_session, client=MockIStoreClient())
+    description_fix = next(
+        fix for fix in db_session.query(IStoreSEOApproval).all() if fix.field_path.endswith(".description")
+    )
+
+    assert "המוצר" in description_fix.proposed_value
+    assert "Portable" not in description_fix.proposed_value
+    assert "Grill" not in description_fix.proposed_value
+    assert "שאלות נפוצות" in description_fix.proposed_value
+
+
+def test_cleanup_marks_pending_english_fallback_drafts_stale_without_publishing(db_session: Session) -> None:
+    bad = IStoreSEOApproval(
+        target_type="product",
+        target_id="bad-1",
+        field_path="meta_description",
+        current_value="",
+        proposed_value="Portable Grill is available from Compass. Explore more options.",
+        seo_reason="old fallback",
+        status="PENDING_APPROVAL",
+        proposed_payload_json=json.dumps({"meta_description": "Discover what is available from Compass"}),
+        rollback_payload_json=json.dumps({"meta_description": ""}),
+    )
+    published = IStoreSEOApproval(
+        target_type="product",
+        target_id="published-1",
+        field_path="meta_title",
+        current_value="",
+        proposed_value="Discover old text",
+        seo_reason="old fallback",
+        status="PUBLISHED",
+        proposed_payload_json=json.dumps({"meta_title": "Discover old text"}),
+        rollback_payload_json=json.dumps({"meta_title": ""}),
+    )
+    db_session.add_all([bad, published])
+    db_session.commit()
+
+    result = mark_english_fallback_drafts_stale(db_session)
+
+    db_session.refresh(bad)
+    db_session.refresh(published)
+    assert result["stale_marked"] == 1
+    assert result["publishing_attempted"] is False
+    assert bad.status == "STALE_ENGLISH_FALLBACK"
+    assert published.status == "PUBLISHED"
+
+
+def test_article_preview_and_manual_export_workflow(db_session: Session) -> None:
+    from app.db.models import CrawlRun, PageAudit
+
+    crawl = CrawlRun(target_domain="https://example.test", status="completed")
+    db_session.add(crawl)
+    db_session.commit()
+    db_session.add(
+        PageAudit(
+            crawl_run_id=crawl.id,
+            url="https://example.test/category/grills",
+            status_code=200,
+            title="גרילים לגינה",
+            h1="גרילים לגינה",
+            meta_description="קטגוריית גרילים",
+            word_count=100,
+            internal_links=0,
+            seo_score=40,
+        )
+    )
+    db_session.commit()
+    scan_istore_seo_opportunities(db_session, client=MockIStoreClient())
+    draft = db_session.query(IStoreSEOApproval).filter(IStoreSEOApproval.field_path == "content_draft").first()
+    assert draft is not None
+    draft.status = "APPROVED"
+    db_session.add(draft)
+    db_session.commit()
+    db_session.refresh(draft)
+
+    result = export_content_draft_for_manual_publish(db_session, draft)
+
+    assert result["status"] == "READY_FOR_MANUAL_PUBLISH"
+    assert result["api_publish_sent"] is False
+    assert "<main" in result["preview_html"]
+    assert result["copy_payload"]["suggested_title"].startswith("גרילים לגינה")
+    assert {schema["@type"] for schema in result["copy_payload"]["schema_suggestions"]} >= {"Article", "FAQPage"}
+
+
+def test_content_publish_blocked_by_safe_mode(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    fix = IStoreSEOApproval(
+        target_type="page",
+        target_id="https://example.test/category/grills",
+        target_url="https://example.test/category/grills",
+        field_path="content_draft",
+        current_value="",
+        proposed_value=json.dumps({"hebrew_article": "<article>תוכן בעברית</article>"}, ensure_ascii=False),
+        seo_reason="טיוטת תוכן",
+        status="APPROVED",
+        proposed_payload_json=json.dumps({}),
+        rollback_payload_json=json.dumps({}),
+    )
+    db_session.add(fix)
+    db_session.commit()
+    db_session.refresh(fix)
+    monkeypatch.setattr("app.services.istore_approval.settings.istore_publish_enabled", True)
+    monkeypatch.setattr("app.services.istore_approval.settings.istore_safe_mode", True)
+
+    with pytest.raises(PermissionError, match="SAFE_MODE"):
+        publish_approved_fix(db_session, fix, approval_confirmed=True)
+
+
+def test_product_payload_does_not_include_commerce_fields_after_generation(db_session: Session) -> None:
+    scan_istore_seo_opportunities(db_session, client=MockIStoreClient())
+    blocked = {"price", "stock", "inventory", "orders", "images", "categories", "shipping", "brand", "sku", "model"}
+
+    for fix in db_session.query(IStoreSEOApproval).filter(IStoreSEOApproval.target_type == "product").all():
+        payload_text = json.dumps(json.loads(fix.proposed_payload_json), ensure_ascii=False)
+        assert not any(f'"{field}"' in payload_text for field in blocked)

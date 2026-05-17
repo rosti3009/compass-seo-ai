@@ -13,7 +13,7 @@ def client() -> Generator[TestClient, None, None]:
         yield test_client
 
 
-def test_health(client: TestClient) -> None:
+def test_health_startup_smoke_with_testclient(client: TestClient) -> None:
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"

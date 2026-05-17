@@ -1,59 +1,79 @@
 <!doctype html>
-<html lang="en">
+<html lang="he" dir="rtl">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>ISTORE SEO approval dashboard</title>
+    <title>לוח אישורי SEO ל-ISTORE</title>
     <link rel="stylesheet" href="/static/style.css">
   </head>
   <body>
     <main class="container">
       <section class="hero">
-        <p class="eyebrow">Semi-automatic SEO workflow</p>
-        <h1>ISTORE SEO approval dashboard</h1>
-        <p>Review Hebrew article previews, SEO-only field changes, schema/FAQ suggestions, rollback previews, and human-readable publish logs before explicit one-at-a-time publishing.</p>
+        <p class="eyebrow">תהליך SEO חצי-אוטומטי ובטוח</p>
+        <h1>לוח אישורי SEO ל-ISTORE</h1>
+        <p>בודקים טיוטות מוצר ותוכן בעברית, תצוגה מקדימה, שאלות נפוצות, קישורים פנימיים, הצעות סכמה, ייצוא ידני ויומני פרסום לפני כל פעולה.</p>
+        <form method="post" action="/integrations/istore/seo-approvals/cleanup-english-fallbacks">
+          <button type="submit">סימון טיוטות אנגליות ישנות כלא עדכניות</button>
+        </form>
       </section>
       <section class="panel">
         <table>
           <thead>
             <tr>
-              <th>Product/Page</th>
-              <th>Field</th>
-              <th>Current value</th>
-              <th>Proposed value</th>
-              <th>SEO reason</th>
-              <th>Risk</th>
-              <th>Status</th>
-              <th>Publish log</th>
-              <th>Actions</th>
+              <th>מוצר או עמוד</th>
+              <th>סוג טיוטה</th>
+              <th>שדה</th>
+              <th>ערך נוכחי</th>
+              <th>הצעה בעברית / תוכן לייצוא</th>
+              <th>סיבת SEO</th>
+              <th>סיכון</th>
+              <th>סטטוס</th>
+              <th>יומן פרסום</th>
+              <th>פעולות</th>
             </tr>
           </thead>
           <tbody>
             {% for fix in fixes %}
+            {% set data = fix.to_dict() %}
+            {% set is_content = fix.field_path == 'content_draft' %}
             <tr>
               <td>{{ fix.target_url or fix.target_id }}</td>
+              <td>{{ 'טיוטת תוכן/מאמר' if is_content else 'טיוטת SEO למוצר' }}</td>
               <td><code>{{ fix.field_path }}</code></td>
               <td>{{ fix.current_value }}</td>
-              <td>{{ fix.proposed_value }}</td>
+              <td>
+                {% if is_content %}
+                  {% set content = data.proposed_value | string %}
+                  <pre dir="rtl">{{ content }}</pre>
+                  <p><a href="/integrations/istore/seo-approvals/{{ fix.id }}/preview">פתיחת תצוגה מקדימה ופרטי ייצוא</a></p>
+                {% else %}
+                  <div dir="rtl">{{ fix.proposed_value }}</div>
+                {% endif %}
+              </td>
               <td>{{ fix.seo_reason }}</td>
               <td>{{ fix.risk_level }}</td>
               <td>{{ fix.status }}</td>
               <td>
-                {% for entry in fix.to_dict().publish_log[-3:] %}
+                {% for entry in data.publish_log[-4:] %}
                 <div><strong>{{ entry.timestamp }}</strong>: {{ entry.message }}</div>
                 {% else %}
-                <span>No publish activity yet.</span>
+                <span>אין פעילות פרסום עדיין.</span>
                 {% endfor %}
               </td>
               <td>
-                <a href="/integrations/istore/seo-approvals/{{ fix.id }}/preview">Preview</a>
-                <form method="post" action="/integrations/istore/seo-approvals/{{ fix.id }}/approve"><button type="submit">Approve</button></form>
-                <form method="post" action="/integrations/istore/seo-approvals/{{ fix.id }}/reject"><button type="submit">Reject</button></form>
-                <a href="/integrations/istore/seo-approvals/{{ fix.id }}/rollback-preview">Rollback preview</a>
+                <a href="/integrations/istore/seo-approvals/{{ fix.id }}/preview">תצוגה מקדימה</a>
+                <form method="post" action="/integrations/istore/seo-approvals/{{ fix.id }}/approve"><button type="submit">אישור</button></form>
+                <form method="post" action="/integrations/istore/seo-approvals/{{ fix.id }}/reject"><button type="submit">דחייה</button></form>
+                {% if is_content %}
+                <form method="post" action="/integrations/istore/seo-approvals/{{ fix.id }}/export"><button type="submit">ייצוא/העתקה ידנית</button></form>
+                {% else %}
+                <form method="post" action="/integrations/istore/seo-approvals/{{ fix.id }}/publish"><button type="submit">פרסום מבוקר</button></form>
+                {% endif %}
+                <a href="/integrations/istore/seo-approvals/{{ fix.id }}/rollback-preview">תצוגת שחזור</a>
               </td>
             </tr>
             {% else %}
-            <tr><td colspan="9">No SEO approval drafts yet.</td></tr>
+            <tr><td colspan="10">אין עדיין טיוטות לאישור.</td></tr>
             {% endfor %}
           </tbody>
         </table>

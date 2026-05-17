@@ -102,49 +102,49 @@ def analyze_istore_product_seo(payload: dict[str, Any]) -> ProductSEOAnalysis:
     title_length = len(title)
     if not title:
         score -= 20
-        issues.append("Missing SEO title")
+        issues.append("חסרה כותרת SEO")
         recommendations.append(
-            "Add a focused product SEO title that includes the product name and primary buying intent."
+            "להוסיף כותרת SEO ממוקדת בעברית שכוללת את שם המוצר וכוונת קנייה."
         )
     elif title_length < MIN_TITLE_LENGTH or title_length > MAX_TITLE_LENGTH:
         score -= 10
-        issues.append(f"SEO title length is {title_length} characters")
-        recommendations.append("Keep the product SEO title between 30 and 60 characters.")
+        issues.append(f"אורך כותרת ה-SEO הוא {title_length} תווים")
+        recommendations.append("לשמור על כותרת SEO באורך 30 עד 60 תווים.")
 
     meta_length = len(meta_description)
     if not meta_description:
         score -= 20
-        issues.append("Missing meta description")
-        recommendations.append("Add a benefit-led meta description with product details and a clear reason to click.")
+        issues.append("חסר תיאור מטא")
+        recommendations.append("להוסיף תיאור מטא בעברית עם יתרונות, פרטי מוצר וסיבה ברורה להיכנס לעמוד.")
     elif meta_length < MIN_META_DESCRIPTION_LENGTH or meta_length > MAX_META_DESCRIPTION_LENGTH:
         score -= 10
-        issues.append(f"Meta description length is {meta_length} characters")
-        recommendations.append("Keep the meta description between 70 and 160 characters.")
+        issues.append(f"אורך תיאור המטא הוא {meta_length} תווים")
+        recommendations.append("לשמור על תיאור מטא באורך 70 עד 160 תווים.")
 
     description_length = len(description_text)
     if description_length < MIN_DESCRIPTION_LENGTH:
         score -= 15
-        issues.append(f"Product description has only {description_length} characters")
+        issues.append(f"תיאור המוצר כולל רק {description_length} תווים")
         recommendations.append(
-            "Expand the product description with materials, use cases, sizing, warranty, and delivery details."
+            "להרחיב את תיאור המוצר עם חומרים, שימושים, מידות, אחריות ופרטי משלוח."
         )
 
     if image_count == 0:
         score -= 10
-        issues.append("No product images detected")
-        recommendations.append("Add descriptive product images with meaningful alt text.")
+        issues.append("לא זוהו תמונות מוצר")
+        recommendations.append("להוסיף תמונות מוצר מתארות עם טקסט חלופי משמעותי.")
 
     if not category:
         score -= 5
-        issues.append("Missing product category")
-        recommendations.append("Assign the product to a clear category to strengthen internal linking and breadcrumbs.")
+        issues.append("חסרה קטגוריית מוצר")
+        recommendations.append("לשייך את המוצר לקטגוריה ברורה כדי לחזק קישורים פנימיים ופירורי לחם.")
 
     if not url:
         score -= 5
-        issues.append("Missing product URL")
-        recommendations.append("Expose a canonical product URL for indexing and reporting.")
+        issues.append("חסר URL מוצר")
+        recommendations.append("להציג כתובת קנונית למוצר לצורך אינדוקס ודיווח.")
 
-    suggested_title = _clip_text(f"{name} | Compass", MAX_TITLE_LENGTH)
+    suggested_title = _clip_text(f"{name} | קומפס", MAX_TITLE_LENGTH)
     suggested_h1 = name
     suggested_meta_description = _clip_text(
         _suggested_meta_description(name, category, price),
@@ -320,5 +320,5 @@ def _suggested_meta_description(name: str, category: str | None, price: str | No
         parts.append(f"בקטגוריית {category}")
     if price:
         parts.append(f"במחיר {price}")
-    parts.append("עם מידע מלא, תמונות מוצר ושירות מקצועי מבית Compass.")
+    parts.append("עם מידע מלא, תמונות מוצר ושירות מקצועי מבית קומפס.")
     return " ".join(parts)

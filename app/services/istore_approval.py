@@ -40,6 +40,14 @@ ROLLBACKABLE_STATUSES = {"PUBLISHED", "FAILED_REVIEW_REQUIRED"}
 _HTML_RE = re.compile(r"<[^>]+>")
 _SPACE_RE = re.compile(r"\s+")
 _HEBREW_RE = re.compile(r"[\u0590-\u05FF]")
+_ENGLISH_LETTER_RE = re.compile(r"[A-Za-z]")
+ENGLISH_FALLBACK_PHRASES = (
+    "is available from Compass",
+    "Explore",
+    "Discover",
+    "available from",
+)
+CONTENT_DRAFT_FIELD = "content_draft"
 
 
 @dataclass(frozen=True)
@@ -107,7 +115,7 @@ def approve_fix(
     approval.approved_by = approved_by
     approval.approval_action = "approved"
     approval.approval_metadata_json = json.dumps(metadata or {}, ensure_ascii=False)
-    _append_publish_log(approval, "Approved for gated publishing", actor=approved_by, metadata=metadata)
+    _append_publish_log(approval, "אושר לפרסום מבוקר לאחר בדיקה אנושית", actor=approved_by, metadata=metadata)
 
     db.add(approval)
     db.commit()
@@ -125,7 +133,7 @@ def reject_fix(
     approval.approved_by = approved_by
     approval.approval_action = "rejected"
     approval.approval_metadata_json = json.dumps(metadata or {}, ensure_ascii=False)
-    _append_publish_log(approval, "Rejected by reviewer", actor=approved_by, metadata=metadata)
+    _append_publish_log(approval, "נדחה על ידי בודק אנושי", actor=approved_by, metadata=metadata)
 
     db.add(approval)
     db.commit()
@@ -149,7 +157,17 @@ def publish_approved_fix(
         raise ValueError("Only approved fixes can be published")
 
     if approval.target_type != "product":
-        raise ValueError("Only product SEO fields can be published to ISTORE automatically")
+        if not settings.istore_publish_enabled or settings.istore_safe_mode:
+            _append_publish_log(
+                approval,
+                "פרסום תוכן אוטומטי נחסם במצב בטוח; הטיוטה נשארה לבדיקה/ייצוא ידני",
+            )
+            db.add(approval)
+            db.commit()
+            db.refresh(approval)
+            raise PermissionError("ISTORE_SAFE_MODE blocks automatic content publishing; use manual export")
+
+        return export_content_draft_for_manual_publish(db, approval)
 
     payload = _json_dict(approval.proposed_payload_json)
     validate_istore_payload(payload)
@@ -157,7 +175,7 @@ def publish_approved_fix(
     if dry_run:
         _append_publish_log(
             approval,
-            "Dry-run publish validation passed; no ISTORE PUT sent",
+            "בדיקת פרסום יבשה עברה בהצלחה; לא נשלחה בקשה ל-ISTORE",
         )
         db.add(approval)
         db.commit()
@@ -183,7 +201,7 @@ def publish_approved_fix(
     try:
         _append_publish_log(
             approval,
-            f"Sending SEO-only ISTORE update for {approval.field_path}",
+           f"נשלח עדכון SEO בלבד ל-ISTORE עבור {approval.field_path}",
         )
         response = client.update_product(approval.target_id, payload)
         approval.publish_response_json = json.dumps(_redacted_json(response), ensure_ascii=False)
@@ -197,7 +215,7 @@ def publish_approved_fix(
         )
         _append_publish_log(
             approval,
-            "ISTORE publish failed and requires human review",
+            "פרסום ב-ISTORE נכשל ונדרשת בדיקה אנושית",
             metadata={"error": str(exc)},
         )
         db.add(approval)
@@ -214,12 +232,13 @@ def publish_approved_fix(
         approval.status = "PUBLISHED"
         verified = True
         _append_publish_log(approval, "Published and verified in ISTORE")
+        _append_publish_log(approval, "פורסם ואומת ב-ISTORE")
     else:
         approval.status = "FAILED_REVIEW_REQUIRED"
         verified = False
         _append_publish_log(
             approval,
-            "ISTORE update response received, but verification did not match proposed value",
+            "התקבלה תגובת עדכון מ-ISTORE, אך האימות לא תאם לערך המוצע",
         )
 
     db.add(approval)
@@ -256,7 +275,7 @@ def rollback_published_fix(
     validate_istore_payload(payload)
 
     if dry_run:
-        _append_publish_log(approval, "Dry-run rollback validation passed; no ISTORE PUT sent")
+        _append_publish_log(approval, "בדיקת שחזור יבשה עברה בהצלחה; לא נשלחה בקשה ל-ISTORE")
         db.add(approval)
         db.commit()
         db.refresh(approval)
@@ -279,7 +298,7 @@ def rollback_published_fix(
     try:
         _append_publish_log(
             approval,
-            f"Sending SEO-only ISTORE rollback for {approval.field_path}",
+            f"נשלח שחזור SEO בלבד ל-ISTORE עבור {approval.field_path}",
         )
         response = client.update_product(approval.target_id, payload)
         approval.publish_response_json = json.dumps(_redacted_json(response), ensure_ascii=False)
@@ -292,7 +311,7 @@ def rollback_published_fix(
         )
         _append_publish_log(
             approval,
-            "ISTORE rollback failed and requires human review",
+            "שחזור ב-ISTORE נכשל ונדרשת בדיקה אנושית",
             metadata={"error": str(exc)},
         )
         db.add(approval)
@@ -308,13 +327,13 @@ def rollback_published_fix(
     if _field_value(fetched, approval.field_path) == (approval.current_value or ""):
         approval.status = "ROLLED_BACK"
         verified = True
-        _append_publish_log(approval, "Rollback published and verified in ISTORE")
+        _append_publish_log(approval, "השחזור פורסם ואומת ב-ISTORE")
     else:
         approval.status = "ROLLBACK_FAILED_REVIEW_REQUIRED"
         verified = False
         _append_publish_log(
             approval,
-            "Rollback response received, but verification did not match original value",
+            "התקבלה תגובת שחזור, אך האימות לא תאם לערך המקורי",
         )
 
     db.add(approval)
@@ -374,14 +393,19 @@ def preview_generated_content(approval: IStoreSEOApproval, db: Session | None = 
     proposed_payload = _json_dict(approval.proposed_payload_json)
     before = _json_dict(approval.before_snapshot_json)
     pages = _latest_pages(db) if db is not None else []
-    stored_preview = _json_dict(approval.proposed_value) if approval.field_path == "content_draft" else {}
+   stored_preview = _json_dict(approval.proposed_value) if approval.field_path == CONTENT_DRAFT_FIELD else {}
 
-    product_name = _product_display_name(before) or approval.target_id
-    category = _category(before)
+    product_name = _hebrew_topic(_product_display_name(before) or approval.target_id, "המוצר")
+    category = _hebrew_topic(_category(before), "הקטגוריה")
+    content_title = stored_preview.get("suggested_title") or _content_title(product_name, category)
+    meta_title = stored_preview.get("suggested_meta_title") or _hebrew_meta_title(product_name, category)
+    meta_description = stored_preview.get("suggested_meta_description") or _hebrew_meta_description(
+        product_name, category
+    )
     article = stored_preview.get("hebrew_article") or _hebrew_article(
         product_name,
         category,
-        _clean(approval.proposed_value),
+        _hebrew_context(approval.proposed_value),
     )
     faq = stored_preview.get("faq") or _hebrew_faq(product_name, category)
     internal_links = stored_preview.get("internal_links") or _internal_link_suggestions(
@@ -395,6 +419,18 @@ def preview_generated_content(approval: IStoreSEOApproval, db: Session | None = 
         approval.target_url,
         faq,
     )
+    preview_html = _content_preview_html(content_title, meta_title, meta_description, article, faq, internal_links)
+    content_export = {
+        "status": "READY_FOR_MANUAL_PUBLISH" if approval.field_path == CONTENT_DRAFT_FIELD else approval.status,
+        "target_url": approval.target_url,
+        "suggested_title": content_title,
+        "suggested_meta_title": meta_title,
+        "suggested_meta_description": meta_description,
+        "html": preview_html,
+        "faq": faq,
+        "internal_links": internal_links,
+        "schema_suggestions": schema,
+    }
 
     return {
         "fix_id": approval.id,
@@ -404,7 +440,12 @@ def preview_generated_content(approval: IStoreSEOApproval, db: Session | None = 
         "current_value": approval.current_value,
         "proposed_value": approval.proposed_value,
         "proposed_payload": proposed_payload,
+        "suggested_title": content_title,
+        "suggested_meta_title": meta_title,
+        "suggested_meta_description": meta_description,
         "hebrew_article": article,
+        "preview_html": preview_html,
+        "content_export": content_export,
         "faq": faq,
         "internal_links": internal_links,
         "schema_suggestions": schema,
@@ -412,6 +453,93 @@ def preview_generated_content(approval: IStoreSEOApproval, db: Session | None = 
         "rollback_preview": rollback_preview(approval),
     }
 
+
+def mark_english_fallback_drafts_stale(db: Session) -> dict[str, object]:
+    """Safely mark pending English fallback drafts stale without publishing or deleting records."""
+    stale_statuses = {"PENDING_APPROVAL", "APPROVED"}
+    candidates = (
+        db.query(IStoreSEOApproval)
+        .filter(IStoreSEOApproval.status.in_(sorted(stale_statuses)))
+        .order_by(IStoreSEOApproval.created_at.desc(), IStoreSEOApproval.id.desc())
+        .all()
+    )
+    marked: list[IStoreSEOApproval] = []
+
+    for approval in candidates:
+        searchable = "\n".join(
+            [
+                approval.proposed_value or "",
+                approval.proposed_payload_json or "",
+                approval.seo_reason or "",
+            ]
+        )
+        if not contains_english_fallback_text(searchable):
+            continue
+
+        approval.status = "STALE_ENGLISH_FALLBACK"
+        approval.approval_action = "marked_stale_english_cleanup"
+        _append_publish_log(
+            approval,
+            "טיוטה סומנה כלא עדכנית בגלל תבנית אנגלית ישנה; לא נמחקה ולא פורסמה",
+            metadata={"cleanup": "english_fallback"},
+        )
+        db.add(approval)
+        marked.append(approval)
+
+    db.commit()
+    for approval in marked:
+        db.refresh(approval)
+
+    return {
+        "success": True,
+        "stale_marked": len(marked),
+        "published_records_deleted": 0,
+        "published_records_modified": 0,
+        "publishing_attempted": False,
+        "fixes": [approval.to_dict() for approval in marked],
+    }
+
+
+def export_content_draft_for_manual_publish(db: Session, approval: IStoreSEOApproval) -> dict[str, object]:
+    """Prepare a copy/export payload for one approved content draft when no content API exists."""
+    if approval.field_path != CONTENT_DRAFT_FIELD or approval.target_type not in {"page", "category", "content"}:
+        raise ValueError("Only article/content drafts can be exported for manual publishing")
+
+    if approval.status not in {"APPROVED", "READY_FOR_MANUAL_PUBLISH"}:
+        raise ValueError("Content export requires an approved draft")
+
+    preview = preview_generated_content(approval, db)
+    approval.status = "READY_FOR_MANUAL_PUBLISH"
+    approval.publish_response_json = json.dumps(
+        {"mode": "manual_export", "api_publish_sent": False, "status": approval.status}, ensure_ascii=False
+    )
+    _append_publish_log(
+        approval,
+        "טיוטת תוכן הוכנה להעתקה ידנית; לא בוצע פרסום אוטומטי",
+        metadata={"api_publish_sent": False},
+    )
+    db.add(approval)
+    db.commit()
+    db.refresh(approval)
+
+    return {
+        "success": True,
+        "status": approval.status,
+        "api_publish_sent": False,
+        "fix": approval.to_dict(),
+        "preview_html": preview["preview_html"],
+        "copy_payload": preview["content_export"],
+        "instructions": [
+            "להעתיק ידנית את הכותרת, המטא והתוכן למערכת הניהול לאחר בדיקה מקדימה.",
+            "אין לשנות מחיר, מלאי, תמונות, קטגוריות, משלוחים, מותג, SKU או הזמנות.",
+            "לא נשלח פרסום אוטומטי כי לא מוגדר Endpoint תוכן/בלוג בטוח ב-ISTORE.",
+        ],
+    }
+
+
+def contains_english_fallback_text(value: str) -> bool:
+    normalized = _clean(value).lower()
+    return any(phrase.lower() in normalized for phrase in ENGLISH_FALLBACK_PHRASES)
 
 def _approval_from_proposal(
     product_id: str,
@@ -436,18 +564,18 @@ def _approval_from_proposal(
         proposed_payload_json=json.dumps(proposed_payload, ensure_ascii=False),
         rollback_payload_json=json.dumps(rollback_payload, ensure_ascii=False),
     )
-    _append_publish_log(approval, "Draft created for human approval; no ISTORE publish attempted")
+    _append_publish_log(approval, "טיוטה נוצרה לאישור אנושי; לא בוצע פרסום ל-ISTORE")
     return approval
 
 
 def _product_fix_proposals(product: dict[str, Any], pages: list[PageAudit] | None = None) -> list[ProposedFix]:
     description, language_id = _description(product)
-    name = _clean(description.get("name") or product.get("name") or "מוצר")
+    name = _hebrew_topic(description.get("name") or product.get("name"), "המוצר")
     meta_title = _clean(product.get("meta_title") or description.get("meta_title") or "")
     meta_description = _clean(product.get("meta_description") or description.get("meta_description") or "")
     body = _clean(description.get("description") or product.get("description") or "")
     keyword = _clean(product.get("keyword") or "")
-    category = _category(product)
+    category = _hebrew_topic(_category(product), "הקטגוריה")
     proposals: list[ProposedFix] = []
 
     suggested_title = _clip(_hebrew_meta_title(name, category), 60)
@@ -495,7 +623,7 @@ def _product_fix_proposals(product: dict[str, Any], pages: list[PageAudit] | Non
                 f"product_description[{language_id}].description",
                 body,
                 _expanded_description(name, body, category, _product_url(product), pages or []),
-                "תיאור מוצר קצר: נוצר תוכן Ecommerce בעברית עם FAQ, קישורים פנימיים וסכמת SEO מוצעת",
+                "תיאור מוצר קצר: נוצר תוכן מסחרי בעברית עם שאלות נפוצות, קישורים פנימיים וסכמת SEO מוצעת",
                 "medium",
             )
         )
@@ -524,19 +652,23 @@ def _site_page_content_opportunities(
         reasons = []
 
         if page.internal_links < 2:
-            reasons.append("missing internal links")
+            reasons.append("חסרים קישורים פנימיים")
 
         if page.word_count < 500:
-            reasons.append("content expansion opportunities")
+            reasons.append("נדרשת הרחבת תוכן")
 
         if not reasons:
             continue
 
-        topic = page.h1 or page.title or page.url
+        topic = _hebrew_topic(page.h1 or page.title or page.url, "עמוד תוכן")
+        page_category = _hebrew_topic(_category_from_url(page.url), "הקטגוריה")
         payload = {
-            "hebrew_article": _hebrew_article(topic, _category_from_url(page.url), page.meta_description or ""),
-            "faq": _hebrew_faq(topic, _category_from_url(page.url)),
-            "internal_links": _internal_link_suggestions(page.url, topic, pages),
+               "suggested_title": _content_title(topic, page_category),
+               "suggested_meta_title": _hebrew_meta_title(topic, page_category),
+               "suggested_meta_description": _hebrew_meta_description(topic, page_category),
+               "hebrew_article": _hebrew_article(topic, page_category, _hebrew_context(page.meta_description or "")),
+               "faq": _hebrew_faq(topic, page_category),
+               "internal_links": _internal_link_suggestions(page.url, topic, pages),
         }
         payload["schema_suggestions"] = _schema_suggestions("category", topic, page.url, payload["faq"])
 
@@ -557,7 +689,7 @@ def _site_page_content_opportunities(
 
         _append_publish_log(
             approval,
-            "Hebrew article/category draft created for preview only; no ISTORE payload generated",
+            "טיוטת תוכן בעברית נוצרה לתצוגה מקדימה בלבד; לא נוצר מטען פרסום ל-ISTORE",
         )
 
         drafts.append(approval)
@@ -708,7 +840,7 @@ def _clip(value: str, limit: int) -> str:
 def _slugify(value: str) -> str:
     transliterated = value.lower().replace(" ", "-")
     transliterated = re.sub(r"[^a-z0-9\u0590-\u05ff-]+", "-", transliterated).strip("-")
-    return transliterated or "seo-product"
+    return transliterated or "מוצר"
 
 
 def _has_hebrew(value: str) -> bool:
@@ -749,15 +881,69 @@ def _product_display_name(product: dict[str, Any]) -> str:
     return _clean(description.get("name") or product.get("name") or product.get("title") or "")
 
 
+def _has_english_letters(value: str) -> bool:
+    return bool(_ENGLISH_LETTER_RE.search(value or ""))
+
+
+def _hebrew_topic(value: Any, fallback: str) -> str:
+    cleaned = _clean(value)
+    if cleaned and _has_hebrew(cleaned) and not contains_english_fallback_text(cleaned):
+        # Keep Hebrew, digits and common punctuation; drop Latin fragments from old fallbacks.
+        cleaned = re.sub(r"[A-Za-z]+", "", cleaned)
+        cleaned = _SPACE_RE.sub(" ", cleaned).strip(" -|,.;:")
+        return cleaned or fallback
+    return fallback
+
+
+def _hebrew_context(value: Any) -> str:
+    cleaned = _clean(value)
+    if not cleaned or not _has_hebrew(cleaned) or contains_english_fallback_text(cleaned):
+        return ""
+    return re.sub(r"[A-Za-z]+", "", cleaned).strip()
+
+
+def _content_title(topic: str, category: str) -> str:
+    category_part = f" ב{category}" if category and category not in {"הקטגוריה", topic} else ""
+    return _clip(f"{topic}{category_part}: מדריך תוכן שימושי", 70)
+
+
+def _content_preview_html(
+    title: str,
+    meta_title: str,
+    meta_description: str,
+    article: str,
+    faq: list[dict[str, str]],
+    internal_links: list[dict[str, str]],
+) -> str:
+    faq_html = "".join(
+        f"<h3>{escape(item['question'])}</h3><p>{escape(item['answer'])}</p>" for item in faq
+    )
+    links_html = "".join(
+        f"<li><a href=\"{escape(link['url'])}\">{escape(link['anchor_text'])}</a> - {escape(link['reason'])}</li>"
+        for link in internal_links
+    )
+    links_section = f"<h2>קישורים פנימיים מומלצים</h2><ul>{links_html}</ul>" if links_html else ""
+    return (
+        "<main dir=\"rtl\" lang=\"he\">"
+        f"<h1>{escape(title)}</h1>"
+        f"<p><strong>כותרת מטא:</strong> {escape(meta_title)}</p>"
+        f"<p><strong>תיאור מטא:</strong> {escape(meta_description)}</p>"
+        f"{article}"
+        f"<section><h2>שאלות נפוצות</h2>{faq_html}</section>"
+        f"{links_section}"
+        "</main>"
+    )
+
+
 def _hebrew_meta_title(name: str, category: str) -> str:
     category_part = f" {category}" if category and category not in name else ""
-    return f"{name}{category_part} | קנייה אונליין ב-Compass"
+    return f"{name}{category_part} | קנייה אונליין בקומפס"
 
 
 def _hebrew_meta_description(name: str, category: str) -> str:
     category_part = f" בקטגוריית {category}" if category else ""
     return (
-        f"מחפשים {name}? ב-Compass תמצאו מידע ברור{category_part}, "
+        f"מחפשים {name}? בקומפס תמצאו מידע ברור{category_part}, "
         "יתרונות מרכזיים, התאמה לצורך ושירות מקצועי לפני קנייה אונליין."
     )
 
@@ -769,7 +955,7 @@ def _expanded_description(
     target_url: str | None,
     pages: list[PageAudit],
 ) -> str:
-    intro = current if current and _has_hebrew(current) else _hebrew_article(name, category, current)
+    intro = _hebrew_context(current) if current and _hebrew_context(current) else _hebrew_article(name, category, "")
     faq = _hebrew_faq(name, category)
     links = _internal_link_suggestions(target_url, name, pages)
 
@@ -812,7 +998,7 @@ def _hebrew_article(topic: str, category: str, context: str = "") -> str:
         "<li>קראו את תיאור המוצר וההנחיות לפני שימוש.</li>"
         "<li>העדיפו מוצר עם מידע ברור, תמונות איכותיות ואפשרות לקבל תמיכה.</li>"
         "</ul>"
-        "<p>צוות Compass ממליץ לבחור לפי שימוש, אמינות וחוויית קנייה מלאה - "
+        "<p>צוות קומפס ממליץ לבחור לפי שימוש, אמינות וחוויית קנייה מלאה - "
         "לא רק לפי כותרת קצרה.</p>"
         "</article>"
     )
@@ -904,7 +1090,7 @@ def _internal_link_suggestions(
             continue
 
         label = _clean(page.h1 or page.title or page.url)
-        if not label:
+        if not label or not _has_hebrew(label):
             continue
 
         score = (page.seo_score or 0) + min(page.internal_links or 0, 20)
@@ -929,7 +1115,7 @@ def _internal_link_suggestions(
 
 def _category_from_url(url: str) -> str:
     parts = [part for part in re.split(r"[/_-]+", url) if part and not part.startswith("http")]
-    return _clean(parts[-1].replace("-", " ") if parts else "")
+    return _hebrew_topic(parts[-1].replace("-", " ") if parts else "", "הקטגוריה")
 
 
 def _looks_like_category(url: str) -> bool:
