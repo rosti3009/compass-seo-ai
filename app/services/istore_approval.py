@@ -393,14 +393,20 @@ def preview_generated_content(approval: IStoreSEOApproval, db: Session | None = 
     proposed_payload = _json_dict(approval.proposed_payload_json)
     before = _json_dict(approval.before_snapshot_json)
     pages = _latest_pages(db) if db is not None else []
-   stored_preview = _json_dict(approval.proposed_value) if approval.field_path == CONTENT_DRAFT_FIELD else {}
+
+    stored_preview = (
+        _json_dict(approval.proposed_value)
+        if approval.field_path == CONTENT_DRAFT_FIELD
+        else {}
+    )
 
     product_name = _hebrew_topic(_product_display_name(before) or approval.target_id, "המוצר")
     category = _hebrew_topic(_category(before), "הקטגוריה")
     content_title = stored_preview.get("suggested_title") or _content_title(product_name, category)
     meta_title = stored_preview.get("suggested_meta_title") or _hebrew_meta_title(product_name, category)
     meta_description = stored_preview.get("suggested_meta_description") or _hebrew_meta_description(
-        product_name, category
+        product_name,
+        category,
     )
     article = stored_preview.get("hebrew_article") or _hebrew_article(
         product_name,
