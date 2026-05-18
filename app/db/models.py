@@ -516,6 +516,9 @@ class IStoreSEOApproval(Base):
     proposed_value: Mapped[str] = mapped_column(Text, default="")
     seo_reason: Mapped[str] = mapped_column(Text, default="")
     risk_level: Mapped[str] = mapped_column(String(32), default="low", nullable=False, index=True)
+    source_audit_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    issue_type: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    priority_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(32), default="PENDING_APPROVAL", nullable=False, index=True)
     before_snapshot_json: Mapped[str] = mapped_column(Text, default="{}")
     proposed_payload_json: Mapped[str] = mapped_column(Text, default="{}")
@@ -542,6 +545,9 @@ class IStoreSEOApproval(Base):
             "proposed_value": self.proposed_value,
             "seo_reason": self.seo_reason,
             "risk_level": self.risk_level,
+            "source_audit_id": self.source_audit_id,
+            "issue_type": self.issue_type,
+            "priority_score": self.priority_score or 0.0,
             "status": self.status,
             "before_snapshot": _json_load(self.before_snapshot_json),
             "proposed_payload": _json_load(self.proposed_payload_json),
