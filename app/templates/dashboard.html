@@ -20,6 +20,7 @@
           <a class="button-link" href="/seo/fixes/pending-view">הצג תיקונים לאישור</a>
           <a class="button-link" href="/crawler/results-view/latest">הצג תוצאות סריקה</a>
           <a class="button-link" href="/integrations/istore/seo-approvals-view">הצג אישורי ISTORE</a>
+          <button type="button" class="secondary-button" data-action="fetch" data-endpoint="/istore/sync-products" data-method="POST" data-label="סנכרון מוצרים">סנכרן קטלוג ISTORE</button>
           <button type="button" class="secondary-button" data-action="fetch" data-endpoint="/seo/fixes/verify-against-latest-crawl" data-method="POST" data-label="אימות תיקונים">אמת תיקונים מול הסריקה האחרונה</button>
           <button type="button" class="secondary-button" data-action="fetch" data-endpoint="/seo/tasks/from-latest-crawl" data-method="POST" data-label="משימות SEO">צור משימות מהסריקה האחרונה</button>
           <button type="button" class="secondary-button" data-action="fetch" data-endpoint="/seo/automation/run?max_tasks=10&amp;generate_articles=false&amp;sync_gsc=true" data-method="POST" data-label="אוטומציה בטוחה">הרץ אוטומציה בטוחה</button>
@@ -47,6 +48,10 @@
         <article class="card"><span class="label">תיקונים מאושרים</span><strong>{{ metrics.approved_fixes }}</strong></article>
         <article class="card"><span class="label">תיקונים שפורסמו</span><strong>{{ metrics.published_fixes }}</strong></article>
         <article class="card"><span class="label">תיקונים שאומתו</span><strong>{{ metrics.verified_fixes }}</strong></article>
+        <article class="card"><span class="label">מוצרי ISTORE מסונכרנים</span><strong>{{ metrics.synced_istore_products }}</strong></article>
+        <article class="card"><span class="label">מיפויים מאומתים</span><strong>{{ metrics.verified_mappings }}</strong></article>
+        <article class="card"><span class="label">תיקונים לא ממופים</span><strong>{{ metrics.unmapped_fixes }}</strong></article>
+        <article class="card"><span class="label">מיפויים אמביוולנטיים</span><strong>{{ metrics.ambiguous_mappings }}</strong></article>
         <article class="card"><span class="label">Generic AI meta</span><strong>{{ metrics.generic_ai_meta }}</strong></article>
         <article class="card"><span class="label">Duplicate meta</span><strong>{{ metrics.duplicate_meta }}</strong></article>
         <article class="card"><span class="label">עמודי מותג</span><strong>{{ metrics.brand_pages }}</strong></article>

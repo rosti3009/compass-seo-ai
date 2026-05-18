@@ -52,6 +52,8 @@ def ensure_sqlite_schema_compatibility(bind_engine=None) -> None:
             "istore_product_id": "VARCHAR(255)",
             "publish_mapping_verified": "BOOLEAN DEFAULT 0",
             "mapping_conflict": "BOOLEAN DEFAULT 0",
+            "mapping_confidence": "INTEGER DEFAULT 0",
+            "mapping_source": "VARCHAR(64)",
             "field_path": "VARCHAR(255) DEFAULT ''",
             "current_value": "TEXT",
             "proposed_value": "TEXT DEFAULT ''",

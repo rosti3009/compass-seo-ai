@@ -163,6 +163,14 @@ async function runEditAction(button) {
   await runDashboardAction(button);
 }
 
+async function runAssignProductAction(button) {
+  const card = button.closest("[data-fix-card]");
+  const input = card ? card.querySelector("[data-manual-product-id]") : null;
+  button.dataset.body = JSON.stringify({ istore_product_id: input ? input.value.trim() : "" });
+  button.dataset.method = "POST";
+  await runDashboardAction(button);
+}
+
 function applyDiffHighlights(root = document) {
   root.querySelectorAll(".diff-viewer[data-diff-old][data-diff-new]").forEach((viewer) => {
     const oldPre = viewer.querySelector(".diff-old pre");
@@ -233,6 +241,10 @@ function bindOperations(root = document) {
   root.querySelectorAll("[data-action='edit-fix']:not([data-bound='true'])").forEach((button) => {
     button.dataset.bound = "true";
     button.addEventListener("click", () => runEditAction(button));
+  });
+  root.querySelectorAll("[data-action='assign-product']:not([data-bound='true'])").forEach((button) => {
+    button.dataset.bound = "true";
+    button.addEventListener("click", () => runAssignProductAction(button));
   });
   applyDiffHighlights(root);
   bindReviewFilters(root);

@@ -18,6 +18,8 @@ from app.db.models import (
     CrawlRun,
     GoogleOAuthToken,
     GSCKeywordMetric,
+    IStoreProduct,
+    IStoreProductMapping,
     IStoreSEOApproval,
     PageAudit,
     PublishingPackage,
@@ -53,7 +55,12 @@ from app.services.istore_approval import (
 from app.services.istore_approval import (
     reject_fix as reject_istore_approval_fix,
 )
-from app.services.istore_mapping import verify_pending_istore_mappings
+from app.services.istore_mapping import (
+    assign_product_mapping,
+    list_synced_products,
+    sync_istore_products,
+    verify_pending_istore_mappings,
+)
 from app.services.istore_product_seo import analyze_istore_product_seo
 from app.services.seo_auto_fixes import (
     AutoFixOptions,
@@ -93,6 +100,10 @@ class IStoreDraftEditRequest(BaseModel):
 
 class IStorePayloadValidationRequest(BaseModel):
     payload: dict[str, object]
+
+
+class IStoreAssignProductRequest(BaseModel):
+    istore_product_id: str
 
 
 class SEOAutoFixGenerationRequest(BaseModel):
@@ -1028,7 +1039,17 @@ def _dashboard_metrics(db: Session, latest_pages: list[PageAudit]) -> dict[str, 
         "pending_fixes": db.query(IStoreSEOApproval).filter(IStoreSEOApproval.status == "PENDING_APPROVAL").count(),
         "approved_fixes": db.query(IStoreSEOApproval).filter(IStoreSEOApproval.status == "APPROVED").count(),
         "published_fixes": db.query(IStoreSEOApproval).filter(IStoreSEOApproval.status == "PUBLISHED").count(),
-        "verified_fixes": db.query(IStoreSEOApproval).filter(IStoreSEOApproval.status == "VERIFIED").count(),
+        "verified_fixes": db.query(IStoreSEOApproval)
+        .filter(IStoreSEOApproval.publish_mapping_verified.is_(True))
+        .count(),
+        "synced_istore_products": db.query(IStoreProduct).count(),
+        "verified_mappings": db.query(IStoreProductMapping).filter(IStoreProductMapping.active.is_(True)).count(),
+        "unmapped_fixes": db.query(IStoreSEOApproval)
+        .filter(IStoreSEOApproval.status.in_(["PENDING_APPROVAL", "APPROVED"]))
+        .filter(IStoreSEOApproval.publish_mapping_verified.is_(False))
+        .filter(IStoreSEOApproval.mapping_conflict.is_(False))
+        .count(),
+        "ambiguous_mappings": db.query(IStoreSEOApproval).filter(IStoreSEOApproval.mapping_conflict.is_(True)).count(),
         "generic_ai_meta": sum(1 for page in latest_pages if _field_has_issue(page.missing_fields, generic_ai_issues)),
         "duplicate_meta": sum(
             1 for page in latest_pages if _field_has_issue(page.missing_fields, duplicate_meta_issues)
@@ -1906,6 +1927,47 @@ def mark_publishing_package_applied(package_id: int, db: DatabaseSession) -> dic
     return {"success": True, "package": package.to_dict()}
 
 
+
+
+@router.post("/istore/sync-products")
+def sync_istore_product_catalog(db: DatabaseSession) -> dict[str, object]:
+    """Synchronize the local ISTORE product catalog without publishing changes."""
+    try:
+        return sync_istore_products(db)
+    except MissingIStoreSettingsError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except IStoreAPIError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+
+@router.get("/istore/products")
+def synced_istore_products(db: DatabaseSession, q: str | None = None, limit: int = 100) -> dict[str, object]:
+    """Return synchronized ISTORE products for mapping review/manual assignment."""
+    products = list_synced_products(db, q=q, limit=limit)
+    return {"products": [product.to_dict() for product in products], "count": len(products)}
+
+
+@router.post("/seo/fixes/{fix_id}/assign-product")
+def assign_seo_fix_product(
+    fix_id: int, db: DatabaseSession, payload: Annotated[IStoreAssignProductRequest, Body()]
+) -> dict[str, object]:
+    """Manually assign a synchronized ISTORE product to a fix without auto-publishing."""
+    fix = _get_istore_approval_or_404(db, fix_id)
+    try:
+        candidate = assign_product_mapping(db, fix, payload.istore_product_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return {
+        "success": True,
+        "auto_publish": False,
+        "mapping": {
+            "istore_product_id": candidate.product_id,
+            "mapping_confidence": candidate.confidence,
+            "mapping_source": candidate.source,
+        },
+        "fix": fix_to_review_dict(fix),
+    }
+
 @router.post("/integrations/istore/seo-approvals/scan", status_code=status.HTTP_201_CREATED)
 def scan_istore_seo_approvals(db: DatabaseSession, limit: int = 50) -> dict[str, object]:
     """Scan ISTORE products and latest crawled pages, storing proposed fixes as pending drafts only."""
@@ -2240,7 +2302,7 @@ def istore_status() -> dict[str, object]:
 
 @router.get("/integrations/istore/products")
 def istore_products() -> dict[str, object]:
-    """Return ISTORE products through the read-only client."""
+    """Return live ISTORE products through the read-only client."""
     try:
         return {"products": IStoreClient.from_settings().list_products()}
     except MissingIStoreSettingsError as exc:
