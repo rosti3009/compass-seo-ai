@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.models import CrawlRun, PageAudit, PageScoreSnapshot
 from app.services.browser_fetcher import fetch_rendered_html
+from app.services.seo_copy_quality import FORBIDDEN_HEBREW_PHRASES
 
 VALID_PAGE_TYPES = {"product", "category", "brand", "blog", "article", "home", "system", "unknown"}
 SYSTEM_PATH_TOKENS = (
@@ -30,14 +31,7 @@ SYSTEM_PATH_TOKENS = (
     "/policy",
     "/404",
 )
-GENERIC_AI_PATTERNS = (
-    "פתרון איכותי",
-    "ביצועים מעולים",
-    "מוצר המיועד לאנשים",
-    "מקסימום נוחות",
-    "מוצרים איכותיים",
-    "מתאים לשימוש מקצועי וביתי",
-)
+GENERIC_AI_PATTERNS = FORBIDDEN_HEBREW_PHRASES
 
 CONTEXT_KEYWORD_GROUPS = {
     "grills": ("גריל", "grill", "barbecue", "bbq"),
