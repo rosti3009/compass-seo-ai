@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>תיקוני SEO ממתינים</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body class="rtl-page">
+    <main class="container">
+      <section class="hero compact">
+        <p class="eyebrow">Pending SEO Fixes</p>
+        <h1>תיקוני SEO ממתינים לאישור</h1>
+        <p>לא בוצע פרסום אוטומטי. כל תיקון נשאר ממתין לאישור אנושי.</p>
+        <div class="actions"><a class="button-link" href="/seo/operations-view">חזרה ללוח התפעול</a><a class="button-link" href="/integrations/istore/seo-approvals-view">פתח אישורי ISTORE</a></div>
+      </section>
+      <section class="panel" id="pending-action-result" aria-live="polite"><p class="empty">פעולות אישור/דחייה יוצגו כאן בלי מעבר לעמוד API.</p></section>
+      <section class="panel">
+        <p><strong>pending fixes count:</strong> {{ review.pending_count }}</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>priority_score</th><th>issue_type</th><th>page_type</th><th>target_url</th><th>field_path</th><th>old value</th><th>new value</th><th>risk_level</th><th>פעולות</th></tr></thead>
+            <tbody>
+              {% for fix in fixes %}
+              <tr>
+                <td>{{ fix.priority_score }}</td>
+                <td>{{ fix.issue_type }}</td>
+                <td>{{ fix.page_type }}</td>
+                <td dir="ltr">{{ fix.target_url or fix.target_id }}</td>
+                <td><code>{{ fix.field_path }}</code></td>
+                <td><pre>{{ fix.preview.old_value or '—' }}</pre></td>
+                <td><pre>{{ fix.preview.new_value or '—' }}</pre></td>
+                <td>{{ 'סיכון קריטי' if fix.risk_level == 'critical' else ('סיכון גבוה' if fix.risk_level == 'high' else fix.risk_level) }}</td>
+                <td>
+                  <button type="button" class="secondary-button inline-action" data-result-target="pending-action-result" data-action="fetch" data-endpoint="/integrations/istore/seo-approvals/{{ fix.id }}/approve" data-method="POST" data-body='{"approved_by":"dashboard"}' data-label="אישור תיקון">אישור</button>
+                  <button type="button" class="secondary-button inline-action" data-result-target="pending-action-result" data-action="fetch" data-endpoint="/integrations/istore/seo-approvals/{{ fix.id }}/reject" data-method="POST" data-body='{"approved_by":"dashboard"}' data-label="דחיית תיקון">דחייה</button>
+                  <button type="button" class="secondary-button inline-action" data-result-target="pending-action-result" data-action="fetch" data-endpoint="/integrations/istore/seo-approvals/{{ fix.id }}/publish" data-method="POST" data-body='{"approval":false,"dry_run":true}' data-label="Dry-run publish">dry-run publish</button>
+                </td>
+              </tr>
+              {% else %}
+              <tr><td colspan="9">אין תיקונים ממתינים.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+    <script src="/static/seo_operations.js"></script>
+  </body>
+</html>

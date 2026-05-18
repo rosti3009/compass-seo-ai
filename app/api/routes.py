@@ -54,7 +54,12 @@ from app.services.istore_approval import (
     reject_fix as reject_istore_approval_fix,
 )
 from app.services.istore_product_seo import analyze_istore_product_seo
-from app.services.seo_auto_fixes import AutoFixOptions, generate_fixes_from_latest_crawl, pending_fixes_review
+from app.services.seo_auto_fixes import (
+    AutoFixOptions,
+    fix_to_review_dict,
+    generate_fixes_from_latest_crawl,
+    pending_fixes_review,
+)
 from app.services.seo_automation import run_seo_automation
 from app.services.seo_scheduler import (
     create_schedule_config,
@@ -991,12 +996,19 @@ def _build_task_from_page(page: PageAudit, gsc_metric: GSCKeywordMetric | None =
     )
 
 
+def _field_has_issue(value: str | None, issue_names: set[str]) -> bool:
+    """Return whether a comma-delimited issue field contains one of the supplied issues."""
+    return bool({field.strip() for field in (value or "").split(",") if field.strip()} & issue_names)
+
+
 def _dashboard_metrics(db: Session, latest_pages: list[PageAudit]) -> dict[str, int]:
     """Return SEO workflow counts for dashboard cards."""
     tasks_by_url = _tasks_by_page_url(db, [page.url for page in latest_pages])
     gsc_by_url = _gsc_metrics_by_url(db, [page.url for page in latest_pages])
     internal_link_opportunities_count = len(_build_internal_link_opportunities(latest_pages, tasks_by_url, gsc_by_url))
     page_payloads = [_page_cluster_payload(page, tasks_by_url.get(page.url)) for page in latest_pages]
+    generic_ai_issues = {"generic_ai_meta", "generic_ai_title", "repetitive_ai_content"}
+    duplicate_meta_issues = {"duplicate_meta_description", "duplicate_meta_similarity", "duplicate_title_similarity"}
     return {
         "total_tasks": db.query(SEOTask).count(),
         "recommended_tasks": db.query(SEOTask).filter(SEOTask.status == "recommended").count(),
@@ -1006,6 +1018,20 @@ def _dashboard_metrics(db: Session, latest_pages: list[PageAudit]) -> dict[str, 
         "strategy_recommendations": db.query(SEOStrategyRecommendation)
         .filter(SEOStrategyRecommendation.status == "pending")
         .count(),
+        "critical_issues": sum(1 for page in latest_pages if (page.seo_risk_level or "").lower() == "critical"),
+        "high_risk_issues": sum(1 for page in latest_pages if (page.seo_risk_level or "").lower() == "high"),
+        "pending_fixes": db.query(IStoreSEOApproval).filter(IStoreSEOApproval.status == "PENDING_APPROVAL").count(),
+        "approved_fixes": db.query(IStoreSEOApproval).filter(IStoreSEOApproval.status == "APPROVED").count(),
+        "published_fixes": db.query(IStoreSEOApproval).filter(IStoreSEOApproval.status == "PUBLISHED").count(),
+        "verified_fixes": db.query(IStoreSEOApproval).filter(IStoreSEOApproval.status == "VERIFIED").count(),
+        "generic_ai_meta": sum(1 for page in latest_pages if _field_has_issue(page.missing_fields, generic_ai_issues)),
+        "duplicate_meta": sum(
+            1 for page in latest_pages if _field_has_issue(page.missing_fields, duplicate_meta_issues)
+        ),
+        "brand_pages": sum(1 for page in latest_pages if page.page_type == "brand"),
+        "system_pages_excluded": sum(
+            1 for page in latest_pages if page.page_type == "system" or bool(get_url_exclusion_reason(page.url))
+        ),
     }
 
 
@@ -1024,6 +1050,20 @@ def _latest_crawl_context(db: Session, limit: int | None = None) -> tuple[CrawlR
         query = query.limit(limit)
     return latest_run, query.all()
 
+
+
+
+def _operations_view_context(db: Session, *, legacy_root_markers: bool = False) -> dict[str, object]:
+    """Build the shared context for the SEO operations dashboard and result views."""
+    latest_run, latest_pages = _latest_crawl_context(db, limit=25)
+    metrics_pages = _latest_crawl_pages(db)
+    return {
+        "target_domain": settings.target_domain,
+        "latest_run": latest_run,
+        "pages": latest_pages,
+        "metrics": _dashboard_metrics(db, metrics_pages),
+        "legacy_root_markers": legacy_root_markers,
+    }
 
 @router.get("/auth/google/start")
 def google_oauth_start() -> RedirectResponse:
@@ -1088,19 +1128,14 @@ def health() -> dict[str, str]:
 
 @router.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, db: DatabaseSession) -> HTMLResponse:
-    """Render the SEO dashboard."""
-    latest_run, latest_pages = _latest_crawl_context(db, limit=25)
-    metrics_pages = _latest_crawl_pages(db)
-    return templates.TemplateResponse(
-        request,
-        "dashboard.html",
-        {
-            "target_domain": settings.target_domain,
-            "latest_run": latest_run,
-            "pages": latest_pages,
-            "metrics": _dashboard_metrics(db, metrics_pages),
-        },
-    )
+    """Render the SEO operations dashboard as the app home page."""
+    return templates.TemplateResponse(request, "dashboard.html", _operations_view_context(db, legacy_root_markers=True))
+
+
+@router.get("/seo/operations-view", response_class=HTMLResponse)
+def seo_operations_view(request: Request, db: DatabaseSession) -> HTMLResponse:
+    """Render the dashboard-safe SEO operations view with in-place actions."""
+    return templates.TemplateResponse(request, "dashboard.html", _operations_view_context(db))
 
 
 def _build_hebrew_insights_payload(db: Session, enrich: bool = False) -> dict[str, object]:
@@ -1527,6 +1562,18 @@ def latest_crawler_results(db: DatabaseSession) -> dict[str, object]:
     return {"crawl_run": crawl_run.to_dict(), "results": [page.to_dict() for page in pages]}
 
 
+
+
+@router.get("/crawler/results-view/latest", response_class=HTMLResponse)
+def latest_crawler_results_view(request: Request, db: DatabaseSession) -> HTMLResponse:
+    """Render the latest crawl results as readable HTML instead of a raw API payload."""
+    latest_run, pages = _latest_crawl_context(db)
+    return templates.TemplateResponse(
+        request,
+        "crawler_results_latest.html",
+        {"crawl_run": latest_run, "pages": pages, "target_domain": settings.target_domain},
+    )
+
 @router.get("/stats")
 def stats(db: DatabaseSession) -> dict[str, object]:
     """Return aggregate SEO crawl statistics."""
@@ -1658,6 +1705,42 @@ def pending_seo_fixes(db: DatabaseSession, limit: int = 250) -> dict[str, object
     """Return pending auto-fix drafts grouped and sorted for human review."""
     return pending_fixes_review(db, limit=limit)
 
+
+
+
+@router.get("/seo/fixes/pending-view", response_class=HTMLResponse)
+def pending_seo_fixes_view(request: Request, db: DatabaseSession, limit: int = 250) -> HTMLResponse:
+    """Render pending fixes in a review table with dashboard-safe action controls."""
+    review = pending_fixes_review(db, limit=limit)
+    return templates.TemplateResponse(request, "seo_pending_fixes.html", {"review": review, "fixes": review["fixes"]})
+
+
+@router.post("/seo/fixes/verify-against-latest-crawl")
+def verify_seo_fixes_against_latest_crawl(db: DatabaseSession) -> dict[str, object]:
+    """Compare pending/approved fixes with the latest crawl without publishing or changing safety gates."""
+    latest_run, pages = _latest_crawl_context(db)
+    latest_urls = {page.url for page in pages}
+    fixes = (
+        db.query(IStoreSEOApproval)
+        .filter(IStoreSEOApproval.status.in_(["PENDING_APPROVAL", "APPROVED", "READY_FOR_MANUAL_PUBLISH"]))
+        .order_by(IStoreSEOApproval.priority_score.desc(), IStoreSEOApproval.id.desc())
+        .all()
+    )
+    verified = [fix for fix in fixes if (fix.target_url or fix.target_id) in latest_urls]
+    warnings = [] if latest_run else ["No crawler runs found; verification used no crawl data."]
+    return {
+        "success": True,
+        "crawl_run_id": latest_run.id if latest_run else None,
+        "pages_crawled": latest_run.pages_crawled if latest_run else 0,
+        "average_score": latest_run.average_score if latest_run else 0,
+        "pending_fixes_count": db.query(IStoreSEOApproval)
+        .filter(IStoreSEOApproval.status == "PENDING_APPROVAL")
+        .count(),
+        "verified_count": len(verified),
+        "warnings": warnings,
+        "safety": {"auto_publish": False, "changed_publish_gates": False},
+        "fixes": [fix_to_review_dict(fix) for fix in verified[:10]],
+    }
 
 @router.get("/seo/fixes")
 def list_seo_fixes(

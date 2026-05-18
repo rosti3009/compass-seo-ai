@@ -12,9 +12,13 @@
         <p class="eyebrow">תהליך SEO חצי-אוטומטי ובטוח</p>
         <h1>לוח אישורי SEO ל-ISTORE</h1>
         <p>בודקים טיוטות מוצר ותוכן בעברית, תצוגה מקדימה, שאלות נפוצות, קישורים פנימיים, הצעות סכמה, ייצוא ידני ויומני פרסום לפני כל פעולה.</p>
-        <form method="post" action="/integrations/istore/seo-approvals/cleanup-english-fallbacks">
-          <button type="submit">סימון טיוטות אנגליות ישנות כלא עדכניות</button>
-        </form>
+        <div class="actions">
+          <button type="button" data-action="fetch" data-endpoint="/integrations/istore/seo-approvals/cleanup-english-fallbacks" data-method="POST" data-label="ניקוי טיוטות">סימון טיוטות אנגליות ישנות כלא עדכניות</button>
+          <a class="button-link" href="/seo/operations-view">חזרה ללוח התפעול</a>
+        </div>
+      </section>
+      <section class="panel" id="operation-result" aria-live="polite">
+        <p class="empty">תוצאות אישור, דחייה, ייצוא או dry-run יוצגו כאן בלי מעבר למסך API.</p>
       </section>
       <section class="panel">
         <table>
@@ -62,12 +66,12 @@
               </td>
               <td>
                 <a href="/integrations/istore/seo-approvals/{{ fix.id }}/preview">תצוגה מקדימה</a>
-                <form method="post" action="/integrations/istore/seo-approvals/{{ fix.id }}/approve"><button type="submit">אישור</button></form>
-                <form method="post" action="/integrations/istore/seo-approvals/{{ fix.id }}/reject"><button type="submit">דחייה</button></form>
+                <button type="button" class="secondary-button inline-action" data-action="fetch" data-endpoint="/integrations/istore/seo-approvals/{{ fix.id }}/approve" data-method="POST" data-body='{"approved_by":"dashboard"}' data-label="אישור">אישור</button>
+                <button type="button" class="secondary-button inline-action" data-action="fetch" data-endpoint="/integrations/istore/seo-approvals/{{ fix.id }}/reject" data-method="POST" data-body='{"approved_by":"dashboard"}' data-label="דחייה">דחייה</button>
                 {% if is_content %}
-                <form method="post" action="/integrations/istore/seo-approvals/{{ fix.id }}/export"><button type="submit">ייצוא/העתקה ידנית</button></form>
+                <button type="button" class="secondary-button inline-action" data-action="fetch" data-endpoint="/integrations/istore/seo-approvals/{{ fix.id }}/export" data-method="POST" data-label="ייצוא ידני">ייצוא/העתקה ידנית</button>
                 {% else %}
-                <form method="post" action="/integrations/istore/seo-approvals/{{ fix.id }}/publish"><button type="submit">פרסום מבוקר</button></form>
+                <button type="button" class="secondary-button inline-action" data-action="fetch" data-endpoint="/integrations/istore/seo-approvals/{{ fix.id }}/publish" data-method="POST" data-body='{"approval":false,"dry_run":true}' data-label="dry-run publish">dry-run פרסום מבוקר</button>
                 {% endif %}
                 <a href="/integrations/istore/seo-approvals/{{ fix.id }}/rollback-preview">תצוגת שחזור</a>
               </td>
@@ -79,5 +83,6 @@
         </table>
       </section>
     </main>
+    <script src="/static/seo_operations.js"></script>
   </body>
 </html>
