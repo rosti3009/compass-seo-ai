@@ -37,6 +37,11 @@ def ensure_sqlite_schema_compatibility(bind_engine=None) -> None:
         "page_audits": {
             "seo_score_delta": "FLOAT DEFAULT 0.0",
             "page_type": "VARCHAR(32) DEFAULT 'unknown'",
+            "seo_risk_level": "VARCHAR(32) DEFAULT 'low'",
+            "remediation_suggestions": "TEXT DEFAULT '[]'",
+            "context_keywords": "TEXT DEFAULT '[]'",
+            "primary_intent": "VARCHAR(64) DEFAULT 'general'",
+            "commercial_intent_score": "FLOAT DEFAULT 0.0",
         },
         "istore_seo_approvals": {
             "target_type": "VARCHAR(32) DEFAULT 'product'",

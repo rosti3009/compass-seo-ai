@@ -130,6 +130,10 @@ def test_sqlite_startup_migrates_legacy_strategy_columns_without_dropping_data(t
     assert "traffic_potential_score" in strategy_columns
     assert "publishing_readiness_score" in strategy_columns
     assert "seo_score_delta" in page_columns
+    assert "seo_risk_level" in page_columns
+    assert "remediation_suggestions" in page_columns
+    assert "context_keywords" in page_columns
+    assert "commercial_intent_score" in page_columns
     assert "page_score_snapshots" in inspector.get_table_names()
 
     session_local = sessionmaker(autocommit=False, autoflush=False, bind=engine)
