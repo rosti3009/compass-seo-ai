@@ -75,6 +75,9 @@ def ensure_sqlite_schema_compatibility(bind_engine=None) -> None:
             "created_at": "DATETIME",
             "updated_at": "DATETIME",
         },
+        "istore_products": {
+            "normalized_slug": "VARCHAR(512)",
+        },
         "seo_strategy_recommendations": {
             "priority_score": "FLOAT DEFAULT 0.0",
             "traffic_potential_score": "FLOAT DEFAULT 0.0",
@@ -108,3 +111,12 @@ def ensure_sqlite_schema_compatibility(bind_engine=None) -> None:
                             f"ADD COLUMN {column_name} {column_definition}"
                         )
                     )
+
+        compatibility_indexes = {
+            "ix_istore_products_normalized_slug": ("istore_products", "normalized_slug"),
+            "ix_istore_products_canonical_url": ("istore_products", "canonical_url"),
+            "ix_istore_products_istore_product_id": ("istore_products", "istore_product_id"),
+        }
+        for index_name, (table_name, column_name) in compatibility_indexes.items():
+            if table_name in existing_tables:
+                connection.execute(text(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} ({column_name})"))

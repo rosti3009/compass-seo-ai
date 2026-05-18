@@ -203,3 +203,63 @@ def test_sync_and_assign_endpoints(client: TestClient, db_session: Session, monk
     assert products_payload["products"][0]["mappings"][0]["normalized_slug"] == "gas-grill-3000"
     assert assign_response.status_code == 200
     assert assign_response.json()["fix"]["publish_mapping_verified"] is True
+
+
+def test_enrich_seo_fields_fetches_full_products_and_reports_missing(
+    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class FullProductClient(ProductCatalogClient):
+        def get_product(self, product_id: str) -> dict[str, object]:
+            products = {
+                "sku-1": {
+                    "product_id": "sku-1",
+                    "slug": "%D7%92%D7%A8%D7%99%D7%9C-%D7%92%D7%96/",
+                    "canonical_url": "https://shop.example.com/products/%D7%92%D7%A8%D7%99%D7%9C-%D7%92%D7%96/?from_admin=1",
+                    "seo": {"focus_keyword": "גריל גז"},
+                    "meta_title": "גריל גז מומלץ",
+                    "meta_description": "תיאור מוצר מלא בעברית.",
+                },
+                "sku-2": {
+                    "product_id": "sku-2",
+                    "slug": "charcoal-grill",
+                    "canonical_url": "",
+                    "meta_title": "Charcoal Grill",
+                    "meta_description": "",
+                },
+            }
+            return products[product_id]
+
+    monkeypatch.setattr("app.services.istore_mapping.IStoreClient.from_settings", lambda: FullProductClient())
+    sync_response = client.post("/istore/sync-products")
+    enrich_response = client.post("/istore/enrich-seo-fields")
+    missing_response = client.get("/istore/products/missing-seo")
+
+    assert sync_response.status_code == 200
+    assert enrich_response.status_code == 200
+    assert enrich_response.json()["enriched_products"] == 2
+    enriched = db_session.query(IStoreProduct).filter_by(istore_product_id="sku-1").one()
+    assert enriched.slug == "%D7%92%D7%A8%D7%99%D7%9C-%D7%92%D7%96/"
+    assert enriched.normalized_slug == "גריל-גז"
+    assert enriched.meta_title == "גריל גז מומלץ"
+    assert enriched.meta_description == "תיאור מוצר מלא בעברית."
+    assert enriched.keyword == "גריל גז"
+    assert missing_response.status_code == 200
+    assert [product["istore_product_id"] for product in missing_response.json()["products"]] == ["sku-2"]
+
+
+def test_hebrew_slug_normalization_prevents_duplicate_mappings(db_session: Session) -> None:
+    encoded = "https://shop.example.com/products/%D7%92%D7%A8%D7%99%D7%9C-%D7%92%D7%96/?from_admin=1"
+    decoded_upper = "https://SHOP.example.com/products/גריל-גז/"
+    product = IStoreProduct(istore_product_id="sku-he", slug="%D7%92%D7%A8%D7%99%D7%9C-%D7%92%D7%96/")
+    db_session.add(product)
+    db_session.commit()
+
+    fix_encoded = _fix(db_session, encoded)
+    assign_product_mapping(db_session, fix_encoded, "sku-he")
+    fix_decoded = _fix(db_session, decoded_upper)
+    assign_product_mapping(db_session, fix_decoded, "sku-he")
+
+    mappings = db_session.query(IStoreProductMapping).filter_by(istore_product_id="sku-he").all()
+    assert len(mappings) == 1
+    assert mappings[0].normalized_slug == "גריל-גז"
+    assert mappings[0].target_url == decoded_upper

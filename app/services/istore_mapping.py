@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from sqlalchemy.orm import Session
 
@@ -15,14 +15,30 @@ from app.integrations.istore import IStoreClient
 _PRODUCT_ID_KEYS = ("istore_product_id", "product_id", "id", "productid", "productId")
 _PRODUCT_NAME_KEYS = ("product_name", "name", "title", "productName")
 _PRODUCT_URL_KEYS = ("url", "product_url", "productUrl", "link", "href")
-_PRODUCT_CANONICAL_KEYS = ("canonical", "canonical_url", "canonicalUrl")
-_PRODUCT_SLUG_KEYS = ("slug", "keyword", "seo_keyword", "seoKeyword")
+_PRODUCT_CANONICAL_KEYS = ("canonical", "canonical_url", "canonicalUrl", "canonicalUrlPath")
+_PRODUCT_SLUG_KEYS = ("slug", "url_slug", "urlSlug", "seo_slug", "seoSlug", "keyword", "seo_keyword", "seoKeyword")
 _BRAND_KEYS = ("brand", "manufacturer", "vendor")
 _CATEGORY_KEYS = ("category", "category_name", "categoryName")
-_META_TITLE_KEYS = ("meta_title", "metaTitle", "seo_title", "seoTitle")
-_META_DESCRIPTION_KEYS = ("meta_description", "metaDescription", "seo_description", "seoDescription")
+_META_TITLE_KEYS = ("meta_title", "metaTitle", "seo_title", "seoTitle", "title_tag", "titleTag")
+_META_DESCRIPTION_KEYS = (
+    "meta_description",
+    "metaDescription",
+    "seo_description",
+    "seoDescription",
+    "description_tag",
+    "descriptionTag",
+)
 _SPACE_RE = re.compile(r"\s+")
 _NON_SLUG_RE = re.compile(r"[^\w\u0590-\u05ff-]+", re.UNICODE)
+_KEYWORD_KEYS = (
+    "keyword",
+    "focus_keyword",
+    "focusKeyword",
+    "focus_keyphrase",
+    "focusKeyphrase",
+    "seo_keyword",
+    "seoKeyword",
+)
 PUBLISHABLE_CONFIDENCE_THRESHOLD = 90
 
 
@@ -75,6 +91,9 @@ def sync_istore_products(db: Session, client: IStoreClient | None = None) -> dic
             db.add(product)
         for key, value in payload.items():
             setattr(product, key, value)
+        product.normalized_slug = (
+            _normalize_slug(product.slug or product.product_url or product.canonical_url or "") or None
+        )
         product.updated_at = now
         synced += 1
         db.flush()
@@ -84,6 +103,63 @@ def sync_istore_products(db: Session, client: IStoreClient | None = None) -> dic
     return {"success": True, "synced_products": synced, "auto_publish": False}
 
 
+
+def enrich_istore_seo_fields(db: Session, client: IStoreClient | None = None) -> dict[str, object]:
+    """Fetch full ISTORE product records and persist SEO fields onto synced products."""
+    client = client or IStoreClient.from_settings()
+    products = db.query(IStoreProduct).order_by(IStoreProduct.id.asc()).all()
+    now = datetime.now(UTC)
+    enriched = 0
+    errors: list[dict[str, str]] = []
+
+    for product in products:
+        try:
+            full_payload = client.get_product(product.istore_product_id)
+        except Exception as exc:  # noqa: BLE001 - keep enriching other products and report per-row failures.
+            errors.append({"istore_product_id": product.istore_product_id, "error": str(exc)})
+            continue
+        payloads = _extract_products(full_payload)
+        payload = payloads[0] if payloads else full_payload
+        if not isinstance(payload, dict):
+            errors.append(
+                {"istore_product_id": product.istore_product_id, "error": "ISTORE product response must be an object"}
+            )
+            continue
+
+        normalized = _normalize_product_payload(payload)
+        product.slug = normalized.get("slug") or product.slug
+        product.canonical_url = normalized.get("canonical_url") or product.canonical_url
+        product.product_url = normalized.get("product_url") or product.product_url
+        product.normalized_slug = (
+            _normalize_slug(product.slug or product.product_url or product.canonical_url or "") or None
+        )
+        product.meta_title = normalized.get("meta_title") or product.meta_title
+        product.meta_description = normalized.get("meta_description") or product.meta_description
+        product.keyword = normalized.get("keyword") or product.keyword
+        product.updated_at = now
+        db.add(product)
+        db.flush()
+        _upsert_catalog_mapping(db, product, product.product_url or product.canonical_url or product.slug or "", now)
+        enriched += 1
+
+    db.commit()
+    return {"success": True, "enriched_products": enriched, "errors": errors, "auto_publish": False}
+
+
+def list_products_missing_seo(db: Session, *, limit: int = 100) -> list[IStoreProduct]:
+    """Return synced products missing title, description, or canonical URL."""
+    return (
+        db.query(IStoreProduct)
+        .filter(
+            (IStoreProduct.meta_title.is_(None) | (IStoreProduct.meta_title == ""))
+            | (IStoreProduct.meta_description.is_(None) | (IStoreProduct.meta_description == ""))
+            | (IStoreProduct.canonical_url.is_(None) | (IStoreProduct.canonical_url == ""))
+        )
+        .order_by(IStoreProduct.updated_at.desc(), IStoreProduct.id.desc())
+        .limit(limit)
+        .all()
+    )
+
 def list_synced_products(db: Session, *, q: str | None = None, limit: int = 100) -> list[IStoreProduct]:
     query = db.query(IStoreProduct).order_by(IStoreProduct.updated_at.desc(), IStoreProduct.id.desc())
     if q:
@@ -92,6 +168,7 @@ def list_synced_products(db: Session, *, q: str | None = None, limit: int = 100)
             IStoreProduct.istore_product_id.ilike(like)
             | IStoreProduct.product_name.ilike(like)
             | IStoreProduct.slug.ilike(like)
+            | IStoreProduct.normalized_slug.ilike(like)
             | IStoreProduct.keyword.ilike(like)
             | IStoreProduct.product_url.ilike(like)
             | IStoreProduct.canonical_url.ilike(like)
@@ -188,7 +265,8 @@ def map_fix_to_products(
 
         for value in product_slugs:
             normalized = _normalize_slug(value)
-            if source_slug and value and value.strip("/").lower() == source_slug:
+            exact_slug = unquote(value or "").strip().strip("/").rsplit("/", 1)[-1].lower()
+            if source_slug and value and exact_slug == source_slug:
                 scored.append((95, "exact_slug"))
             if source_slug and normalized == source_slug:
                 scored.append((85, "normalized_slug"))
@@ -283,20 +361,35 @@ def _upsert_catalog_mapping(
     source: str = "catalog_sync",
 ) -> IStoreProductMapping:
     target_url = target_url or product.product_url or product.canonical_url or product.slug or product.istore_product_id
-    mapping = (
+    normalized_target_slug = _normalize_slug(product.slug or product.keyword or target_url)
+    canonical_target_url = _canonicalize_url(target_url)
+    mapping = None
+    existing_mappings = (
         db.query(IStoreProductMapping)
-        .filter(
-            IStoreProductMapping.istore_product_id == product.istore_product_id,
-            IStoreProductMapping.target_url == target_url,
-        )
-        .one_or_none()
+        .filter(IStoreProductMapping.istore_product_id == product.istore_product_id)
+        .order_by(IStoreProductMapping.id.asc())
+        .all()
     )
+    for existing_mapping in existing_mappings:
+        if existing_mapping.target_url == target_url:
+            mapping = existing_mapping
+            break
+        if normalized_target_slug and existing_mapping.normalized_slug == normalized_target_slug:
+            mapping = existing_mapping
+            break
+        if canonical_target_url and _canonicalize_url(existing_mapping.target_url) == canonical_target_url:
+            mapping = existing_mapping
+            break
+        if canonical_target_url and _canonicalize_url(existing_mapping.canonical_url or "") == canonical_target_url:
+            mapping = existing_mapping
+            break
     if mapping is None:
         mapping = IStoreProductMapping(istore_product_id=product.istore_product_id, target_url=target_url)
         db.add(mapping)
+    mapping.target_url = target_url
     mapping.canonical_url = product.canonical_url
     mapping.slug = product.slug
-    mapping.normalized_slug = _normalize_slug(product.slug or product.keyword or target_url)
+    mapping.normalized_slug = normalized_target_slug
     mapping.last_verified_at = verified_at
     mapping.active = True
     mapping.mapping_confidence = confidence
@@ -320,18 +413,22 @@ def _candidate_payload(fix: IStoreSEOApproval, candidate: MappingCandidate) -> d
 def _normalize_product_payload(product: dict[str, Any]) -> dict[str, str | None]:
     description = product.get("product_description") if isinstance(product.get("product_description"), dict) else {}
     nested = next((value for value in description.values() if isinstance(value, dict)), {}) if description else {}
+    slug = _first_deep_value(product, _PRODUCT_SLUG_KEYS)
+    product_url = _first_deep_value(product, _PRODUCT_URL_KEYS)
+    canonical_url = _first_deep_value(product, _PRODUCT_CANONICAL_KEYS)
     return {
         "istore_product_id": _first_value(product, _PRODUCT_ID_KEYS),
         "product_name": _first_value(product, _PRODUCT_NAME_KEYS) or _first_value(nested, _PRODUCT_NAME_KEYS),
-        "slug": _first_value(product, _PRODUCT_SLUG_KEYS),
-        "canonical_url": _first_value(product, _PRODUCT_CANONICAL_KEYS),
-        "product_url": _first_value(product, _PRODUCT_URL_KEYS),
+        "slug": slug,
+        "canonical_url": canonical_url,
+        "product_url": product_url,
         "brand": _first_value(product, _BRAND_KEYS),
         "category": _first_value(product, _CATEGORY_KEYS),
-        "meta_title": _first_value(product, _META_TITLE_KEYS) or _first_value(nested, _META_TITLE_KEYS),
-        "meta_description": _first_value(product, _META_DESCRIPTION_KEYS)
+        "meta_title": _first_deep_value(product, _META_TITLE_KEYS) or _first_value(nested, _META_TITLE_KEYS),
+        "meta_description": _first_deep_value(product, _META_DESCRIPTION_KEYS)
         or _first_value(nested, _META_DESCRIPTION_KEYS),
-        "keyword": _first_value(product, ("keyword", "seo_keyword", "seoKeyword")),
+        "keyword": _first_deep_value(product, _KEYWORD_KEYS) or _first_value(nested, _KEYWORD_KEYS),
+        "normalized_slug": _normalize_slug(slug or product_url or canonical_url or "") or None,
     }
 
 
@@ -347,6 +444,7 @@ def _model_payload(product: IStoreProduct) -> dict[str, str | None]:
         "meta_title": product.meta_title,
         "meta_description": product.meta_description,
         "keyword": product.keyword,
+        "normalized_slug": product.normalized_slug,
     }
 
 
@@ -355,6 +453,18 @@ def _first_value(payload: dict[str, Any], keys: tuple[str, ...]) -> str | None:
         value = payload.get(key)
         if value is not None and str(value).strip():
             return str(value).strip()
+    return None
+
+
+def _first_deep_value(payload: dict[str, Any], keys: tuple[str, ...]) -> str | None:
+    direct = _first_value(payload, keys)
+    if direct:
+        return direct
+    for value in payload.values():
+        if isinstance(value, dict):
+            nested = _first_deep_value(value, keys)
+            if nested:
+                return nested
     return None
 
 
@@ -375,16 +485,16 @@ def _canonicalize_url(value: str) -> str:
     if not value:
         return ""
     parsed = urlparse(value if "://" in value else f"https://placeholder.local/{value.lstrip('/')}")
-    path = "/".join(part for part in parsed.path.split("/") if part)
+    path = "/".join(_normalize_slug(part) for part in parsed.path.split("/") if part)
     host = parsed.netloc.lower()
     if host == "placeholder.local":
         host = ""
-    return f"{host}/{path}".strip("/").lower()
+    return f"{host}/{path}".strip("/").lower().rstrip("/")
 
 
 def _normalize_path(value: str) -> str:
     parsed = urlparse(value if "://" in value else f"https://placeholder.local/{value.lstrip('/')}")
-    return "/".join(part for part in parsed.path.split("/") if part).lower()
+    return "/".join(_normalize_slug(part) for part in parsed.path.split("/") if part).lower().rstrip("/")
 
 
 def _slug_from_url(value: str) -> str:
@@ -394,7 +504,7 @@ def _slug_from_url(value: str) -> str:
 
 
 def _normalize_slug(value: str) -> str:
-    value = (value or "").strip().split("?")[0].strip("/")
+    value = unquote((value or "").strip()).split("?")[0].strip().strip("/")
     value = value.rsplit("/", 1)[-1]
     value = _SPACE_RE.sub("-", value)
     value = _NON_SLUG_RE.sub("-", value)
