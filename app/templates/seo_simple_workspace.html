@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>לוח עבודה פשוט לקידום בגוגל</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body class="rtl-page simple-workspace">
+    <main class="container">
+      <nav class="simple-nav" aria-label="ניווט SEO">
+        <a class="button-link" href="/seo/simple-workspace">לוח עבודה פשוט</a>
+        <a class="button-link" href="/seo/fixes/pending-view">תיקונים לבדיקה</a>
+        <a class="button-link" href="/crawler/results-view/latest">תוצאות אחרונות</a>
+        <a class="button-link" href="/seo/operations-view">מצב מתקדם</a>
+      </nav>
+
+      <section class="hero simple-hero">
+        <p class="eyebrow">AI SEO work desk</p>
+        <h1>לוח עבודה פשוט לקידום בגוגל</h1>
+        <p>מקום אחד לבדוק טקסטים שהמערכת הכינה, להבין למה הם חשובים, ולאשר רק כשזה בטוח.</p>
+        <div class="recommended-next-step">
+          <h2>פעולה מומלצת הבאה</h2>
+          <p>{{ next_message }}</p>
+          <a class="button-link primary-link" href="{{ primary_href }}">{{ primary_label }}</a>
+        </div>
+      </section>
+
+      <section class="cards simple-summary" aria-label="מה צריך טיפול היום">
+        <article class="card"><span class="label">מה צריך טיפול היום</span><strong>{{ summary.needs_today }}</strong></article>
+        <article class="card"><span class="label">כמה תיקונים מוכנים לבדיקה</span><strong>{{ summary.ready_review }}</strong></article>
+        <article class="card"><span class="label">כמה תיקונים בטוחים לאישור</span><strong>{{ summary.safe_approval }}</strong></article>
+        <article class="card"><span class="label">כמה תיקונים צריכים בדיקת מוצר</span><strong>{{ summary.needs_product_check }}</strong></article>
+        <article class="card"><span class="label">כמה תיקונים כבר אושרו</span><strong>{{ summary.approved }}</strong></article>
+      </section>
+
+      <section class="panel" id="simple-action-result" aria-live="polite">
+        <h2>בדיקה ואישור</h2>
+        <p class="empty">בחרו תיקון כדי לראות את השלבים ולאשר רק אחרי בדיקה.</p>
+      </section>
+
+      {% if safe_cards %}
+      <section class="panel simple-bulk-panel">
+        <h2>אישור מהיר לתיקונים בטוחים</h2>
+        <p>הכפתור כולל רק תיקונים שכבר מחוברים בוודאות למוצר בחנות ומתאימים לשדות בטוחים.</p>
+        <button type="button" data-action="bulk-simple-approve" data-result-target="simple-action-result" data-bulk-ids="{{ safe_cards|map(attribute='id')|join(',') }}">אשר את כל התיקונים הבטוחים בדף זה</button>
+        <p class="safe-message">לפני האישור תופיע שאלה: בדקת שהטקסט החדש נשמע נכון ומתאים למוצר?</p>
+      </section>
+      {% endif %}
+
+      <section class="review-list simple-review-list" id="simple-review-list" aria-label="תיקוני SEO לבדיקה">
+        {% for fix in cards %}
+        <article class="fix-card simple-fix-card{% if not fix.can_approve %} is-not-publishable{% endif %}" data-fix-card data-safe-bulk="{{ 'true' if fix.bulk_safe else 'false' }}">
+          <header class="fix-card-header">
+            <div>
+              <p class="eyebrow">שם העמוד / המוצר</p>
+              <h2>{{ fix.page_name }}</h2>
+              {% if fix.page_url %}<p class="simple-url" dir="ltr">{{ fix.page_url }}</p>{% endif %}
+            </div>
+            <div class="badge-row" aria-label="סטטוס ידידותי">
+              <span class="badge status-badge status-pending">{{ fix.status_label }}</span>
+              <span class="badge status-badge {{ 'status-approved' if fix.can_approve else 'status-missing' }}">{{ fix.safety_label }}</span>
+            </div>
+          </header>
+
+          <div class="simple-card-grid">
+            <section><h3>מה הבעיה?</h3><p>{{ fix.problem }}</p></section>
+            <section><h3>למה זה חשוב?</h3><p>{{ fix.importance }}</p></section>
+            <section><h3>מה המערכת מציעה?</h3><p>{{ fix.suggestion }}</p></section>
+            <section><h3>האם אפשר לאשר עכשיו?</h3><p>{{ fix.approval_label }}</p>{% if not fix.can_approve %}<p class="notice error">אי אפשר לפרסם עדיין כי המוצר לא חובר בוודאות למערכת החנות.</p>{% endif %}</section>
+          </div>
+
+          <details class="simple-guided-flow" open>
+            <summary>פתח בדיקה מודרכת</summary>
+            <ol>
+              <li><strong>שלב 1: הבעיה</strong><p>{{ fix.problem }}</p></li>
+              <li><strong>שלב 2: התיקון המוצע</strong><p>{{ fix.suggestion }}</p></li>
+              <li><strong>שלב 3: בדיקה שלך</strong><p>קראו את הטקסט החדש ובדקו שהוא נשמע נכון ומתאים למוצר.</p></li>
+              <li><strong>שלב 4: אישור</strong><p>אשרו רק אם הטקסט ברור, נכון ולא מטעה.</p></li>
+            </ol>
+          </details>
+
+          <div class="diff-viewer simple-before-after">
+            <section class="diff-pane diff-old"><h3>לפני</h3><pre>{{ fix.before }}</pre></section>
+            <section class="diff-pane diff-new"><h3>אחרי</h3><pre>{{ fix.after }}</pre></section>
+          </div>
+
+          {% if fix.show_google_preview %}
+          <section class="google-preview" aria-label="איך זה עשוי להיראות בגוגל">
+            <h3>איך זה עשוי להיראות בגוגל:</h3>
+            <p class="google-title">{{ fix.preview_title }}</p>
+            <p class="google-url" dir="ltr">{{ fix.page_url or 'https://example.com/page' }}</p>
+            <p class="google-description">{{ fix.preview_description }}</p>
+          </section>
+          {% endif %}
+
+          <details class="draft-editor">
+            <summary>ערוך טקסט</summary>
+            <label class="draft-label">הטקסט החדש<textarea data-edit-value rows="4">{{ fix.after }}</textarea></label>
+            <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="edit-fix" data-endpoint="/integrations/istore/seo-approvals/{{ fix.id }}/draft" data-label="שמירת טקסט">שמור טקסט</button>
+          </details>
+
+          <div class="actions review-actions" aria-label="פעולות פשוטות">
+            <button type="button" class="inline-action" data-result-target="simple-action-result" data-action="confirm-fetch" data-endpoint="/integrations/istore/seo-approvals/{{ fix.id }}/approve" data-method="POST" data-confirm="בדקת שהטקסט החדש נשמע נכון ומתאים למוצר?" data-label="אשר שינוי">אשר שינוי</button>
+            <button type="button" class="secondary-button inline-action danger-button" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/integrations/istore/seo-approvals/{{ fix.id }}/reject" data-method="POST" data-label="דחה">דחה</button>
+            <a class="button-link inline-action" href="/seo/fixes/pending-view">צריך בדיקה</a>
+          </div>
+        </article>
+        {% else %}
+        <section class="panel"><p class="empty">אין תיקונים מוכנים כרגע. מומלץ להריץ סריקה חדשה.</p></section>
+        {% endfor %}
+      </section>
+    </main>
+    <script src="/static/seo_operations.js"></script>
+  </body>
+</html>

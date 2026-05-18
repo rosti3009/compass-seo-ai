@@ -124,6 +124,7 @@ function renderResult(panel, label, payload, ok) {
 }
 
 async function runDashboardAction(button) {
+  if (button.dataset.confirm && !window.confirm(button.dataset.confirm)) return;
   const targetId = button.dataset.resultTarget || "operation-result";
   const panel = document.getElementById(targetId) || document.getElementById("operation-result");
   const original = button.textContent;
@@ -233,8 +234,22 @@ function bindReviewFilters(root = document) {
   render();
 }
 
+async function runSimpleBulkApprove(button) {
+  const fixIds = (button.dataset.bulkIds || "")
+    .split(",")
+    .map((value) => Number(value.trim()))
+    .filter((value) => Number.isInteger(value) && value > 0);
+  if (!fixIds.length) return;
+  if (!window.confirm("בדקת שהטקסט החדש נשמע נכון ומתאים למוצר?")) return;
+  button.dataset.body = JSON.stringify({ fix_ids: fixIds, confirmed: true });
+  button.dataset.method = "POST";
+  button.dataset.endpoint = "/seo/simple-workspace/bulk-approve";
+  button.dataset.label = button.dataset.label || "אישור תיקונים בטוחים";
+  await runDashboardAction(button);
+}
+
 function bindOperations(root = document) {
-  root.querySelectorAll("[data-action='fetch']:not([data-bound='true'])").forEach((button) => {
+  root.querySelectorAll("[data-action='fetch']:not([data-bound='true']), [data-action='confirm-fetch']:not([data-bound='true'])").forEach((button) => {
     button.dataset.bound = "true";
     button.addEventListener("click", () => runDashboardAction(button));
   });
@@ -245,6 +260,10 @@ function bindOperations(root = document) {
   root.querySelectorAll("[data-action='assign-product']:not([data-bound='true'])").forEach((button) => {
     button.dataset.bound = "true";
     button.addEventListener("click", () => runAssignProductAction(button));
+  });
+  root.querySelectorAll("[data-action='bulk-simple-approve']:not([data-bound='true'])").forEach((button) => {
+    button.dataset.bound = "true";
+    button.addEventListener("click", () => runSimpleBulkApprove(button));
   });
   applyDiffHighlights(root);
   bindReviewFilters(root);
