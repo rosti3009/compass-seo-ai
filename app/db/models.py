@@ -511,6 +511,7 @@ class IStoreProduct(Base):
     istore_product_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
     product_name: Mapped[str | None] = mapped_column(String(512), nullable=True, index=True)
     slug: Mapped[str | None] = mapped_column(String(512), nullable=True, index=True)
+    normalized_slug: Mapped[str | None] = mapped_column(String(512), nullable=True, index=True)
     canonical_url: Mapped[str | None] = mapped_column(String(1024), nullable=True, index=True)
     product_url: Mapped[str | None] = mapped_column(String(1024), nullable=True, index=True)
     brand: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
@@ -530,6 +531,7 @@ class IStoreProduct(Base):
             "istore_product_id": self.istore_product_id,
             "product_name": self.product_name,
             "slug": self.slug,
+            "normalized_slug": self.normalized_slug,
             "canonical_url": self.canonical_url,
             "product_url": self.product_url,
             "brand": self.brand,

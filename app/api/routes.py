@@ -58,6 +58,8 @@ from app.services.istore_approval import (
 from app.services.istore_mapping import (
     PUBLISHABLE_CONFIDENCE_THRESHOLD,
     assign_product_mapping,
+    enrich_istore_seo_fields,
+    list_products_missing_seo,
     list_synced_products,
     sync_istore_products,
     verify_pending_istore_mappings,
@@ -1942,6 +1944,24 @@ def sync_istore_product_catalog(db: DatabaseSession) -> dict[str, object]:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except IStoreAPIError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+
+@router.post("/istore/enrich-seo-fields")
+def enrich_istore_product_seo_fields(db: DatabaseSession) -> dict[str, object]:
+    """Fetch full ISTORE product records and enrich local SEO catalog fields."""
+    try:
+        return enrich_istore_seo_fields(db)
+    except MissingIStoreSettingsError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except IStoreAPIError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+
+@router.get("/istore/products/missing-seo")
+def missing_istore_product_seo_fields(db: DatabaseSession, limit: int = 100) -> dict[str, object]:
+    """Return synced ISTORE products missing core SEO fields."""
+    products = list_products_missing_seo(db, limit=limit)
+    return {"products": [product.to_dict() for product in products], "count": len(products)}
 
 
 @router.get("/istore/products")
