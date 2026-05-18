@@ -87,6 +87,10 @@ class IStorePublishRequest(BaseModel):
     dry_run: bool = False
 
 
+class IStoreDraftEditRequest(BaseModel):
+    proposed_value: str
+
+
 class IStorePayloadValidationRequest(BaseModel):
     payload: dict[str, object]
 
@@ -1943,6 +1947,39 @@ def preview_istore_seo_approval(fix_id: int, db: DatabaseSession) -> dict[str, o
         "preview": preview_generated_content(fix, db),
         "rollback_preview": rollback_preview(fix),
     }
+
+
+@router.post("/integrations/istore/seo-approvals/{fix_id}/draft")
+def edit_istore_seo_approval_draft(
+    fix_id: int, db: DatabaseSession, payload: Annotated[IStoreDraftEditRequest, Body()]
+) -> dict[str, object]:
+    """Update the proposed SEO draft text inline without approving or publishing it."""
+    approval = _get_istore_approval_or_404(db, fix_id)
+    if approval.status not in {"PENDING_APPROVAL", "APPROVED", "READY_FOR_MANUAL_PUBLISH"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only reviewable drafts can be edited")
+    proposed_value = payload.proposed_value.strip()
+    if not proposed_value:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="proposed_value cannot be empty")
+    approval.proposed_value = proposed_value
+    approval.approval_action = "draft_edited"
+    db.add(approval)
+    db.commit()
+    db.refresh(approval)
+    return {"success": True, "updated": True, "auto_publish": False, "fix": fix_to_review_dict(approval)}
+
+
+@router.post("/integrations/istore/seo-approvals/{fix_id}/verify-mapping")
+def verify_single_istore_seo_mapping(fix_id: int, db: DatabaseSession) -> dict[str, object]:
+    """Run ISTORE mapping verification and return the selected fix state for inline review."""
+    _get_istore_approval_or_404(db, fix_id)
+    try:
+        result = verify_pending_istore_mappings(db)
+    except MissingIStoreSettingsError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except IStoreAPIError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    approval = _get_istore_approval_or_404(db, fix_id)
+    return {**result, "fix": fix_to_review_dict(approval), "auto_publish": False}
 
 
 @router.post("/integrations/istore/seo-approvals/{fix_id}/approve")

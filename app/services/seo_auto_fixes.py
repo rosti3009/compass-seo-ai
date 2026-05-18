@@ -264,54 +264,48 @@ def _issues(page: PageAudit) -> set[str]:
 
 
 def _title(page: PageAudit) -> str:
-    base = _entity_name(page)
-    keywords = _hebrew_keywords(page)
+    base = _hebrew_entity_name(page)
     suffix = " | Compass"
-    title = f"{base} - {', '.join(keywords[:2])}" if keywords else base
+    title = f"{base} - קנייה חכמה"
     if len(title) + len(suffix) <= 65:
         title = f"{title}{suffix}"
-    return _truncate(title, 65)
+    return _sanitize_customer_copy(page, _truncate(title, 65))
 
 
 def _meta_description(page: PageAudit) -> str:
-    base = _entity_name(page)
-    keywords = _hebrew_keywords(page)
-    intent = (page.primary_intent or "general").replace("_", " ")
+    base = _hebrew_entity_name(page)
     page_type_phrase = {
-        "brand": "מותג מוביל",
-        "product": "מוצר נבחר",
-        "category": "קטגוריה ממוקדת",
-        "article": "מדריך מקצועי",
-    }.get(page.page_type or "", "עמוד מידע")
-    keyword_text = ", ".join(keywords[:3]) if keywords else intent
-    meta = (
-        f"{base} - {page_type_phrase} עם מידע ברור על {keyword_text}, "
-        "יתרונות מרכזיים והתאמה לצרכים לפני קנייה ב-Compass."
-    )
+        "brand": "סקירת מותג ודגמים מובילים",
+        "product": "פרטים חשובים שיעזרו לבחור נכון",
+        "category": "השוואת אפשרויות לפי צורך, שימוש ותקציב",
+        "article": "מדריך קצר וברור לקבלת החלטה טובה יותר",
+    }.get(page.page_type or "", "מידע ברור ותמציתי לקבלת החלטה")
     if page.page_type == "brand":
-        meta = f"{base} ב-Compass: סקירת מותג, דגמים רלוונטיים, יתרונות ושיקולים לבחירה חכמה לפי {keyword_text}."
-    return _truncate(_pad_meta(_remove_forbidden_phrases(meta), base, keyword_text), 155)
+        meta = f"{base} ב-Compass: {page_type_phrase}, יתרונות מרכזיים ושיקולים לפני קנייה."
+    else:
+        meta = f"{base} ב-Compass: {page_type_phrase}, יתרונות מרכזיים והתאמה לצרכים לפני קנייה."
+    return _sanitize_customer_copy(page, _truncate(_pad_meta(_remove_forbidden_phrases(meta), base, "הבחירה"), 155))
 
 
 def _keyword_slug(page: PageAudit) -> str:
-    source = " ".join([_entity_name(page), *[str(item) for item in _json_list(page.context_keywords)]])
+    source = _hebrew_entity_name(page)
     normalized = re.sub(r"[^\w\u0590-\u05FF]+", "-", source.strip().lower(), flags=re.UNICODE).strip("-")
     return normalized or "seo-keyword"
 
 
 def _content_expansion(page: PageAudit) -> str:
-    base = _entity_name(page)
-    keywords = ", ".join(_hebrew_keywords(page)[:3]) or page.primary_intent or "SEO"
-    return _remove_forbidden_phrases(
+    base = _hebrew_entity_name(page)
+    value = (
         f"<section><h2>מידע נוסף על {base}</h2>"
-        f"<p>{base} מתאים למי שמחפש מידע ממוקד על {keywords}. מומלץ להשוות מאפיינים, "
-        "שימושים מרכזיים ותנאי שירות לפני החלטה.</p>"
+        f"<p>{base} מתאים ללקוחות שרוצים להבין במהירות מה חשוב לבדוק לפני רכישה. "
+        "מומלץ להשוות מאפיינים, שימושים מרכזיים, אחריות ותנאי שירות לפני החלטה.</p>"
         "<h3>שאלות נפוצות</h3><ul>"
         f"<li>למי {base} מתאים?</li><li>אילו מאפיינים חשוב לבדוק לפני רכישה?</li>"
         "<li>איך משווים בין אפשרויות דומות?</li>"
         "</ul><h3>קישורים פנימיים מוצעים</h3><p>לקשר לעמודי קטגוריה, מדריכים ומוצרים "
-        f"משלימים הקשורים ל-{keywords}.</p></section>"
+        "משלימים באופן טבעי וללא דחיסת מילות מפתח.</p></section>"
     )
+    return _sanitize_customer_copy(page, _remove_forbidden_phrases(value))
 
 
 def _system_recommendation(page: PageAudit) -> str:
@@ -322,7 +316,7 @@ def _system_recommendation(page: PageAudit) -> str:
 
 
 def _h1_recommendation(page: PageAudit) -> str:
-    return f"להוסיף H1 ייחודי וברור: {_entity_name(page)}"
+    return _sanitize_customer_copy(page, f"להוסיף H1 ייחודי וברור: {_hebrew_entity_name(page)}")
 
 
 def _priority_score(page: PageAudit, issue_type: str) -> float:
@@ -409,6 +403,47 @@ def _reason(page: PageAudit, issue_type: str, field_path: str) -> str:
         f"Risk={page.seo_risk_level}; intent={page.primary_intent}; page_type={page.page_type}. "
         "Draft requires human approval and is not published automatically."
     )
+
+
+def _hebrew_entity_name(page: PageAudit) -> str:
+    for value in (page.h1, page.title):
+        cleaned = _clean_text((value or "").replace(" | Compass", ""))
+        if re.search(r"[֐-׿]", cleaned):
+            return _truncate(cleaned, 42)
+    slug = _url_slug(page.url).replace("-", " ").replace("_", " ")
+    translations = {
+        "gas": "גז",
+        "grill": "גריל",
+        "grills": "גרילים",
+        "smoker": "מעשנה",
+        "smokers": "מעשנות",
+        "butcher": "קצב",
+        "tools": "כלים",
+        "tool": "כלי",
+        "bbq": "ברביקיו",
+        "weber": "Weber",
+        "napoleon": "Napoleon",
+    }
+    words = [translations.get(part.lower(), part) for part in slug.split() if part]
+    translated = " ".join(words).strip()
+    if translated and translated != slug:
+        if translated == "גז גריל":
+            translated = "גריל גז"
+        return _truncate(translated, 42)
+    return _entity_name(page)
+
+
+def _sanitize_customer_copy(page: PageAudit, value: str) -> str:
+    cleaned = value
+    for keyword in _json_list(page.context_keywords):
+        phrase = _clean_text(str(keyword))
+        if phrase and phrase in cleaned and ("," in phrase or re.search(r"[A-Za-z]", phrase)):
+            cleaned = cleaned.replace(phrase, "")
+    cleaned = re.sub(r",\s*,+", ", ", cleaned)
+    cleaned = re.sub(r"\s+,", ",", cleaned)
+    cleaned = re.sub(r",\s*(?=[.:;])", "", cleaned)
+    cleaned = re.sub(r"(?:,\s*){2,}", ", ", cleaned)
+    return _clean_text(cleaned)
 
 
 def _entity_name(page: PageAudit) -> str:
