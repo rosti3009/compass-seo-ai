@@ -6,43 +6,106 @@
     <title>תיקוני SEO ממתינים</title>
     <link rel="stylesheet" href="/static/style.css">
   </head>
-  <body class="rtl-page">
+  <body class="rtl-page operations-review-page">
     <main class="container">
       <section class="hero compact">
         <p class="eyebrow">Pending SEO Fixes</p>
         <h1>תיקוני SEO ממתינים לאישור</h1>
-        <p>לא בוצע פרסום אוטומטי. כל תיקון נשאר ממתין לאישור אנושי.</p>
+        <p>כל תיקון מוצג כטיוטה תפעולית ברורה: בלי פרסום אוטומטי, בלי עקיפת שערי בטיחות, ועם בדיקת מיפוי לפני פרסום.</p>
         <div class="actions"><a class="button-link" href="/seo/operations-view">חזרה ללוח התפעול</a><a class="button-link" href="/integrations/istore/seo-approvals-view">פתח אישורי ISTORE</a></div>
       </section>
-      <section class="panel" id="pending-action-result" aria-live="polite"><p class="empty">פעולות אישור/דחייה יוצגו כאן בלי מעבר לעמוד API.</p></section>
-      <section class="panel">
-        <p><strong>pending fixes count:</strong> {{ review.pending_count }}</p>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>priority_score</th><th>issue_type</th><th>page_type</th><th>target_url</th><th>field_path</th><th>old value</th><th>new value</th><th>risk_level</th><th>פעולות</th></tr></thead>
-            <tbody>
-              {% for fix in fixes %}
-              <tr>
-                <td>{{ fix.priority_score }}</td>
-                <td>{{ fix.issue_type }}</td>
-                <td>{{ fix.page_type }}</td>
-                <td dir="ltr">{{ fix.target_url or fix.target_id }}</td>
-                <td><code>{{ fix.field_path }}</code></td>
-                <td><pre>{{ fix.preview.old_value or '—' }}</pre></td>
-                <td><pre>{{ fix.preview.new_value or '—' }}</pre></td>
-                <td>{{ 'סיכון קריטי' if fix.risk_level == 'critical' else ('סיכון גבוה' if fix.risk_level == 'high' else fix.risk_level) }}</td>
-                <td>
-                  <button type="button" class="secondary-button inline-action" data-result-target="pending-action-result" data-action="fetch" data-endpoint="/integrations/istore/seo-approvals/{{ fix.id }}/approve" data-method="POST" data-body='{"approved_by":"dashboard"}' data-label="אישור תיקון">אישור</button>
-                  <button type="button" class="secondary-button inline-action" data-result-target="pending-action-result" data-action="fetch" data-endpoint="/integrations/istore/seo-approvals/{{ fix.id }}/reject" data-method="POST" data-body='{"approved_by":"dashboard"}' data-label="דחיית תיקון">דחייה</button>
-                  <button type="button" class="secondary-button inline-action" data-result-target="pending-action-result" data-action="fetch" data-endpoint="/integrations/istore/seo-approvals/{{ fix.id }}/publish" data-method="POST" data-body='{"approval":false,"dry_run":true}' data-label="Dry-run publish">dry-run publish</button>
-                </td>
-              </tr>
-              {% else %}
-              <tr><td colspan="9">אין תיקונים ממתינים.</td></tr>
-              {% endfor %}
-            </tbody>
-          </table>
+
+      <section class="panel" id="pending-action-result" aria-live="polite"><p class="empty">פעולות אישור, דחייה, עריכת טיוטה, dry-run ואימות מיפוי יוצגו כאן בלי לעזוב את הדשבורד.</p></section>
+
+      <section class="cards review-metrics" aria-label="סיכום תיקונים ממתינים">
+        <article class="card"><span class="label">ממתין לאישור</span><strong>{{ review.pending_count }}</strong></article>
+        <article class="card"><span class="label">סיכון גבוה</span><strong>{{ fixes|selectattr('risk_level', 'in', ['high', 'critical'])|list|length }}</strong></article>
+        <article class="card"><span class="label">מיפוי מאומת</span><strong>{{ fixes|selectattr('publish_mapping_verified')|list|length }}</strong></article>
+        <article class="card"><span class="label">ניתן לפרסום</span><strong>{{ fixes|selectattr('publishable')|list|length }}</strong></article>
+      </section>
+
+      <section class="panel review-controls" aria-label="סינון ומיון תיקונים">
+        <div class="filter-grid" data-review-filters>
+          <label>חיפוש<input type="search" data-filter="search" placeholder="URL, סוג תקלה או טקסט מוצע"></label>
+          <label>page_type<select data-filter="page_type"><option value="">הכל</option>{% for value in fixes|map(attribute='page_type')|unique|sort %}<option value="{{ value }}">{{ value }}</option>{% endfor %}</select></label>
+          <label>issue_type<select data-filter="issue_type"><option value="">הכל</option>{% for value in fixes|map(attribute='issue_type')|unique|sort %}<option value="{{ value }}">{{ value }}</option>{% endfor %}</select></label>
+          <label>risk_level<select data-filter="risk_level"><option value="">הכל</option><option value="critical">critical</option><option value="high">high</option><option value="medium">medium</option><option value="low">low</option></select></label>
+          <label>publishable<select data-filter="publishable"><option value="">הכל</option><option value="true">כן</option><option value="false">לא</option></select></label>
+          <label>mapping_verified<select data-filter="mapping_verified"><option value="">הכל</option><option value="true">כן</option><option value="false">לא</option></select></label>
+          <label>מיון<select data-sort><option value="priority_desc">עדיפות גבוהה</option><option value="risk_desc">סיכון גבוה</option><option value="url_asc">URL א-ת</option><option value="issue_asc">סוג תקלה</option></select></label>
+          <label>לעמוד<select data-page-size><option value="10">10</option><option value="25">25</option><option value="50">50</option></select></label>
         </div>
+        <p class="empty" data-pagination-summary>מציג תיקונים ממתינים.</p>
+        <div class="actions pagination-actions"><button type="button" class="secondary-button" data-page-prev>הקודם</button><button type="button" class="secondary-button" data-page-next>הבא</button></div>
+      </section>
+
+      <section class="review-list" data-review-list>
+        {% for fix in fixes %}
+        {% set old_value = fix.preview.old_value or '—' %}
+        {% set new_value = fix.preview.new_value or '—' %}
+        {% set publishable = 'true' if fix.publishable else 'false' %}
+        {% set mapping_verified = 'true' if fix.publish_mapping_verified else 'false' %}
+        <article class="fix-card{% if fix.risk_level in ['high', 'critical'] %} is-high-risk{% endif %}{% if not fix.publishable %} is-not-publishable{% endif %}{% if not fix.publish_mapping_verified %} is-unverified{% endif %}"
+          data-fix-card
+          data-search="{{ (fix.target_url or fix.target_id or '') }} {{ fix.issue_type }} {{ fix.page_type }} {{ old_value }} {{ new_value }}"
+          data-page-type="{{ fix.page_type }}"
+          data-issue-type="{{ fix.issue_type }}"
+          data-risk-level="{{ fix.risk_level }}"
+          data-publishable="{{ publishable }}"
+          data-mapping-verified="{{ mapping_verified }}"
+          data-priority="{{ fix.priority_score }}"
+          data-url="{{ fix.target_url or fix.target_id }}">
+          <header class="fix-card-header">
+            <div>
+              <p class="eyebrow">Fix #{{ fix.id }}</p>
+              <h2><span class="bidi-isolate" dir="ltr">{{ fix.target_url or fix.target_id }}</span></h2>
+            </div>
+            <div class="badge-row" aria-label="סטטוסים">
+              <span class="badge status-badge status-pending">ממתין לאישור</span>
+              {% if fix.status == 'APPROVED' %}<span class="badge status-badge status-approved">מאושר</span>{% endif %}
+              {% if fix.status == 'REJECTED' %}<span class="badge status-badge status-rejected">נדחה</span>{% endif %}
+              {% if fix.status == 'PUBLISHED' %}<span class="badge status-badge status-published">פורסם</span>{% endif %}
+              {% if fix.publish_mapping_verified %}<span class="badge status-badge status-verified">אומת</span>{% else %}<span class="badge status-badge status-missing">מיפוי חסר</span>{% endif %}
+              {% if fix.mapping_conflict %}<span class="badge status-badge status-conflict">קונפליקט מיפוי</span>{% endif %}
+              {% if not fix.publishable %}<span class="badge status-badge status-blocked">לא ניתן לפרסום</span>{% endif %}
+              {% if fix.risk_level in ['high', 'critical'] %}<span class="badge status-badge status-risk">סיכון גבוה</span>{% endif %}
+              {% if fix.page_type == 'system' %}<span class="badge status-badge status-system">עמוד מערכת</span>{% endif %}
+            </div>
+          </header>
+
+          <dl class="fix-meta-grid">
+            <div><dt>issue_type</dt><dd>{{ fix.issue_type or '—' }}</dd></div>
+            <div><dt>page_type</dt><dd>{{ fix.page_type }}</dd></div>
+            <div><dt>risk_level</dt><dd>{{ fix.risk_level }}</dd></div>
+            <div><dt>priority_score</dt><dd>{{ '%.2f'|format(fix.priority_score) }}</dd></div>
+            <div><dt>mapping verified</dt><dd>{{ 'כן' if fix.publish_mapping_verified else 'לא' }}</dd></div>
+            <div><dt>publishable</dt><dd>{{ 'כן' if fix.publishable else 'לא' }}</dd></div>
+          </dl>
+
+          <details class="diff-details" open>
+            <summary>תצוגת OLD / NEW עם ספירת תווים</summary>
+            <div class="diff-viewer" data-diff-old="{{ old_value|e }}" data-diff-new="{{ new_value|e }}">
+              <section class="diff-pane diff-old"><h3>OLD <span>{{ old_value|length }} תווים</span></h3><pre><mark class="removed-text">{{ old_value }}</mark></pre></section>
+              <section class="diff-pane diff-new"><h3>NEW <span>{{ new_value|length }} תווים</span></h3><pre><mark class="added-text">{{ new_value }}</mark></pre></section>
+            </div>
+          </details>
+
+          <details class="draft-editor">
+            <summary>עריכת טיוטה</summary>
+            <label class="draft-label">proposed value<textarea data-edit-value rows="4">{{ new_value }}</textarea></label>
+            <button type="button" class="secondary-button inline-action" data-result-target="pending-action-result" data-action="edit-fix" data-endpoint="/integrations/istore/seo-approvals/{{ fix.id }}/draft" data-label="שמירת טיוטה">שמור טיוטה</button>
+          </details>
+
+          <div class="actions review-actions" aria-label="פעולות סקירה">
+            <button type="button" class="secondary-button inline-action" data-result-target="pending-action-result" data-action="fetch" data-endpoint="/integrations/istore/seo-approvals/{{ fix.id }}/approve" data-method="POST" data-body='{"approved_by":"dashboard"}' data-label="אישור תיקון">אישור</button>
+            <button type="button" class="secondary-button inline-action danger-button" data-result-target="pending-action-result" data-action="fetch" data-endpoint="/integrations/istore/seo-approvals/{{ fix.id }}/reject" data-method="POST" data-body='{"approved_by":"dashboard"}' data-label="דחיית תיקון">דחייה</button>
+            <button type="button" class="secondary-button inline-action" data-result-target="pending-action-result" data-action="fetch" data-endpoint="/integrations/istore/seo-approvals/{{ fix.id }}/publish" data-method="POST" data-body='{"approval":false,"dry_run":true}' data-label="dry-run publish">dry-run publish</button>
+            <button type="button" class="secondary-button inline-action" data-result-target="pending-action-result" data-action="fetch" data-endpoint="/integrations/istore/seo-approvals/{{ fix.id }}/verify-mapping" data-method="POST" data-label="אימות מיפוי">אמת מיפוי</button>
+          </div>
+        </article>
+        {% else %}
+        <section class="panel"><p class="empty">אין תיקונים ממתינים.</p></section>
+        {% endfor %}
       </section>
     </main>
     <script src="/static/seo_operations.js"></script>

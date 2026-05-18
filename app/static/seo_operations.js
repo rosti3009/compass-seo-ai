@@ -1,25 +1,63 @@
 const HEBREW_PERSISTENCE_MESSAGE = "הפעולה הסתיימה ונשמרה. חזרה אחורה בדפדפן לא מבטלת אותה.";
+const RISK_ORDER = { critical: 4, high: 3, medium: 2, low: 1 };
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function nestedValue(payload, key) {
+  if (payload[key] !== undefined && payload[key] !== null) return payload[key];
+  for (const container of [payload.metrics, payload.summary, payload.result, payload.data]) {
+    if (container && container[key] !== undefined && container[key] !== null) return container[key];
+  }
+  return undefined;
+}
+
 function countFrom(payload, keys) {
   for (const key of keys) {
-    if (typeof payload[key] === "number") return payload[key];
+    const value = nestedValue(payload, key);
+    if (typeof value === "number") return value;
+    if (typeof value === "string" && value.trim() !== "" && !Number.isNaN(Number(value))) return Number(value);
   }
   return 0;
 }
 
-function valueFrom(payload, keys) {
+function valueFrom(payload, keys, fallback = "0") {
   for (const key of keys) {
-    if (payload[key] !== undefined && payload[key] !== null) return payload[key];
+    const value = nestedValue(payload, key);
+    if (value !== undefined && value !== null && value !== "") return value;
   }
-  return "—";
+  return fallback;
 }
 
 function generatedFixes(payload) {
-  return asArray(payload.fixes || payload.results || []).slice(0, 10);
+  return asArray(payload.fixes || payload.results || payload.items || []).slice(0, 10);
+}
+
+function yesNo(value) {
+  return value ? "כן" : "לא";
+}
+
+function statusBadge(text, className = "") {
+  return `<span class="badge status-badge ${className}">${escapeHtml(text)}</span>`;
+}
+
+function diffHtml(oldValue, newValue) {
+  const oldText = String(oldValue || "—");
+  const newText = String(newValue || "—");
+  return `<div class="diff-viewer">
+    <section class="diff-pane diff-old"><h3>OLD <span>${oldText.length} תווים</span></h3><pre><mark class="removed-text">${escapeHtml(oldText)}</mark></pre></section>
+    <section class="diff-pane diff-new"><h3>NEW <span>${newText.length} תווים</span></h3><pre><mark class="added-text">${escapeHtml(newText)}</mark></pre></section>
+  </div>`;
 }
 
 function renderFixList(fixes) {
@@ -28,33 +66,51 @@ function renderFixList(fixes) {
     .map((fix) => {
       const url = fix.target_url || fix.page_url || fix.url || fix.target_id || "—";
       const issue = fix.issue_type || fix.fix_type || fix.field_path || "—";
+      const pageType = fix.page_type || fix.target_type || "—";
+      const risk = fix.risk_level || "—";
+      const priority = fix.priority_score ?? "—";
+      const oldValue = (fix.preview && fix.preview.old_value) || fix.current_value || "";
       const newValue = (fix.preview && fix.preview.new_value) || fix.proposed_value || "";
-      return `<li><strong>${issue}</strong> <span dir="ltr">${url}</span><br><small>${String(newValue).slice(0, 180)}</small></li>`;
+      return `<article class="fix-card compact-fix-card">
+        <header class="fix-card-header"><div><p class="eyebrow">${escapeHtml(issue)}</p><h3 dir="ltr" class="bidi-isolate">${escapeHtml(url)}</h3></div><div class="badge-row">${statusBadge(risk, risk === "high" || risk === "critical" ? "status-risk" : "")}${statusBadge(pageType)}</div></header>
+        <dl class="fix-meta-grid"><div><dt>priority_score</dt><dd>${escapeHtml(priority)}</dd></div><div><dt>mapping verified</dt><dd>${yesNo(fix.publish_mapping_verified)}</dd></div><div><dt>publishable</dt><dd>${yesNo(fix.publishable)}</dd></div></dl>
+        <details><summary>Diff preview</summary>${diffHtml(oldValue, newValue)}</details>
+      </article>`;
     })
     .join("");
-  return `<ol>${items}</ol>`;
+  return `<div class="review-list generated-fixes">${items}</div>`;
+}
+
+function resultMetric(label, value) {
+  return `<span><strong>${escapeHtml(label)}</strong><b>${escapeHtml(value)}</b></span>`;
 }
 
 function renderResult(panel, label, payload, ok) {
   const warnings = asArray(payload.warnings || payload.errors);
-  const crawlRun = valueFrom(payload, ["crawl_run_id"]);
-  const pages = valueFrom(payload, ["pages_crawled", "pages_scanned"]);
-  const average = valueFrom(payload, ["average_score"]);
-  const created = countFrom(payload, ["created_count", "fixes_generated", "verified_count"]);
-  const duplicates = countFrom(payload, ["duplicates_skipped"]);
-  const pending = valueFrom(payload, ["pending_fixes_count", "pending_count"]);
+  const crawlRun = valueFrom(payload, ["crawl_run_id"], "—");
+  const pages = valueFrom(payload, ["pages_crawled", "pages_scanned"], 0);
+  const average = valueFrom(payload, ["average_score", "avg_score", "seo_average_score"], 0);
+  const created = countFrom(payload, ["created_count", "fixes_generated", "verified_count", "drafts_created"]);
+  const duplicates = countFrom(payload, ["duplicates_skipped", "skipped_duplicates"]);
+  const pending = valueFrom(payload, ["pending_fixes_count", "pending_count", "pending_fixes"], 0);
+  const highRisk = countFrom(payload, ["high_risk_fixes", "high_risk_count"]);
+  const publishable = countFrom(payload, ["publishable_fixes", "publishable_count"]);
+  const unmapped = countFrom(payload, ["unmapped_fixes", "unmapped_count"]);
   panel.innerHTML = `
-    <h2>${ok ? "פעולה הסתיימה בהצלחה" : "הפעולה נכשלה"}: ${label}</h2>
+    <h2>${ok ? "פעולה הסתיימה בהצלחה" : "הפעולה נכשלה"}: ${escapeHtml(label)}</h2>
     <p class="safe-message">${HEBREW_PERSISTENCE_MESSAGE}</p>
     <div class="result-grid">
-      <span><strong>created count:</strong> ${created}</span>
-      <span><strong>skipped duplicates:</strong> ${duplicates}</span>
-      <span><strong>crawl_run_id:</strong> ${crawlRun}</span>
-      <span><strong>pages_crawled:</strong> ${pages}</span>
-      <span><strong>average_score:</strong> ${average}</span>
-      <span><strong>pending fixes count:</strong> ${pending}</span>
+      ${resultMetric("תיקונים שנוצרו", created)}
+      ${resultMetric("כפילויות שדולגו", duplicates)}
+      ${resultMetric("תיקונים בסיכון גבוה", highRisk)}
+      ${resultMetric("תיקונים ניתנים לפרסום", publishable)}
+      ${resultMetric("תיקונים ללא מיפוי", unmapped)}
+      ${resultMetric("crawl_run_id", crawlRun)}
+      ${resultMetric("עמודים שנסרקו", pages)}
+      ${resultMetric("ציון SEO ממוצע", average)}
+      ${resultMetric("ממתין לאישור", pending)}
     </div>
-    ${warnings.length ? `<div class="notice error"><strong>warnings/errors:</strong><ul>${warnings.map((warning) => `<li>${warning}</li>`).join("")}</ul></div>` : ""}
+    ${warnings.length ? `<div class="notice error"><strong>אזהרות:</strong><ul>${warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul></div>` : ""}
     <h3>Top 10 generated fixes</h3>
     ${renderFixList(generatedFixes(payload))}
     <div class="actions">
@@ -74,7 +130,7 @@ async function runDashboardAction(button) {
   const label = button.dataset.label || original;
   button.disabled = true;
   button.textContent = `⏳ ${label}`;
-  if (panel) panel.innerHTML = `<h2>מריץ פעולה: ${label}</h2><p><span class="spinner"></span> נא להמתין...</p>`;
+  if (panel) panel.innerHTML = `<h2>מריץ פעולה: ${escapeHtml(label)}</h2><p><span class="spinner"></span> נא להמתין...</p>`;
   try {
     const headers = { Accept: "application/json" };
     const options = { method: button.dataset.method || "POST", headers };
@@ -99,11 +155,87 @@ async function runDashboardAction(button) {
   }
 }
 
+async function runEditAction(button) {
+  const card = button.closest("[data-fix-card]");
+  const textarea = card ? card.querySelector("[data-edit-value]") : null;
+  button.dataset.body = JSON.stringify({ proposed_value: textarea ? textarea.value : "" });
+  button.dataset.method = "POST";
+  await runDashboardAction(button);
+}
+
+function applyDiffHighlights(root = document) {
+  root.querySelectorAll(".diff-viewer[data-diff-old][data-diff-new]").forEach((viewer) => {
+    const oldPre = viewer.querySelector(".diff-old pre");
+    const newPre = viewer.querySelector(".diff-new pre");
+    if (!oldPre || !newPre || viewer.dataset.diffBound === "true") return;
+    viewer.dataset.diffBound = "true";
+    oldPre.innerHTML = `<mark class="removed-text">${escapeHtml(viewer.dataset.diffOld || "—")}</mark>`;
+    newPre.innerHTML = `<mark class="added-text">${escapeHtml(viewer.dataset.diffNew || "—")}</mark>`;
+  });
+}
+
+function bindReviewFilters(root = document) {
+  const list = root.querySelector("[data-review-list]");
+  const controls = root.querySelector("[data-review-filters]");
+  if (!list || !controls || controls.dataset.bound === "true") return;
+  controls.dataset.bound = "true";
+  let page = 1;
+  const cards = Array.from(list.querySelectorAll("[data-fix-card]"));
+  const summary = root.querySelector("[data-pagination-summary]");
+  const pageSizeControl = root.querySelector("[data-page-size]");
+  const sortControl = root.querySelector("[data-sort]");
+
+  function matches(card) {
+    return Array.from(controls.querySelectorAll("[data-filter]")).every((control) => {
+      const key = control.dataset.filter;
+      const value = control.value.trim().toLowerCase();
+      if (!value) return true;
+      if (key === "search") return (card.dataset.search || "").toLowerCase().includes(value);
+      const datasetKey = { page_type: "pageType", issue_type: "issueType", risk_level: "riskLevel", publishable: "publishable", mapping_verified: "mappingVerified" }[key];
+      return String(card.dataset[datasetKey] || "").toLowerCase() === value;
+    });
+  }
+
+  function sortCards(filtered) {
+    const mode = sortControl ? sortControl.value : "priority_desc";
+    return filtered.sort((a, b) => {
+      if (mode === "url_asc") return (a.dataset.url || "").localeCompare(b.dataset.url || "");
+      if (mode === "issue_asc") return (a.dataset.issueType || "").localeCompare(b.dataset.issueType || "");
+      if (mode === "risk_desc") return (RISK_ORDER[b.dataset.riskLevel] || 0) - (RISK_ORDER[a.dataset.riskLevel] || 0);
+      return Number(b.dataset.priority || 0) - Number(a.dataset.priority || 0);
+    });
+  }
+
+  function render() {
+    const pageSize = Number(pageSizeControl ? pageSizeControl.value : 10);
+    const filtered = sortCards(cards.filter(matches));
+    const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+    page = Math.min(page, totalPages);
+    const start = (page - 1) * pageSize;
+    const visible = new Set(filtered.slice(start, start + pageSize));
+    filtered.forEach((card) => list.appendChild(card));
+    cards.forEach((card) => { card.hidden = !visible.has(card); });
+    if (summary) summary.textContent = `מציג ${visible.size} מתוך ${filtered.length} תיקונים | עמוד ${page} מתוך ${totalPages}`;
+  }
+
+  controls.addEventListener("input", () => { page = 1; render(); });
+  if (sortControl) sortControl.addEventListener("change", () => { page = 1; render(); });
+  root.querySelector("[data-page-prev]")?.addEventListener("click", () => { page = Math.max(1, page - 1); render(); });
+  root.querySelector("[data-page-next]")?.addEventListener("click", () => { page += 1; render(); });
+  render();
+}
+
 function bindOperations(root = document) {
   root.querySelectorAll("[data-action='fetch']:not([data-bound='true'])").forEach((button) => {
     button.dataset.bound = "true";
     button.addEventListener("click", () => runDashboardAction(button));
   });
+  root.querySelectorAll("[data-action='edit-fix']:not([data-bound='true'])").forEach((button) => {
+    button.dataset.bound = "true";
+    button.addEventListener("click", () => runEditAction(button));
+  });
+  applyDiffHighlights(root);
+  bindReviewFilters(root);
 }
 
 document.addEventListener("DOMContentLoaded", () => bindOperations());

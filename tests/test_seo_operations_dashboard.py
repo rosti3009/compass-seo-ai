@@ -159,3 +159,87 @@ def test_no_auto_publish_behavior_changed(client: TestClient, db_session: Sessio
     validate_istore_payload({"meta_title": "כותרת מאושרת"})
     with pytest.raises(ValueError, match="not allowed"):
         validate_istore_payload({"h1": "לא לפרסום אוטומטי"})
+
+
+def test_pending_fixes_view_has_rtl_review_workflow_filters_and_badges(client: TestClient, db_session: Session) -> None:
+    _seed_crawl(db_session)
+    _seed_pending_fix(db_session)
+
+    response = client.get("/seo/fixes/pending-view")
+
+    assert response.status_code == 200
+    html = response.text
+    assert '<html lang="he" dir="rtl">' in html
+    assert 'data-filter="page_type"' in html
+    assert 'data-filter="issue_type"' in html
+    assert 'data-filter="risk_level"' in html
+    assert 'data-filter="publishable"' in html
+    assert 'data-filter="mapping_verified"' in html
+    assert "ממתין לאישור" in html
+    assert "מיפוי חסר" in html
+    assert "לא ניתן לפרסום" in html
+    assert "data-action=\"edit-fix\"" in html
+    assert "verify-mapping" in html
+
+
+def test_pending_fixes_view_renders_structured_diff_viewer(client: TestClient, db_session: Session) -> None:
+    _seed_crawl(db_session)
+    _seed_pending_fix(db_session)
+
+    response = client.get("/seo/fixes/pending-view")
+
+    assert response.status_code == 200
+    html = response.text
+    assert "diff-viewer" in html
+    assert "OLD" in html
+    assert "NEW" in html
+    assert "תווים" in html
+    assert "removed-text" in html
+    assert "added-text" in html
+
+
+def test_generated_seo_copy_does_not_leak_context_keywords(client: TestClient, db_session: Session) -> None:
+    crawl_run = CrawlRun(target_domain="https://example.com", status="completed", pages_crawled=1, average_score=42)
+    db_session.add(crawl_run)
+    db_session.flush()
+    db_session.add(
+        PageAudit(
+            crawl_run_id=crawl_run.id,
+            url="https://example.com/products/gas-grill",
+            status_code=200,
+            title="Gas Grill",
+            meta_description="Generic AI copy",
+            h1="Gas Grill",
+            word_count=80,
+            missing_fields="generic_ai_meta,duplicate_title_similarity",
+            page_type="product",
+            seo_score=40,
+            seo_risk_level="high",
+            remediation_suggestions=json.dumps(["rewrite_meta_description"]),
+            context_keywords=json.dumps(["grills, smokers, butcher tools"]),
+        )
+    )
+    db_session.commit()
+
+    response = client.post("/seo/fixes/generate-from-latest-crawl", json={"dry_run": True, "limit": 10})
+
+    assert response.status_code == 201
+    payload = response.json()
+    generated_text = " ".join(fix["proposed_value"] for fix in payload["fixes"])
+    assert "grills, smokers, butcher tools" not in generated_text
+    assert "גריל גז" in generated_text
+
+
+def test_dashboard_metrics_render_numeric_values(client: TestClient, db_session: Session) -> None:
+    _seed_crawl(db_session)
+    _seed_pending_fix(db_session)
+
+    response = client.get("/seo/operations-view")
+
+    assert response.status_code == 200
+    html = response.text
+    assert "ציון SEO ממוצע" in html
+    assert "64" in html
+    assert "ממתין לאישור" in html
+    assert "--:average_score" not in html
+    assert "--:pending fixes count" not in html
