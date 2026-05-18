@@ -243,3 +243,139 @@ def test_dashboard_metrics_render_numeric_values(client: TestClient, db_session:
     assert "ממתין לאישור" in html
     assert "--:average_score" not in html
     assert "--:pending fixes count" not in html
+
+
+def _seed_simple_workspace_fixes(db_session: Session) -> tuple[IStoreSEOApproval, IStoreSEOApproval, IStoreSEOApproval]:
+    safe_fix = IStoreSEOApproval(
+        target_type="product",
+        target_id="sku-safe",
+        target_url="https://example.com/products/gas-grill-safe",
+        istore_product_id="sku-safe",
+        publish_mapping_verified=True,
+        mapping_conflict=False,
+        mapping_confidence=100,
+        field_path="meta_description",
+        current_value="Old generic description",
+        proposed_value="תיאור חדש וברור לגריל גז איכותי לחצר",
+        seo_reason="Generic meta description",
+        risk_level="high",
+        issue_type="generic_ai_meta",
+        priority_score=95,
+        status="PENDING_APPROVAL",
+        approval_metadata_json=json.dumps({"page_type": "product"}),
+    )
+    unsafe_fix = IStoreSEOApproval(
+        target_type="product",
+        target_id="sku-needs-map",
+        target_url="https://example.com/products/needs-map",
+        field_path="meta_title",
+        current_value="Very long old title that needs replacement",
+        proposed_value="כותרת קצרה וברורה",
+        seo_reason="Title too long",
+        risk_level="medium",
+        issue_type="title_too_long",
+        priority_score=80,
+        status="PENDING_APPROVAL",
+        approval_metadata_json=json.dumps({"page_type": "product"}),
+    )
+    system_fix = IStoreSEOApproval(
+        target_type="recommendation",
+        target_id="system-page",
+        target_url="https://example.com/cart",
+        publish_mapping_verified=True,
+        mapping_conflict=False,
+        mapping_confidence=100,
+        field_path="noindex_recommendation",
+        current_value="index",
+        proposed_value="לא לקדם את עמוד המערכת הזה בגוגל",
+        seo_reason="System page indexable",
+        risk_level="high",
+        issue_type="system_page_indexable",
+        priority_score=70,
+        status="PENDING_APPROVAL",
+        approval_metadata_json=json.dumps({"page_type": "system"}),
+    )
+    db_session.add_all([safe_fix, unsafe_fix, system_fix])
+    db_session.commit()
+    db_session.refresh(safe_fix)
+    db_session.refresh(unsafe_fix)
+    db_session.refresh(system_fix)
+    return safe_fix, unsafe_fix, system_fix
+
+
+def test_simple_workspace_loads_with_plain_hebrew_cards_and_preview(client: TestClient, db_session: Session) -> None:
+    _seed_simple_workspace_fixes(db_session)
+
+    response = client.get("/seo/simple-workspace")
+
+    assert response.status_code == 200
+    html = response.text
+    assert "לוח עבודה פשוט לקידום בגוגל" in html
+    assert "מה צריך טיפול היום" in html
+    assert "כמה תיקונים מוכנים לבדיקה" in html
+    assert "כמה תיקונים בטוחים לאישור" in html
+    assert "כמה תיקונים צריכים בדיקת מוצר" in html
+    assert "כמה תיקונים כבר אושרו" in html
+    assert "פעולה מומלצת הבאה" in html
+    assert "התיאור נשמע גנרי מדי ולא מספיק משכנע ללקוחות." in html
+    assert "הכותרת ארוכה מדי וגוגל עלול לחתוך אותה." in html
+    assert "זה עמוד מערכת שלא צריך לקדם בגוגל." in html
+    assert "כותרת טובה יותר יכולה לגרום ליותר אנשים ללחוץ על התוצאה בגוגל." in html
+    assert "תיאור ייחודי עוזר לגוגל להבין במה העמוד שונה מעמודים אחרים." in html
+    assert "ממתין לבדיקה" in html
+    assert "צריך לחבר למוצר בחנות" in html
+    assert "עדיין לא ניתן לפרסם" in html
+    assert "מצב מתקדם" in html
+    assert 'href="/seo/operations-view"' in html
+    assert "בדקת שהטקסט החדש נשמע נכון ומתאים למוצר?" in html
+    assert "אשר את כל התיקונים הבטוחים בדף זה" in html
+    assert "איך זה עשוי להיראות בגוגל:" in html
+    assert "שלב 1: הבעיה" in html
+    assert "שלב 2: התיקון המוצע" in html
+    assert "שלב 3: בדיקה שלך" in html
+    assert "שלב 4: אישור" in html
+
+
+def test_simple_workspace_hides_technical_fields_and_raw_payloads(client: TestClient, db_session: Session) -> None:
+    _seed_simple_workspace_fixes(db_session)
+
+    response = client.get("/seo/simple-workspace")
+
+    assert response.status_code == 200
+    html = response.text
+    assert "issue_type" not in html
+    assert "mapping_confidence" not in html
+    assert "canonical_url" not in html
+    assert "source_audit_id" not in html
+    assert "proposed_payload" not in html
+    assert "rollback_payload" not in html
+    assert "JSON" not in html
+    assert "dry-run publish" not in html
+
+
+def test_simple_bulk_approve_only_includes_safe_publishable_fixes(client: TestClient, db_session: Session) -> None:
+    safe_fix, unsafe_fix, system_fix = _seed_simple_workspace_fixes(db_session)
+
+    response = client.get("/seo/simple-workspace")
+
+    assert response.status_code == 200
+    html = response.text
+    assert f'data-bulk-ids="{safe_fix.id}"' in html
+    assert f'data-bulk-ids="{unsafe_fix.id}"' not in html
+    assert f'data-bulk-ids="{system_fix.id}"' not in html
+
+    bulk_response = client.post(
+        "/seo/simple-workspace/bulk-approve",
+        json={"fix_ids": [safe_fix.id, unsafe_fix.id, system_fix.id], "confirmed": True},
+    )
+
+    assert bulk_response.status_code == 200
+    assert bulk_response.json()["approved_count"] == 1
+    assert bulk_response.json()["skipped_count"] == 2
+    db_session.refresh(safe_fix)
+    db_session.refresh(unsafe_fix)
+    db_session.refresh(system_fix)
+    assert safe_fix.status == "APPROVED"
+    assert unsafe_fix.status == "PENDING_APPROVAL"
+    assert system_fix.status == "PENDING_APPROVAL"
+    assert safe_fix.publish_timestamp is None

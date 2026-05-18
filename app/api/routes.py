@@ -59,6 +59,7 @@ from app.services.istore_mapping import (
     PUBLISHABLE_CONFIDENCE_THRESHOLD,
     assign_product_mapping,
     list_synced_products,
+    publishable_mapping,
     sync_istore_products,
     verify_pending_istore_mappings,
 )
@@ -99,6 +100,11 @@ class IStoreDraftEditRequest(BaseModel):
     proposed_value: str
 
 
+class SimpleBulkApprovalRequest(BaseModel):
+    fix_ids: list[int] = []
+    confirmed: bool = False
+
+
 class IStorePayloadValidationRequest(BaseModel):
     payload: dict[str, object]
 
@@ -136,6 +142,39 @@ SEO_FIX_TYPES = {
 }
 SEO_FIX_STATUSES = {"draft", "ready_for_review", "approved", "rejected", "exported", "applied_manually"}
 PUBLISHING_PACKAGE_STATUSES = {"draft", "ready", "exported", "applied_manually", "failed"}
+
+
+
+SIMPLE_ISSUE_LABELS = {
+    "title_too_long": "הכותרת ארוכה מדי וגוגל עלול לחתוך אותה.",
+    "generic_ai_meta": "התיאור נשמע גנרי מדי ולא מספיק משכנע ללקוחות.",
+    "duplicate_meta_similarity": "התיאור דומה מדי לעמודים אחרים באתר.",
+    "duplicate_meta_description": "התיאור דומה מדי לעמודים אחרים באתר.",
+    "thin_content": "חסר מידע שיעזור ללקוחות להבין את המוצר.",
+    "system_page_indexable": "זה עמוד מערכת שלא צריך לקדם בגוגל.",
+    "missing_h1": "חסרה כותרת ראשית ברורה בעמוד.",
+    "non_descriptive_slug": "כתובת העמוד לא מספיק ברורה.",
+    "invalid_slug": "כתובת העמוד לא מספיק ברורה.",
+}
+
+SIMPLE_IMPORTANCE_BY_FIELD = {
+    "meta_title": "כותרת טובה יותר יכולה לגרום ליותר אנשים ללחוץ על התוצאה בגוגל.",
+    "meta_description": "תיאור ייחודי עוזר לגוגל להבין במה העמוד שונה מעמודים אחרים.",
+    "content_draft": "טקסט ברור יותר עוזר ללקוח להבין אם המוצר מתאים לו.",
+    "h1_recommendation": "כותרת ברורה עוזרת ללקוח להבין מיד לאן הגיע ומה יש בעמוד.",
+    "keyword": "כתובת ברורה עוזרת ללקוחות ולגוגל להבין את נושא העמוד.",
+    "noindex_recommendation": "הסתרת עמודי מערכת מגוגל עוזרת להתמקד בעמודים שבאמת חשובים ללקוחות.",
+}
+
+SIMPLE_STATUS_LABELS = {
+    "PENDING_APPROVAL": "ממתין לבדיקה",
+    "APPROVED": "אושר",
+    "REJECTED": "נדחה",
+    "PUBLISHED": "פורסם באתר",
+    "VERIFIED": "אומת באתר",
+}
+
+SIMPLE_SAFE_FIELDS = {"meta_title", "meta_description"}
 
 SEO_STRATEGY_STATUSES = {"pending", "accepted", "ignored", "completed"}
 SEO_STRATEGY_RECOMMENDATION_TYPES = {
@@ -1095,6 +1134,167 @@ def _operations_view_context(db: Session, *, legacy_root_markers: bool = False) 
         "legacy_root_markers": legacy_root_markers,
     }
 
+
+def _simple_page_name(fix: IStoreSEOApproval) -> str:
+    source = fix.target_url or fix.source_url or fix.target_id or "עמוד ללא שם"
+    cleaned = source.rstrip("/").split("/")[-1] if source.startswith("http") else source
+    return cleaned.replace("-", " ").replace("_", " ") or source
+
+
+def _simple_issue_label(issue_type: str | None) -> str:
+    return SIMPLE_ISSUE_LABELS.get(issue_type or "", "נדרש שיפור קטן כדי שהעמוד יהיה ברור ומשכנע יותר.")
+
+
+def _simple_importance(fix: IStoreSEOApproval) -> str:
+    if fix.issue_type in {"duplicate_meta_similarity", "duplicate_meta_description"}:
+        return "תיאור ייחודי עוזר לגוגל להבין במה העמוד שונה מעמודים אחרים."
+    if fix.issue_type == "thin_content":
+        return "טקסט ברור יותר עוזר ללקוח להבין אם המוצר מתאים לו."
+    return SIMPLE_IMPORTANCE_BY_FIELD.get(
+        fix.field_path,
+        "שיפור ברור ומדויק יותר יכול לעזור ללקוחות להבין את העמוד ולקבל החלטה מהר יותר.",
+    )
+
+
+def _simple_suggestion(fix: IStoreSEOApproval) -> str:
+    suggestions = {
+        "meta_title": "להחליף לכותרת קצרה וברורה יותר.",
+        "meta_description": "להחליף לתיאור ייחודי ומשכנע יותר.",
+        "content_draft": "להוסיף טקסט הסבר קצר וברור יותר בעמוד.",
+        "h1_recommendation": "להוסיף כותרת ראשית ברורה בעמוד.",
+        "keyword": "לבדוק כתובת עמוד ברורה יותר לפני שינוי ידני.",
+        "noindex_recommendation": "לבדוק אם זה באמת עמוד מערכת שלא צריך להופיע בגוגל.",
+    }
+    return suggestions.get(fix.field_path, "לבדוק את הטקסט המוצע ולאשר רק אם הוא מתאים לעמוד.")
+
+
+def _simple_review_state(fix: IStoreSEOApproval) -> tuple[bool, str]:
+    if fix.mapping_conflict:
+        return False, "נמצאו כמה מוצרים דומים — צריך לבחור ידנית"
+    if not fix.publish_mapping_verified:
+        return False, "צריך לחבר למוצר בחנות"
+    if not publishable_mapping(fix):
+        return False, "עדיין לא ניתן לפרסם"
+    return True, "כן, אפשר לאשר בבטחה"
+
+
+def _is_simple_bulk_safe_fix(fix: IStoreSEOApproval) -> bool:
+    metadata = fix.to_dict().get("approval_metadata", {})
+    page_type = metadata.get("page_type") if isinstance(metadata, dict) else None
+    return bool(
+        fix.status == "PENDING_APPROVAL"
+        and fix.field_path in SIMPLE_SAFE_FIELDS
+        and page_type != "system"
+        and publishable_mapping(fix)
+    )
+
+
+def _simple_fix_card(fix: IStoreSEOApproval) -> dict[str, object]:
+    can_approve, approval_label = _simple_review_state(fix)
+    status_label = SIMPLE_STATUS_LABELS.get(fix.status, "ממתין לבדיקה")
+    if fix.mapping_conflict:
+        safety_label = "נמצאו כמה מוצרים דומים — צריך לבחור ידנית"
+    elif not fix.publish_mapping_verified:
+        safety_label = "צריך לחבר למוצר בחנות"
+    elif not publishable_mapping(fix):
+        safety_label = "עדיין לא ניתן לפרסם"
+    else:
+        safety_label = "מוכן לאישור בטוח"
+    return {
+        "id": fix.id,
+        "page_name": _simple_page_name(fix),
+        "page_url": fix.target_url or fix.source_url or "",
+        "problem": _simple_issue_label(fix.issue_type),
+        "importance": _simple_importance(fix),
+        "suggestion": _simple_suggestion(fix),
+        "before": fix.current_value or "—",
+        "after": fix.proposed_value or "—",
+        "can_approve": can_approve,
+        "approval_label": approval_label,
+        "status_label": status_label,
+        "safety_label": safety_label,
+        "show_google_preview": fix.field_path in {"meta_title", "meta_description"},
+        "preview_title": (
+            fix.proposed_value if fix.field_path == "meta_title" else (_simple_page_name(fix) or "שם העמוד")
+        ),
+        "preview_description": (
+            fix.proposed_value
+            if fix.field_path == "meta_description"
+            else (fix.current_value or "תיאור העמוד יופיע כאן.")
+        ),
+        "bulk_safe": _is_simple_bulk_safe_fix(fix),
+    }
+
+
+def _simple_workspace_context(db: Session) -> dict[str, object]:
+    fixes = (
+        db.query(IStoreSEOApproval)
+        .filter(IStoreSEOApproval.status.in_(["PENDING_APPROVAL", "APPROVED", "REJECTED", "PUBLISHED", "VERIFIED"]))
+        .order_by(IStoreSEOApproval.priority_score.desc(), IStoreSEOApproval.id.desc())
+        .limit(50)
+        .all()
+    )
+    cards = [_simple_fix_card(fix) for fix in fixes]
+    pending = [card for card in cards if card["status_label"] == "ממתין לבדיקה"]
+    safe = [card for card in cards if card["bulk_safe"]]
+    needs_product = [
+        card
+        for card in cards
+        if card["safety_label"] in {"צריך לחבר למוצר בחנות", "נמצאו כמה מוצרים דומים — צריך לבחור ידנית"}
+    ]
+    approved_count = sum(1 for fix in fixes if fix.status in {"APPROVED", "PUBLISHED", "VERIFIED"})
+    if pending:
+        if safe:
+            next_message = f"יש {len(pending)} תיקונים מוכנים לבדיקה. מומלץ להתחיל מהתיקונים הבטוחים."
+            primary_label = "התחל בדיקה"
+            primary_href = "#simple-review-list"
+        elif needs_product:
+            next_message = f"יש {len(needs_product)} מוצרים שצריך לחבר למערכת החנות לפני שאפשר לפרסם."
+            primary_label = "חבר מוצרים"
+            primary_href = "/seo/fixes/pending-view"
+        else:
+            next_message = f"יש {len(pending)} תיקונים מוכנים לבדיקה."
+            primary_label = "התחל בדיקה"
+            primary_href = "#simple-review-list"
+    else:
+        next_message = "אין תיקונים מוכנים. מומלץ להריץ סריקה חדשה."
+        primary_label = "הרץ סריקה"
+        primary_href = "/seo/operations-view"
+    return {
+        "cards": cards,
+        "safe_cards": safe,
+        "summary": {
+            "needs_today": len(pending) + len(needs_product),
+            "ready_review": len(pending),
+            "safe_approval": len(safe),
+            "needs_product_check": len(needs_product),
+            "approved": approved_count,
+        },
+        "next_message": next_message,
+        "primary_label": primary_label,
+        "primary_href": primary_href,
+    }
+
+
+def _bulk_approve_simple_safe_fixes(db: Session, fix_ids: list[int]) -> dict[str, object]:
+    fixes = db.query(IStoreSEOApproval).filter(IStoreSEOApproval.id.in_(fix_ids)).all() if fix_ids else []
+    approved: list[int] = []
+    skipped: list[int] = []
+    for fix in fixes:
+        if not _is_simple_bulk_safe_fix(fix):
+            skipped.append(fix.id)
+            continue
+        approve_istore_approval_fix(db, fix, approved_by="simple-workspace")
+        approved.append(fix.id)
+    return {
+        "approved_count": len(approved),
+        "skipped_count": len(skipped),
+        "approved_fix_ids": approved,
+        "skipped_fix_ids": skipped,
+    }
+
+
+
 @router.get("/auth/google/start")
 def google_oauth_start() -> RedirectResponse:
     """Redirect the user to Google's OAuth consent screen for GSC and GA4 read access."""
@@ -1166,6 +1366,20 @@ def dashboard(request: Request, db: DatabaseSession) -> HTMLResponse:
 def seo_operations_view(request: Request, db: DatabaseSession) -> HTMLResponse:
     """Render the dashboard-safe SEO operations view with in-place actions."""
     return templates.TemplateResponse(request, "dashboard.html", _operations_view_context(db))
+
+
+@router.get("/seo/simple-workspace", response_class=HTMLResponse)
+def seo_simple_workspace(request: Request, db: DatabaseSession) -> HTMLResponse:
+    """Render a jargon-free employee SEO review workspace."""
+    return templates.TemplateResponse(request, "seo_simple_workspace.html", _simple_workspace_context(db))
+
+
+@router.post("/seo/simple-workspace/bulk-approve")
+def seo_simple_bulk_approve(payload: SimpleBulkApprovalRequest, db: DatabaseSession) -> dict[str, object]:
+    """Approve only fixes that pass the existing mapping and safe-field gates; never publish automatically."""
+    if not payload.confirmed:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Approval confirmation is required.")
+    return _bulk_approve_simple_safe_fixes(db, payload.fix_ids)
 
 
 def _build_hebrew_insights_payload(db: Session, enrich: bool = False) -> dict[str, object]:

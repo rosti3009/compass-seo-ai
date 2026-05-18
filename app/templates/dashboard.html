@@ -14,6 +14,10 @@
         <p>ניהול סריקות, תיקונים ואישורי ISTORE עבור <strong>{{ target_domain }}</strong> בלי לעבור למסכי API גולמיים.</p>
         <p class="safe-message">הפעולות כאן רצות בתוך הדשבורד. הפעולה הסתיימה ונשמרה. חזרה אחורה בדפדפן לא מבטלת אותה.</p>
         <div class="actions operations-actions" aria-label="פעולות SEO">
+          <a class="button-link primary-link" href="/seo/simple-workspace">לוח עבודה פשוט</a>
+          <a class="button-link" href="/seo/fixes/pending-view">תיקונים לבדיקה</a>
+          <a class="button-link" href="/crawler/results-view/latest">תוצאות אחרונות</a>
+          <a class="button-link" href="/seo/operations-view">מצב מתקדם</a>
           <button type="button" data-action="fetch" data-endpoint="/crawler/run" data-method="POST" data-label="סריקה" data-next="/seo/fixes/generate-from-latest-crawl">הרץ סריקה</button>
           <button type="button" class="secondary-button" data-action="fetch" data-endpoint="/seo/fixes/generate-from-latest-crawl" data-method="POST" data-body='{"dry_run":true,"limit":50}' data-label="טיוטת תיקונים">צור תיקוני SEO (dry-run)</button>
           <button type="button" class="secondary-button" data-action="fetch" data-endpoint="/seo/fixes/generate-from-latest-crawl" data-method="POST" data-body='{"dry_run":false,"limit":50}' data-label="תיקונים לאישור">צור תיקונים ממתינים</button>
