@@ -54,6 +54,7 @@ from app.services.istore_approval import (
     reject_fix as reject_istore_approval_fix,
 )
 from app.services.istore_product_seo import analyze_istore_product_seo
+from app.services.seo_auto_fixes import AutoFixOptions, generate_fixes_from_latest_crawl, pending_fixes_review
 from app.services.seo_automation import run_seo_automation
 from app.services.seo_scheduler import (
     create_schedule_config,
@@ -82,6 +83,13 @@ class IStorePublishRequest(BaseModel):
 
 class IStorePayloadValidationRequest(BaseModel):
     payload: dict[str, object]
+
+
+class SEOAutoFixGenerationRequest(BaseModel):
+    limit: int = 50
+    min_risk_level: str | None = None
+    page_type: str | None = None
+    dry_run: bool = True
 
 
 class SEOScheduleConfigCreate(BaseModel):
@@ -1625,6 +1633,30 @@ def create_seo_fixes_for_task(task_id: int, db: DatabaseSession) -> dict[str, ob
         db.refresh(fix)
 
     return {"created_count": len(new_fixes), "fixes": [fix.to_dict() for fix in new_fixes]}
+
+
+
+@router.post("/seo/fixes/generate-from-latest-crawl", status_code=status.HTTP_201_CREATED)
+def generate_seo_fixes_from_latest_crawl(
+    db: DatabaseSession, payload: Annotated[SEOAutoFixGenerationRequest | None, Body()] = None
+) -> dict[str, object]:
+    """Generate human-reviewable SEO fixes from the latest crawl without publishing anything."""
+    request_payload = payload or SEOAutoFixGenerationRequest()
+    return generate_fixes_from_latest_crawl(
+        db,
+        AutoFixOptions(
+            limit=request_payload.limit,
+            min_risk_level=request_payload.min_risk_level,
+            page_type=request_payload.page_type,
+            dry_run=request_payload.dry_run,
+        ),
+    )
+
+
+@router.get("/seo/fixes/pending")
+def pending_seo_fixes(db: DatabaseSession, limit: int = 250) -> dict[str, object]:
+    """Return pending auto-fix drafts grouped and sorted for human review."""
+    return pending_fixes_review(db, limit=limit)
 
 
 @router.get("/seo/fixes")
