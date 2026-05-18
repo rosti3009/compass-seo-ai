@@ -13,6 +13,7 @@ from app.core.config import settings
 from app.db.models import IStoreSEOApproval, PageAudit
 from app.integrations.istore import IStoreAPIError, IStoreClient, _redact_token
 from app.services.istore_mapping import publishable_mapping
+from app.services.seo_copy_quality import sanitize_generated_seo_copy, truncate_without_ellipsis
 
 ALLOWED_ISTORE_FIELDS = {"product_description", "keyword", "meta_title", "meta_description"}
 BLOCKED_ISTORE_FIELDS = {
@@ -856,8 +857,7 @@ def _clean(value: Any) -> str:
 
 
 def _clip(value: str, limit: int) -> str:
-    value = _clean(value)
-    return value if len(value) <= limit else value[: limit - 1].rstrip() + "…"
+    return truncate_without_ellipsis(_clean(value), limit)
 
 
 def _slugify(value: str) -> str:
@@ -965,9 +965,9 @@ def _hebrew_meta_title(name: str, category: str) -> str:
 
 def _hebrew_meta_description(name: str, category: str) -> str:
     category_part = f" בקטגוריית {category}" if category else ""
-    return (
+    return sanitize_generated_seo_copy(
         f"מחפשים {name}? בקומפס תמצאו מידע ברור{category_part}, "
-        "יתרונות מרכזיים, התאמה לצורך ושירות מקצועי לפני קנייה אונליין."
+        "מפרט שימושי, תמונות ושירות מקצועי לרכישה אונליין."
     )
 
 
@@ -996,7 +996,7 @@ def _expanded_description(
 
     return (
         f"<section dir=\"rtl\" lang=\"he\">{intro}"
-        "<h2>שאלות נפוצות לפני קנייה</h2>"
+        "<h2>שאלות נפוצות לפני רכישה</h2>"
         f"{faq_items}{links_html}</section>"
     )
 

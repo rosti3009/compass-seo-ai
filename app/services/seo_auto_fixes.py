@@ -9,18 +9,11 @@ from sqlalchemy.orm import Session
 
 from app.db.models import CrawlRun, IStoreSEOApproval, PageAudit
 from app.services.istore_approval import ALLOWED_ISTORE_FIELDS, BLOCKED_ISTORE_FIELDS
+from app.services.seo_copy_quality import sanitize_generated_seo_copy, truncate_without_ellipsis
 from app.services.seo_url_filters import get_url_exclusion_reason
 
 PENDING_AUTOFIX_STATUSES = {"PENDING_APPROVAL", "APPROVED", "READY_FOR_MANUAL_PUBLISH"}
 SAFE_PUBLISHABLE_FIELDS = {"meta_title", "meta_description", "keyword", "product_description"}
-FORBIDDEN_HEBREW_PHRASES = (
-    "פתרון איכותי",
-    "ביצועים מעולים",
-    "מוצר המיועד לאנשים",
-    "מקסימום נוחות",
-    "מוצרים איכותיים",
-    "מתאים לשימוש מקצועי וביתי",
-)
 SUPPORTED_ISSUES = {
     "generic_ai_meta",
     "duplicate_meta_description",
@@ -171,6 +164,19 @@ def _page_fix_proposals(page: PageAudit) -> list[IStoreSEOApproval]:
                 _system_recommendation(page),
             )
         ]
+    if page.page_type == "home":
+        issue = _first_issue(
+            issues, ["generic_ai_meta", "duplicate_title_similarity", "title_too_long", "title_too_short"]
+        )
+        return [
+            _build_fix(
+                page,
+                issue,
+                "content_draft",
+                _current_snapshot(page),
+                _homepage_recommendation(page),
+            )
+        ]
 
     proposals: list[IStoreSEOApproval] = []
     meta_issues = {
@@ -265,26 +271,51 @@ def _issues(page: PageAudit) -> set[str]:
 
 def _title(page: PageAudit) -> str:
     base = _hebrew_entity_name(page)
-    suffix = " | Compass"
-    title = f"{base} - קנייה חכמה"
-    if len(title) + len(suffix) <= 65:
-        title = f"{title}{suffix}"
-    return _sanitize_customer_copy(page, _truncate(title, 65))
+    keyword = _primary_context_keyword(page)
+    title_by_type = {
+        "brand": f"{base} | מותג ומוצרים ב-Compass",
+        "category": f"{base} | קטגוריה ב-Compass",
+        "article": f"{base} | מדריך Compass",
+        "blog": f"{base} | מדריך Compass",
+        "product": f"{base} | Compass",
+    }
+    title = title_by_type.get(page.page_type or "", f"{base} | Compass")
+    if page.page_type == "product" and keyword and keyword not in base and len(f"{base} {keyword} | Compass") <= 65:
+        title = f"{base} {keyword} | Compass"
+    return _sanitize_customer_copy(page, title, limit=65)
 
 
 def _meta_description(page: PageAudit) -> str:
     base = _hebrew_entity_name(page)
-    page_type_phrase = {
-        "brand": "סקירת מותג ודגמים מובילים",
-        "product": "פרטים חשובים שיעזרו לבחור נכון",
-        "category": "השוואת אפשרויות לפי צורך, שימוש ותקציב",
-        "article": "מדריך קצר וברור לקבלת החלטה טובה יותר",
-    }.get(page.page_type or "", "מידע ברור ותמציתי לקבלת החלטה")
-    if page.page_type == "brand":
-        meta = f"{base} ב-Compass: {page_type_phrase}, יתרונות מרכזיים ושיקולים לפני קנייה."
+    keyword = _primary_context_keyword(page)
+    category_hint = f" בתחום {keyword}" if keyword and keyword not in base else ""
+    page_type = page.page_type or ""
+    if page_type == "brand":
+        meta = (
+            f"עמוד המותג {base} ב-Compass מרכז מוצרים, קטגוריות ומידע שימושי על סדרות, "
+            "מאפיינים ושירות כדי להמשיך לעמודים הרלוונטיים."
+        )
+    elif page_type == "product":
+        meta = (
+            f"גלו את {base} ב-Compass{category_hint}: מפרט ברור, תמונות, אחריות ושירות "
+            "שיעזרו להבין אם זה המוצר המתאים לעמוד, לחצר או למטבח שלכם."
+        )
+    elif page_type == "category":
+        meta = (
+            f"השוו אפשרויות של {base} ב-Compass לפי מפרט, שימושים, אחריות וזמינות, "
+            "עם קישורים למוצרים רלוונטיים ומידע שמצמצם את החיפוש."
+        )
+    elif page_type in {"article", "blog"}:
+        meta = (
+            f"קראו על {base} ב-Compass עם הסברים מעשיים, דגשים להשוואה "
+            "וקישורים למוצרים או קטגוריות רלוונטיים באתר."
+        )
     else:
-        meta = f"{base} ב-Compass: {page_type_phrase}, יתרונות מרכזיים והתאמה לצרכים לפני קנייה."
-    return _sanitize_customer_copy(page, _truncate(_pad_meta(_remove_forbidden_phrases(meta), base, "הבחירה"), 155))
+        meta = (
+            f"{base} ב-Compass עם מידע ממוקד, פרטים שימושיים וקישורים רלוונטיים "
+            "להמשך בדיקה באתר."
+        )
+    return _sanitize_customer_copy(page, _pad_meta(meta, base, keyword or "הנושא"), limit=155)
 
 
 def _keyword_slug(page: PageAudit) -> str:
@@ -312,6 +343,14 @@ def _system_recommendation(page: PageAudit) -> str:
     return (
         "Recommendation only: add noindex, exclude this system URL from SEO automation, "
         "and suppress product/content update tasks. No ISTORE product payload is generated."
+    )
+
+
+def _homepage_recommendation(page: PageAudit) -> str:
+    return sanitize_generated_seo_copy(
+        "Recommendation only: homepage SEO copy requires manual brand strategy review. "
+        "Do not create a simple title or meta rewrite from crawl data alone; review positioning, "
+        "priority categories, shipping/service promises and legal/commercial claims before drafting."
     )
 
 
@@ -433,8 +472,8 @@ def _hebrew_entity_name(page: PageAudit) -> str:
     return _entity_name(page)
 
 
-def _sanitize_customer_copy(page: PageAudit, value: str) -> str:
-    cleaned = value
+def _sanitize_customer_copy(page: PageAudit, value: str, *, limit: int | None = None) -> str:
+    cleaned = sanitize_generated_seo_copy(value)
     for keyword in _json_list(page.context_keywords):
         phrase = _clean_text(str(keyword))
         if phrase and phrase in cleaned and ("," in phrase or re.search(r"[A-Za-z]", phrase)):
@@ -443,7 +482,7 @@ def _sanitize_customer_copy(page: PageAudit, value: str) -> str:
     cleaned = re.sub(r"\s+,", ",", cleaned)
     cleaned = re.sub(r",\s*(?=[.:;])", "", cleaned)
     cleaned = re.sub(r"(?:,\s*){2,}", ", ", cleaned)
-    return _clean_text(cleaned)
+    return sanitize_generated_seo_copy(cleaned, limit=limit)
 
 
 def _entity_name(page: PageAudit) -> str:
@@ -459,21 +498,28 @@ def _hebrew_keywords(page: PageAudit) -> list[str]:
     if page.primary_intent and page.primary_intent != "general":
         values.append(page.primary_intent.replace("_", " "))
     if not values:
-        values.append("בחירה חכמה")
+        values.append("מידע שימושי")
     return list(dict.fromkeys(values))
+
+
+def _primary_context_keyword(page: PageAudit) -> str:
+    for keyword in _json_list(page.context_keywords):
+        cleaned = _clean_text(str(keyword))
+        if cleaned and re.search(r"[֐-׿]", cleaned) and not re.search(r"[A-Za-z]", cleaned):
+            return _truncate(cleaned, 28)
+    if page.primary_intent and re.search(r"[֐-׿]", page.primary_intent):
+        return _truncate(page.primary_intent, 28)
+    return ""
 
 
 def _pad_meta(meta: str, base: str, keyword_text: str) -> str:
     if len(meta) >= 120:
         return meta
-    return f"{meta} כולל פירוט שימושים, התאמה והשוואה כדי לבחור {base} נכון עבור {keyword_text}."
+    return f"{meta} כולל פירוט שימושים, מפרט ושירות כדי לבדוק את {base} בהקשר של {keyword_text}."
 
 
 def _remove_forbidden_phrases(value: str) -> str:
-    cleaned = value
-    for phrase in FORBIDDEN_HEBREW_PHRASES:
-        cleaned = cleaned.replace(phrase, "")
-    return _clean_text(cleaned)
+    return sanitize_generated_seo_copy(value)
 
 
 def _clean_text(value: str) -> str:
@@ -481,10 +527,7 @@ def _clean_text(value: str) -> str:
 
 
 def _truncate(value: str, limit: int) -> str:
-    value = _clean_text(value)
-    if len(value) <= limit:
-        return value
-    return value[: limit - 1].rstrip(" ,-|/") + "…"
+    return truncate_without_ellipsis(value, limit)
 
 
 def _url_slug(url: str) -> str:

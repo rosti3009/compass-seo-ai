@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from html import unescape
 from typing import Any
 
+from app.services.seo_copy_quality import sanitize_generated_seo_copy, truncate_without_ellipsis
+
 MIN_TITLE_LENGTH = 30
 MAX_TITLE_LENGTH = 60
 MIN_META_DESCRIPTION_LENGTH = 70
@@ -144,11 +146,10 @@ def analyze_istore_product_seo(payload: dict[str, Any]) -> ProductSEOAnalysis:
         issues.append("חסר URL מוצר")
         recommendations.append("להציג כתובת קנונית למוצר לצורך אינדוקס ודיווח.")
 
-    suggested_title = _clip_text(f"{name} | קומפס", MAX_TITLE_LENGTH)
+    suggested_title = sanitize_generated_seo_copy(_clip_text(f"{name} | קומפס", MAX_TITLE_LENGTH))
     suggested_h1 = name
-    suggested_meta_description = _clip_text(
-        _suggested_meta_description(name, category, price),
-        MAX_META_DESCRIPTION_LENGTH,
+    suggested_meta_description = sanitize_generated_seo_copy(
+        _clip_text(_suggested_meta_description(name, category, price), MAX_META_DESCRIPTION_LENGTH)
     )
 
     return ProductSEOAnalysis(
@@ -308,10 +309,7 @@ def _price(product: dict[str, Any]) -> str | None:
 
 
 def _clip_text(value: str, max_length: int) -> str:
-    value = _clean_text(value)
-    if len(value) <= max_length:
-        return value
-    return value[: max_length - 1].rstrip() + "…"
+    return truncate_without_ellipsis(_clean_text(value), max_length)
 
 
 def _suggested_meta_description(name: str, category: str | None, price: str | None) -> str:

@@ -281,3 +281,48 @@ def test_verify_mapping_endpoint_reports_conflicts_and_blocks_publishable(
     assert fix.mapping_conflict is True
     assert fix.publish_mapping_verified is False
     assert fix.to_dict()["publishable"] is False
+
+
+def test_all_forbidden_hebrew_phrases_and_ellipsis_are_filtered_from_final_copy(
+    client: TestClient, db_session: Session
+) -> None:
+    from app.services.seo_copy_quality import FORBIDDEN_HEBREW_PHRASES
+
+    _page(
+        db_session,
+        _crawl(db_session),
+        title="גריל גז מקצועי ... דגם ארוך מאוד עם תיאור שאסור שיחתך באליפסיס",
+        h1="גריל גז מקצועי ... דגם ארוך מאוד עם תיאור שאסור שיחתך באליפסיס",
+        missing_fields="generic_ai_meta,title_too_long",
+    )
+
+    client.post("/seo/fixes/generate-from-latest-crawl", json={"dry_run": False})
+
+    fixes = db_session.query(IStoreSEOApproval).all()
+    assert fixes
+    for fix in fixes:
+        assert "..." not in fix.proposed_value
+        assert "…" not in fix.proposed_value
+        assert all(phrase not in fix.proposed_value for phrase in FORBIDDEN_HEBREW_PHRASES)
+
+
+def test_homepage_generates_manual_strategy_recommendation_not_title_or_meta_rewrite(
+    client: TestClient, db_session: Session
+) -> None:
+    _page(
+        db_session,
+        _crawl(db_session),
+        url="https://example.com/",
+        title="Compass",
+        h1="Compass",
+        page_type="home",
+        missing_fields="generic_ai_meta,title_too_long",
+    )
+
+    client.post("/seo/fixes/generate-from-latest-crawl", json={"dry_run": False})
+
+    fix = db_session.query(IStoreSEOApproval).one()
+    assert fix.target_type == "recommendation"
+    assert fix.field_path == "content_draft"
+    assert "homepage SEO copy requires manual brand strategy review" in fix.proposed_value
+    assert json.loads(fix.proposed_payload_json)["api_publish_allowed"] is False
