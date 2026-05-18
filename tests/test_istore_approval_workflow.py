@@ -64,6 +64,9 @@ def _approved_fix(db_session: Session, *, proposed_payload: dict[str, object] | 
     fix = IStoreSEOApproval(
         target_type="product",
         target_id="123",
+        istore_product_id="123",
+        publish_mapping_verified=True,
+        mapping_conflict=False,
         field_path="meta_title",
         current_value="Bad",
         proposed_value="Better title",
@@ -399,3 +402,35 @@ def test_product_payload_does_not_include_commerce_fields_after_generation(db_se
     for fix in db_session.query(IStoreSEOApproval).filter(IStoreSEOApproval.target_type == "product").all():
         payload_text = json.dumps(json.loads(fix.proposed_payload_json), ensure_ascii=False)
         assert not any(f'"{field}"' in payload_text for field in blocked)
+
+def test_unverified_mapping_blocks_publish_and_never_calls_wrong_id(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fix = _approved_fix(db_session)
+    fix.target_id = "999"
+    fix.istore_product_id = None
+    fix.publish_mapping_verified = False
+    db_session.commit()
+    client = MockIStoreClient()
+    monkeypatch.setattr("app.services.istore_approval.settings.istore_publish_enabled", True)
+    monkeypatch.setattr("app.services.istore_approval.settings.istore_safe_mode", False)
+
+    with pytest.raises(ValueError, match="ISTORE product mapping not verified"):
+        publish_approved_fix(db_session, fix, approval_confirmed=True, client=client)
+
+    assert client.put_payloads == []
+
+
+def test_conflicting_mapping_blocks_publish(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    fix = _approved_fix(db_session)
+    fix.publish_mapping_verified = False
+    fix.mapping_conflict = True
+    db_session.commit()
+    client = MockIStoreClient()
+    monkeypatch.setattr("app.services.istore_approval.settings.istore_publish_enabled", True)
+    monkeypatch.setattr("app.services.istore_approval.settings.istore_safe_mode", False)
+
+    with pytest.raises(ValueError, match="ISTORE product mapping not verified"):
+        publish_approved_fix(db_session, fix, approval_confirmed=True, client=client)
+
+    assert client.put_payloads == []

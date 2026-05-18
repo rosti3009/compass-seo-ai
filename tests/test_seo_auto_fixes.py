@@ -209,3 +209,75 @@ def test_publishing_safety_gates_remain_unchanged() -> None:
         validate_istore_payload({"meta_title": "כותרת", "price": "99"})
     with pytest.raises(ValueError, match="not allowed"):
         validate_istore_payload({"h1": "לא לפרסום אוטומטי"})
+
+
+class MappingClient:
+    def __init__(self, products: list[dict[str, object]]) -> None:
+        self.products = products
+
+    def list_products(self) -> dict[str, object]:
+        return {"products": self.products}
+
+
+def test_crawler_product_fix_uses_no_page_audit_id_as_publish_target(client: TestClient, db_session: Session) -> None:
+    page = _page(db_session, _crawl(db_session), missing_fields="generic_ai_meta")
+
+    response = client.post("/seo/fixes/generate-from-latest-crawl", json={"dry_run": False})
+
+    assert response.status_code == 201
+    fix = db_session.query(IStoreSEOApproval).one()
+    assert fix.source_page_audit_id == page.id
+    assert fix.source_url == page.url
+    assert fix.target_id != str(page.id)
+    assert fix.target_id == ""
+    assert fix.publish_mapping_verified is False
+    assert fix.to_dict()["publishable"] is False
+
+
+def test_verify_mapping_endpoint_maps_slug_and_pending_view_exposes_status(
+    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _page(db_session, _crawl(db_session), missing_fields="generic_ai_meta")
+    client.post("/seo/fixes/generate-from-latest-crawl", json={"dry_run": False})
+    monkeypatch.setattr(
+        "app.services.istore_mapping.IStoreClient.from_settings",
+        lambda: MappingClient([{"product_id": "real-123", "url": "https://example.com/products/gas-grill"}]),
+    )
+
+    response = client.post("/seo/fixes/verify-istore-mappings")
+
+    assert response.status_code == 200
+    assert response.json()["mapped"][0]["istore_product_id"] == "real-123"
+    fix = db_session.query(IStoreSEOApproval).one()
+    assert fix.target_id == "real-123"
+    assert fix.istore_product_id == "real-123"
+    assert fix.publish_mapping_verified is True
+    pending = client.get("/seo/fixes/pending").json()["fixes"][0]
+    assert pending["publish_mapping_verified"] is True
+    assert pending["istore_product_id"] == "real-123"
+    assert pending["publishable"] is False
+
+
+def test_verify_mapping_endpoint_reports_conflicts_and_blocks_publishable(
+    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _page(db_session, _crawl(db_session), missing_fields="generic_ai_meta")
+    client.post("/seo/fixes/generate-from-latest-crawl", json={"dry_run": False})
+    monkeypatch.setattr(
+        "app.services.istore_mapping.IStoreClient.from_settings",
+        lambda: MappingClient(
+            [
+                {"product_id": "real-1", "url": "https://example.com/products/gas-grill"},
+                {"product_id": "real-2", "keyword": "gas-grill"},
+            ]
+        ),
+    )
+
+    response = client.post("/seo/fixes/verify-istore-mappings")
+
+    assert response.status_code == 200
+    assert response.json()["conflicts"][0]["candidate_product_ids"] == ["real-1", "real-2"]
+    fix = db_session.query(IStoreSEOApproval).one()
+    assert fix.mapping_conflict is True
+    assert fix.publish_mapping_verified is False
+    assert fix.to_dict()["publishable"] is False
