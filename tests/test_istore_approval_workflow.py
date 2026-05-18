@@ -16,6 +16,7 @@ from app.services.istore_approval import (
     validate_istore_payload,
 )
 
+
 @pytest.fixture
 def db_session() -> Generator[Session, None, None]:
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
@@ -271,7 +272,8 @@ def test_rollback_published_fix_is_gated_and_seo_only(db_session: Session, monke
 
     assert result["verified"] is True
     assert result["fix"]["status"] == "ROLLED_BACK"
-     assert client.put_payloads == [{"meta_title": "Bad"}]
+    assert client.put_payloads == [{"meta_title": "Bad"}]
+
 
 def test_generated_product_drafts_have_no_english_fallback_text(db_session: Session) -> None:
     scan_istore_seo_opportunities(db_session, client=MockIStoreClient())

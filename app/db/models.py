@@ -8,14 +8,15 @@ from app.db.database import Base
 from app.services.seo_url_filters import get_url_exclusion_reason
 
 
-def _json_load(value: str | None) -> object:
+def _json_load(value: str | None, default: object | None = None) -> object:
     """Safely parse a JSON model field for API responses."""
+    fallback = {} if default is None else default
     if not value:
-        return {}
+        return fallback
     try:
         return json.loads(value)
     except json.JSONDecodeError:
-        return {}
+        return fallback
 
 
 class CrawlRun(Base):
@@ -66,6 +67,11 @@ class PageAudit(Base):
     page_type: Mapped[str] = mapped_column(String(32), default="unknown")
     seo_score: Mapped[float] = mapped_column(Float, default=0.0)
     seo_score_delta: Mapped[float] = mapped_column(Float, default=0.0)
+    seo_risk_level: Mapped[str] = mapped_column(String(32), default="low")
+    remediation_suggestions: Mapped[str] = mapped_column(Text, default="[]")
+    context_keywords: Mapped[str] = mapped_column(Text, default="[]")
+    primary_intent: Mapped[str] = mapped_column(String(64), default="general")
+    commercial_intent_score: Mapped[float] = mapped_column(Float, default=0.0)
     crawled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
     crawl_run: Mapped[CrawlRun] = relationship(back_populates="pages")
@@ -87,6 +93,11 @@ class PageAudit(Base):
             "internal_links": self.internal_links,
             "missing_fields": [field for field in self.missing_fields.split(",") if field],
             "page_type": self.page_type or "unknown",
+            "seo_risk_level": self.seo_risk_level or "low",
+            "remediation_suggestions": _json_load(self.remediation_suggestions, []),
+            "context_keywords": _json_load(self.context_keywords, []),
+            "primary_intent": self.primary_intent or "general",
+            "commercial_intent_score": self.commercial_intent_score or 0.0,
             "seo_score": self.seo_score or 0.0,
             "seo_score_delta": self.seo_score_delta or 0.0,
             "crawled_at": self.crawled_at.isoformat() if self.crawled_at else None,
