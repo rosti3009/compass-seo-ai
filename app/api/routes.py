@@ -53,6 +53,7 @@ from app.services.istore_approval import (
 from app.services.istore_approval import (
     reject_fix as reject_istore_approval_fix,
 )
+from app.services.istore_mapping import verify_pending_istore_mappings
 from app.services.istore_product_seo import analyze_istore_product_seo
 from app.services.seo_auto_fixes import AutoFixOptions, generate_fixes_from_latest_crawl, pending_fixes_review
 from app.services.seo_automation import run_seo_automation
@@ -1652,6 +1653,16 @@ def generate_seo_fixes_from_latest_crawl(
         ),
     )
 
+
+@router.post("/seo/fixes/verify-istore-mappings")
+def verify_istore_fix_mappings(db: DatabaseSession) -> dict[str, object]:
+    """Verify crawler SEO fixes against real ISTORE product IDs before any publish can occur."""
+    try:
+        return verify_pending_istore_mappings(db)
+    except MissingIStoreSettingsError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except IStoreAPIError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
 @router.get("/seo/fixes/pending")
 def pending_seo_fixes(db: DatabaseSession, limit: int = 250) -> dict[str, object]:

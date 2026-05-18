@@ -229,8 +229,12 @@ def _build_fix(
     }
     approval = IStoreSEOApproval(
         target_type=target_type,
-        target_id=_target_id(page),
+        target_id="",
         target_url=page.url,
+        source_page_audit_id=page.id,
+        source_url=page.url,
+        publish_mapping_verified=False,
+        mapping_conflict=False,
         field_path=field_path,
         current_value=current_value,
         proposed_value=proposed_value,
@@ -360,7 +364,7 @@ def _safe_publish_status_for(target_type: str, field_path: str) -> str:
     if field_path == "keyword":
         return "approval_required_keyword_slug_never_auto_publish"
     if target_type == "product" and field_path in SAFE_PUBLISHABLE_FIELDS:
-        return "approval_required_publish_gated"
+        return "non_publishable_until_istore_mapping_verified"
     return "manual_review_only"
 
 

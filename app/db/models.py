@@ -511,6 +511,11 @@ class IStoreSEOApproval(Base):
     target_type: Mapped[str] = mapped_column(String(32), default="product", nullable=False, index=True)
     target_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     target_url: Mapped[str | None] = mapped_column(String(1024), nullable=True, index=True)
+    source_page_audit_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    source_url: Mapped[str | None] = mapped_column(String(1024), nullable=True, index=True)
+    istore_product_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    publish_mapping_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    mapping_conflict: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     field_path: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     current_value: Mapped[str | None] = mapped_column(Text, nullable=True)
     proposed_value: Mapped[str] = mapped_column(Text, default="")
@@ -540,6 +545,19 @@ class IStoreSEOApproval(Base):
             "target_type": self.target_type,
             "target_id": self.target_id,
             "target_url": self.target_url,
+            "source_page_audit_id": self.source_page_audit_id,
+            "source_url": self.source_url,
+            "istore_product_id": self.istore_product_id,
+            "publish_mapping_verified": self.publish_mapping_verified,
+            "mapping_conflict": self.mapping_conflict,
+            "publishable": bool(
+                self.target_type == "product"
+                and self.status == "APPROVED"
+                and self.publish_mapping_verified
+                and self.istore_product_id
+                and self.target_id == self.istore_product_id
+                and not self.mapping_conflict
+            ),
             "field_path": self.field_path,
             "current_value": self.current_value,
             "proposed_value": self.proposed_value,

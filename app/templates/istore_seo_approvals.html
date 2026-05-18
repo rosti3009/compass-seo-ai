@@ -28,6 +28,7 @@
               <th>סיבת SEO</th>
               <th>סיכון</th>
               <th>סטטוס</th>
+              <th>מיפוי ISTORE</th>
               <th>יומן פרסום</th>
               <th>פעולות</th>
             </tr>
@@ -54,6 +55,16 @@
               <td>{{ fix.risk_level }}</td>
               <td>{{ fix.status }}</td>
               <td>
+                {% if data.mapping_conflict %}
+                  <strong>קונפליקט מיפוי</strong>
+                {% elif data.publish_mapping_verified %}
+                  מאומת: {{ data.istore_product_id }}
+                {% else %}
+                  לא מאומת
+                {% endif %}
+                <br>ניתן לפרסום: {{ 'כן' if data.publishable else 'לא' }}
+              </td>
+              <td>
                 {% for entry in data.publish_log[-4:] %}
                 <div><strong>{{ entry.timestamp }}</strong>: {{ entry.message }}</div>
                 {% else %}
@@ -73,7 +84,7 @@
               </td>
             </tr>
             {% else %}
-            <tr><td colspan="10">אין עדיין טיוטות לאישור.</td></tr>
+            <tr><td colspan="11">אין עדיין טיוטות לאישור.</td></tr>
             {% endfor %}
           </tbody>
         </table>

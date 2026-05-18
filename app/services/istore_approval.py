@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.models import IStoreSEOApproval, PageAudit
 from app.integrations.istore import IStoreAPIError, IStoreClient, _redact_token
+from app.services.istore_mapping import publishable_mapping
 
 ALLOWED_ISTORE_FIELDS = {"product_description", "keyword", "meta_title", "meta_description"}
 BLOCKED_ISTORE_FIELDS = {
@@ -172,6 +173,9 @@ def publish_approved_fix(
     payload = _json_dict(approval.proposed_payload_json)
     validate_istore_payload(payload)
 
+    if not publishable_mapping(approval):
+        raise ValueError("ISTORE product mapping not verified")
+
     if dry_run:
         _append_publish_log(
             approval,
@@ -201,12 +205,13 @@ def publish_approved_fix(
     try:
         _append_publish_log(
             approval,
-           f"נשלח עדכון SEO בלבד ל-ISTORE עבור {approval.field_path}",
+            f"נשלח עדכון SEO בלבד ל-ISTORE עבור {approval.field_path}",
         )
-        response = client.update_product(approval.target_id, payload)
+        product_id = str(approval.istore_product_id)
+        response = client.update_product(product_id, payload)
         approval.publish_response_json = json.dumps(_redacted_json(response), ensure_ascii=False)
         approval.publish_timestamp = datetime.now(UTC)
-        fetched = client.get_product(approval.target_id)
+        fetched = client.get_product(product_id)
     except IStoreAPIError as exc:
         approval.status = "FAILED_REVIEW_REQUIRED"
         approval.publish_response_json = json.dumps(
@@ -274,6 +279,9 @@ def rollback_published_fix(
     payload = _json_dict(approval.rollback_payload_json)
     validate_istore_payload(payload)
 
+    if not publishable_mapping(approval):
+        raise ValueError("ISTORE product mapping not verified")
+
     if dry_run:
         _append_publish_log(approval, "בדיקת שחזור יבשה עברה בהצלחה; לא נשלחה בקשה ל-ISTORE")
         db.add(approval)
@@ -300,9 +308,10 @@ def rollback_published_fix(
             approval,
             f"נשלח שחזור SEO בלבד ל-ISTORE עבור {approval.field_path}",
         )
-        response = client.update_product(approval.target_id, payload)
+        product_id = str(approval.istore_product_id)
+        response = client.update_product(product_id, payload)
         approval.publish_response_json = json.dumps(_redacted_json(response), ensure_ascii=False)
-        fetched = client.get_product(approval.target_id)
+        fetched = client.get_product(product_id)
     except IStoreAPIError as exc:
         approval.status = "ROLLBACK_FAILED_REVIEW_REQUIRED"
         approval.publish_response_json = json.dumps(
@@ -560,6 +569,10 @@ def _approval_from_proposal(
         target_type="product",
         target_id=product_id,
         target_url=url,
+        source_url=url,
+        istore_product_id=product_id,
+        publish_mapping_verified=True,
+        mapping_conflict=False,
         field_path=proposal.field_path,
         current_value=proposal.current_value,
         proposed_value=proposal.proposed_value,
@@ -682,6 +695,10 @@ def _site_page_content_opportunities(
             target_type="category" if _looks_like_category(page.url) else "page",
             target_id=page.url,
             target_url=page.url,
+            source_page_audit_id=page.id,
+            source_url=page.url,
+            publish_mapping_verified=False,
+            mapping_conflict=False,
             field_path="content_draft",
             current_value=page.meta_description or page.title or "",
             proposed_value=json.dumps(payload, ensure_ascii=False),
