@@ -67,6 +67,7 @@
               {% if fix.status == 'PUBLISHED' %}<span class="badge status-badge status-published">פורסם</span>{% endif %}
               {% if fix.publish_mapping_verified %}<span class="badge status-badge status-verified">אומת</span>{% else %}<span class="badge status-badge status-missing">מיפוי חסר</span>{% endif %}
               {% if fix.mapping_conflict %}<span class="badge status-badge status-conflict">קונפליקט מיפוי</span>{% endif %}
+              {% if fix.mapping_confidence and fix.mapping_confidence < 90 %}<span class="badge status-badge status-risk">ביטחון נמוך</span>{% endif %}
               {% if not fix.publishable %}<span class="badge status-badge status-blocked">לא ניתן לפרסום</span>{% endif %}
               {% if fix.risk_level in ['high', 'critical'] %}<span class="badge status-badge status-risk">סיכון גבוה</span>{% endif %}
               {% if fix.page_type == 'system' %}<span class="badge status-badge status-system">עמוד מערכת</span>{% endif %}
@@ -79,6 +80,9 @@
             <div><dt>risk_level</dt><dd>{{ fix.risk_level }}</dd></div>
             <div><dt>priority_score</dt><dd>{{ '%.2f'|format(fix.priority_score) }}</dd></div>
             <div><dt>mapping verified</dt><dd>{{ 'כן' if fix.publish_mapping_verified else 'לא' }}</dd></div>
+            <div><dt>matched product</dt><dd>{{ fix.istore_product_id or '—' }}</dd></div>
+            <div><dt>confidence score</dt><dd>{{ fix.mapping_confidence or 0 }}</dd></div>
+            <div><dt>mapping source</dt><dd>{{ fix.mapping_source or '—' }}</dd></div>
             <div><dt>publishable</dt><dd>{{ 'כן' if fix.publishable else 'לא' }}</dd></div>
           </dl>
 
@@ -94,6 +98,13 @@
             <summary>עריכת טיוטה</summary>
             <label class="draft-label">proposed value<textarea data-edit-value rows="4">{{ new_value }}</textarea></label>
             <button type="button" class="secondary-button inline-action" data-result-target="pending-action-result" data-action="edit-fix" data-endpoint="/integrations/istore/seo-approvals/{{ fix.id }}/draft" data-label="שמירת טיוטה">שמור טיוטה</button>
+          </details>
+
+          <details class="draft-editor">
+            <summary>שיוך ידני למוצר ISTORE</summary>
+            <p class="empty">מיועד למיפוי חסר, אמביוולנטי או בעל ביטחון נמוך. הזן Product ID מסונכרן מתוך <code>/istore/products</code>.</p>
+            <label class="draft-label">ISTORE product id<input data-manual-product-id type="text" value="{{ fix.istore_product_id or '' }}" dir="ltr"></label>
+            <button type="button" class="secondary-button inline-action" data-result-target="pending-action-result" data-action="assign-product" data-endpoint="/seo/fixes/{{ fix.id }}/assign-product" data-label="שיוך מוצר">שייך מוצר ידנית</button>
           </details>
 
           <div class="actions review-actions" aria-label="פעולות סקירה">

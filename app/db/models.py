@@ -502,6 +502,83 @@ class SEOStrategyRecommendation(Base):
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 
+class IStoreProduct(Base):
+    """Locally synchronized ISTORE product catalog row used for safe SEO mapping."""
+
+    __tablename__ = "istore_products"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    istore_product_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    product_name: Mapped[str | None] = mapped_column(String(512), nullable=True, index=True)
+    slug: Mapped[str | None] = mapped_column(String(512), nullable=True, index=True)
+    canonical_url: Mapped[str | None] = mapped_column(String(1024), nullable=True, index=True)
+    product_url: Mapped[str | None] = mapped_column(String(1024), nullable=True, index=True)
+    brand: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    category: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    meta_title: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    meta_description: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    keyword: Mapped[str | None] = mapped_column(String(512), nullable=True, index=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+    )
+
+    mappings: Mapped[list["IStoreProductMapping"]] = relationship(back_populates="product")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "istore_product_id": self.istore_product_id,
+            "product_name": self.product_name,
+            "slug": self.slug,
+            "canonical_url": self.canonical_url,
+            "product_url": self.product_url,
+            "brand": self.brand,
+            "category": self.category,
+            "meta_title": self.meta_title,
+            "meta_description": self.meta_description,
+            "keyword": self.keyword,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class IStoreProductMapping(Base):
+    """Verified URL/slug mapping between crawler fixes and synchronized ISTORE products."""
+
+    __tablename__ = "istore_product_mappings"
+    __table_args__ = (UniqueConstraint("istore_product_id", "target_url", name="uq_istore_product_target_url"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    istore_product_id: Mapped[str] = mapped_column(
+        ForeignKey("istore_products.istore_product_id"), nullable=False, index=True
+    )
+    canonical_url: Mapped[str | None] = mapped_column(String(1024), nullable=True, index=True)
+    slug: Mapped[str | None] = mapped_column(String(512), nullable=True, index=True)
+    normalized_slug: Mapped[str | None] = mapped_column(String(512), nullable=True, index=True)
+    target_url: Mapped[str] = mapped_column(String(1024), nullable=False, index=True)
+    last_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+    mapping_confidence: Mapped[int] = mapped_column(Integer, default=0, nullable=False, index=True)
+    mapping_source: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+    product: Mapped[IStoreProduct] = relationship(back_populates="mappings")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "istore_product_id": self.istore_product_id,
+            "canonical_url": self.canonical_url,
+            "slug": self.slug,
+            "normalized_slug": self.normalized_slug,
+            "target_url": self.target_url,
+            "last_verified_at": self.last_verified_at.isoformat() if self.last_verified_at else None,
+            "active": self.active,
+            "mapping_confidence": self.mapping_confidence,
+            "mapping_source": self.mapping_source,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class IStoreSEOApproval(Base):
     """Human-approved ISTORE SEO change draft with publish/rollback audit data."""
 
@@ -516,6 +593,8 @@ class IStoreSEOApproval(Base):
     istore_product_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     publish_mapping_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     mapping_conflict: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    mapping_confidence: Mapped[int] = mapped_column(Integer, default=0, nullable=False, index=True)
+    mapping_source: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     field_path: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     current_value: Mapped[str | None] = mapped_column(Text, nullable=True)
     proposed_value: Mapped[str] = mapped_column(Text, default="")
@@ -550,6 +629,8 @@ class IStoreSEOApproval(Base):
             "istore_product_id": self.istore_product_id,
             "publish_mapping_verified": self.publish_mapping_verified,
             "mapping_conflict": self.mapping_conflict,
+            "mapping_confidence": self.mapping_confidence or 0,
+            "mapping_source": self.mapping_source,
             "publishable": bool(
                 self.target_type == "product"
                 and self.status == "APPROVED"
@@ -557,6 +638,7 @@ class IStoreSEOApproval(Base):
                 and self.istore_product_id
                 and self.target_id == self.istore_product_id
                 and not self.mapping_conflict
+                and ((self.mapping_confidence or 100) if self.publish_mapping_verified else 0) >= 90
             ),
             "field_path": self.field_path,
             "current_value": self.current_value,
