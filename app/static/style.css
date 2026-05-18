@@ -237,3 +237,82 @@ a {
 .istore-recommendations h3 {
   margin-top: 0;
 }
+
+.safe-message,
+.notice {
+  background: #ecfdf3;
+  border: 1px solid #abefc6;
+  border-radius: 16px;
+  color: #067647;
+  padding: 12px 16px;
+}
+
+.notice.error {
+  background: #fff1f3;
+  border-color: #fecdd6;
+  color: #b42318;
+}
+
+.result-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 16px 0;
+}
+
+.result-grid span {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.spinner {
+  animation: spin 0.9s linear infinite;
+  border: 3px solid #d0d5dd;
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  display: inline-block;
+  height: 18px;
+  margin-inline-end: 8px;
+  vertical-align: middle;
+  width: 18px;
+}
+
+.inline-action {
+  margin: 4px;
+  padding: 9px 12px;
+}
+
+pre {
+  white-space: pre-wrap;
+}
+
+.rtl-page th,
+.rtl-page td {
+  text-align: right;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 760px) {
+  .result-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.sr-only {
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}

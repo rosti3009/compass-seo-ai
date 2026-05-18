@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>תוצאות סריקה אחרונה</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body class="rtl-page">
+    <main class="container">
+      <section class="hero compact">
+        <p class="eyebrow">Crawler Results</p>
+        <h1>תוצאות סריקה אחרונה</h1>
+        <p>תצוגת HTML קריאה עבור {{ target_domain }}.</p>
+        <div class="actions"><a class="button-link" href="/seo/operations-view">חזרה ללוח התפעול</a><a class="button-link" href="/seo/fixes/pending-view">פתח תיקונים ממתינים</a></div>
+      </section>
+      <section class="panel">
+        {% if crawl_run %}
+        <p><strong>crawl_run_id:</strong> {{ crawl_run.id }} · <strong>pages_crawled:</strong> {{ crawl_run.pages_crawled }} · <strong>average_score:</strong> {{ crawl_run.average_score }}</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>URL</th><th>page_type</th><th>seo_score</th><th>seo_risk_level</th><th>missing_fields</th><th>remediation_suggestions</th><th>context_keywords</th><th>excluded_reason</th></tr></thead>
+            <tbody>
+              {% for page in pages %}
+              {% set data = page.to_dict() %}
+              <tr>
+                <td dir="ltr"><a href="{{ page.url }}" target="_blank" rel="noreferrer">{{ page.url }}</a></td>
+                <td>{{ data.page_type }}</td>
+                <td>{{ data.seo_score }}</td>
+                <td>{{ 'סיכון קריטי' if data.seo_risk_level == 'critical' else ('סיכון גבוה' if data.seo_risk_level == 'high' else data.seo_risk_level) }}</td>
+                <td>{{ data.missing_fields | join(', ') if data.missing_fields else '—' }}</td>
+                <td>{{ data.remediation_suggestions | join(', ') if data.remediation_suggestions else '—' }}</td>
+                <td>{{ data.context_keywords | join(', ') if data.context_keywords else '—' }}</td>
+                <td>{{ data.excluded_reason or '—' }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="empty">אין עדיין סריקות להצגה.</p>
+        {% endif %}
+      </section>
+    </main>
+  </body>
+</html>

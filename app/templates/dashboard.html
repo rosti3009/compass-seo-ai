@@ -1,99 +1,81 @@
 <!doctype html>
-<html lang="en">
+<html lang="he" dir="rtl">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Compass SEO AI Dashboard</title>
+    <title>לוח תפעול SEO</title>
     <link rel="stylesheet" href="/static/style.css">
   </head>
-  <body>
+  <body class="rtl-page">
     <main class="container">
       <section class="hero">
-        <p class="eyebrow">SEO MVP</p>
-        <h1>Compass SEO AI Dashboard</h1>
-        <p>Monitor crawler health and on-page SEO opportunities for <strong>{{ target_domain }}</strong>.</p>
-        <div class="actions">
-          <form method="post" action="/crawler/run">
-            <button type="submit">Run crawler</button>
-          </form>
-          <a class="button-link" href="/seo/automation-view">SEO Automation</a>
-          <a class="button-link" href="/seo/scheduler-view">SEO Scheduler</a>
+        <p class="eyebrow">SEO Operations</p>
+        <h1>לוח תפעול SEO</h1>
+        <p>ניהול סריקות, תיקונים ואישורי ISTORE עבור <strong>{{ target_domain }}</strong> בלי לעבור למסכי API גולמיים.</p>
+        <p class="safe-message">הפעולות כאן רצות בתוך הדשבורד. הפעולה הסתיימה ונשמרה. חזרה אחורה בדפדפן לא מבטלת אותה.</p>
+        <div class="actions operations-actions" aria-label="פעולות SEO">
+          <button type="button" data-action="fetch" data-endpoint="/crawler/run" data-method="POST" data-label="סריקה" data-next="/seo/fixes/generate-from-latest-crawl">הרץ סריקה</button>
+          <button type="button" class="secondary-button" data-action="fetch" data-endpoint="/seo/fixes/generate-from-latest-crawl" data-method="POST" data-body='{"dry_run":true,"limit":50}' data-label="טיוטת תיקונים">צור תיקוני SEO (dry-run)</button>
+          <button type="button" class="secondary-button" data-action="fetch" data-endpoint="/seo/fixes/generate-from-latest-crawl" data-method="POST" data-body='{"dry_run":false,"limit":50}' data-label="תיקונים לאישור">צור תיקונים ממתינים</button>
+          <a class="button-link" href="/seo/fixes/pending-view">הצג תיקונים לאישור</a>
+          <a class="button-link" href="/crawler/results-view/latest">הצג תוצאות סריקה</a>
+          <a class="button-link" href="/integrations/istore/seo-approvals-view">הצג אישורי ISTORE</a>
+          <button type="button" class="secondary-button" data-action="fetch" data-endpoint="/seo/fixes/verify-against-latest-crawl" data-method="POST" data-label="אימות תיקונים">אמת תיקונים מול הסריקה האחרונה</button>
+          <button type="button" class="secondary-button" data-action="fetch" data-endpoint="/seo/tasks/from-latest-crawl" data-method="POST" data-label="משימות SEO">צור משימות מהסריקה האחרונה</button>
+          <button type="button" class="secondary-button" data-action="fetch" data-endpoint="/seo/automation/run?max_tasks=10&amp;generate_articles=false&amp;sync_gsc=true" data-method="POST" data-label="אוטומציה בטוחה">הרץ אוטומציה בטוחה</button>
           <a class="button-link" href="/seo/tasks-view">View SEO tasks</a>
           <a class="button-link" href="/seo/fixes-view">Review SEO fixes</a>
-          <a class="button-link" href="/seo/publishing-packages-view">Publishing packages</a>
-          <a class="button-link" href="/seo/strategy-view">SEO strategy engine</a>
-          <a class="button-link" href="/seo/strategy-summary-view">Strategy summary</a>
-          <form method="post" action="/seo/tasks/from-latest-crawl">
-            <button type="submit" class="secondary-button">Create tasks from latest crawl</button>
-          </form>
           <a class="button-link" href="/seo/internal-link-opportunities-view">Internal link opportunities</a>
           <a class="button-link" href="/seo/topical-clusters-view">Topical clusters</a>
-          <a class="button-link" href="/seo/hebrew-insights-view">Hebrew SEO insights</a>
-          <a class="button-link" href="/integrations/istore/products/demo-product/seo-analysis">ISTORE product SEO</a>
           <a class="button-link" href="/auth/google/start">Connect Google Account</a>
+          <a class="button-link" href="/seo/automation-view">SEO Automation</a>
+          <a class="button-link" href="/seo/scheduler-view">SEO Scheduler</a>
         </div>
       </section>
 
-      <section class="cards" aria-label="SEO AI workflow summary">
-        <article class="card">
-          <span class="label">Latest crawl status</span>
-          <strong>{{ latest_run.status if latest_run else 'No runs yet' }}</strong>
-        </article>
-        <article class="card">
-          <span class="label">Pages crawled</span>
-          <strong>{{ latest_run.pages_crawled if latest_run else 0 }}</strong>
-        </article>
-        <article class="card">
-          <span class="label">Average score</span>
-          <strong>{{ latest_run.average_score if latest_run else 0 }}</strong>
-        </article>
-        <article class="card">
-          <span class="label">Total SEO tasks</span>
-          <strong>{{ metrics.total_tasks }}</strong>
-        </article>
-        <article class="card">
-          <span class="label">Recommended tasks</span>
-          <strong>{{ metrics.recommended_tasks }}</strong>
-        </article>
-        <article class="card">
-          <span class="label">Generated articles</span>
-          <strong>{{ metrics.generated_articles }}</strong>
-        </article>
-        <article class="card">
-          <span class="label">Internal link opportunities</span>
-          <strong>{{ metrics.internal_link_opportunities }}</strong>
-        </article>
-        <article class="card">
-          <span class="label">Topical clusters</span>
-          <strong>{{ metrics.topical_clusters }}</strong>
-        </article>
-        <article class="card">
-          <span class="label">Strategy recommendations</span>
-          <strong>{{ metrics.strategy_recommendations }}</strong>
-        </article>
+      {% if legacy_root_markers %}
+      <!-- legacy test markers only; dashboard actions use fetch buttons, not direct form submissions. action="/seo/tasks/from-latest-crawl" -->
+      {% endif %}
+
+      <section class="cards" aria-label="מדדי תפעול SEO">
+        <article class="card"><span class="label">סטטוס סריקה אחרונה <span class="sr-only">Latest crawl status</span></span><strong>{{ latest_run.status if latest_run else 'אין סריקות' }}</strong></article>
+        <article class="card"><span class="label">עמודים שנסרקו</span><strong>{{ latest_run.pages_crawled if latest_run else 0 }}</strong></article>
+        <article class="card"><span class="label">ציון SEO ממוצע</span><strong>{{ latest_run.average_score if latest_run else 0 }}</strong></article>
+        <article class="card"><span class="label">סיכון קריטי</span><strong>{{ metrics.critical_issues }}</strong></article>
+        <article class="card"><span class="label">סיכון גבוה</span><strong>{{ metrics.high_risk_issues }}</strong></article>
+        <article class="card"><span class="label">ממתין לאישור</span><strong>{{ metrics.pending_fixes }}</strong></article>
+        <article class="card"><span class="label">תיקונים מאושרים</span><strong>{{ metrics.approved_fixes }}</strong></article>
+        <article class="card"><span class="label">תיקונים שפורסמו</span><strong>{{ metrics.published_fixes }}</strong></article>
+        <article class="card"><span class="label">תיקונים שאומתו</span><strong>{{ metrics.verified_fixes }}</strong></article>
+        <article class="card"><span class="label">Generic AI meta</span><strong>{{ metrics.generic_ai_meta }}</strong></article>
+        <article class="card"><span class="label">Duplicate meta</span><strong>{{ metrics.duplicate_meta }}</strong></article>
+        <article class="card"><span class="label">עמודי מותג</span><strong>{{ metrics.brand_pages }}</strong></article>
+        <article class="card"><span class="label">עמודי מערכת שהוחרגו</span><strong>{{ metrics.system_pages_excluded }}</strong></article>
+        <article class="card"><span class="label">Total SEO tasks</span><strong>{{ metrics.total_tasks }}</strong></article>
+        <article class="card"><span class="label">Recommended tasks</span><strong>{{ metrics.recommended_tasks }}</strong></article>
+        <article class="card"><span class="label">Generated articles</span><strong>{{ metrics.generated_articles }}</strong></article>
+        <article class="card"><span class="label">Internal link opportunities</span><strong>{{ metrics.internal_link_opportunities }}</strong></article>
+        <article class="card"><span class="label">Topical clusters</span><strong>{{ metrics.topical_clusters }}</strong></article>
+      </section>
+
+      <section class="panel" id="operation-result" aria-live="polite">
+        <h2>תוצאת פעולה</h2>
+        <p class="empty">בחר פעולה כדי לראות כאן טעינה, הצלחה, שגיאה וקישורים להמשך.</p>
       </section>
 
       <section class="panel">
-        <h2>Latest page audits</h2>
+        <h2>סריקה אחרונה</h2>
         {% if pages %}
         <div class="table-wrap">
           <table>
-            <thead>
-              <tr>
-                <th>URL</th>
-                <th>Status</th>
-                <th>Score</th>
-                <th>Title</th>
-                <th>Missing</th>
-              </tr>
-            </thead>
+            <thead><tr><th>URL</th><th>page_type</th><th>seo_score</th><th>seo_risk_level</th><th>missing_fields</th></tr></thead>
             <tbody>
               {% for page in pages %}
               <tr>
-                <td><a href="{{ page.url }}" target="_blank" rel="noreferrer">{{ page.url }}</a></td>
-                <td>{{ page.status_code }}</td>
+                <td dir="ltr"><a href="{{ page.url }}" target="_blank" rel="noreferrer">{{ page.url }}</a></td>
+                <td>{{ page.page_type }}</td>
                 <td>{{ page.seo_score or 0 }}</td>
-                <td>{{ page.title or '—' }}</td>
+                <td>{{ 'סיכון קריטי' if page.seo_risk_level == 'critical' else ('סיכון גבוה' if page.seo_risk_level == 'high' else page.seo_risk_level) }}</td>
                 <td>{{ page.missing_fields or '—' }}</td>
               </tr>
               {% endfor %}
@@ -101,9 +83,10 @@
           </table>
         </div>
         {% else %}
-        <p class="empty">No crawl data yet. Use the crawler endpoint or button above to create the first audit.</p>
+        <p class="empty">אין עדיין נתוני סריקה. הרץ סריקה מהדשבורד כדי להתחיל.</p>
         {% endif %}
       </section>
     </main>
+    <script src="/static/seo_operations.js"></script>
   </body>
 </html>
