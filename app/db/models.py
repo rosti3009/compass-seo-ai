@@ -538,6 +538,8 @@ class IStoreProduct(Base):
             "meta_description": self.meta_description,
             "keyword": self.keyword,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "mapping_count": len([mapping for mapping in self.mappings if mapping.active]),
+            "mappings": [mapping.to_dict() for mapping in self.mappings if mapping.active],
         }
 
 

@@ -196,6 +196,10 @@ def test_sync_and_assign_endpoints(client: TestClient, db_session: Session, monk
 
     assert sync_response.status_code == 200
     assert products_response.status_code == 200
-    assert products_response.json()["count"] == 1
+    products_payload = products_response.json()
+    assert products_payload["count"] == 1
+    assert products_payload["publishable_threshold"] == 90
+    assert products_payload["products"][0]["mapping_count"] == 1
+    assert products_payload["products"][0]["mappings"][0]["normalized_slug"] == "gas-grill-3000"
     assert assign_response.status_code == 200
     assert assign_response.json()["fix"]["publish_mapping_verified"] is True

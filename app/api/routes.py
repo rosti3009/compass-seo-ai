@@ -56,6 +56,7 @@ from app.services.istore_approval import (
     reject_fix as reject_istore_approval_fix,
 )
 from app.services.istore_mapping import (
+    PUBLISHABLE_CONFIDENCE_THRESHOLD,
     assign_product_mapping,
     list_synced_products,
     sync_istore_products,
@@ -1043,7 +1044,10 @@ def _dashboard_metrics(db: Session, latest_pages: list[PageAudit]) -> dict[str, 
         .filter(IStoreSEOApproval.publish_mapping_verified.is_(True))
         .count(),
         "synced_istore_products": db.query(IStoreProduct).count(),
-        "verified_mappings": db.query(IStoreProductMapping).filter(IStoreProductMapping.active.is_(True)).count(),
+        "verified_mappings": db.query(IStoreProductMapping)
+        .filter(IStoreProductMapping.active.is_(True))
+        .filter(IStoreProductMapping.mapping_confidence >= PUBLISHABLE_CONFIDENCE_THRESHOLD)
+        .count(),
         "unmapped_fixes": db.query(IStoreSEOApproval)
         .filter(IStoreSEOApproval.status.in_(["PENDING_APPROVAL", "APPROVED"]))
         .filter(IStoreSEOApproval.publish_mapping_verified.is_(False))
@@ -1944,7 +1948,11 @@ def sync_istore_product_catalog(db: DatabaseSession) -> dict[str, object]:
 def synced_istore_products(db: DatabaseSession, q: str | None = None, limit: int = 100) -> dict[str, object]:
     """Return synchronized ISTORE products for mapping review/manual assignment."""
     products = list_synced_products(db, q=q, limit=limit)
-    return {"products": [product.to_dict() for product in products], "count": len(products)}
+    return {
+        "products": [product.to_dict() for product in products],
+        "count": len(products),
+        "publishable_threshold": PUBLISHABLE_CONFIDENCE_THRESHOLD,
+    }
 
 
 @router.post("/seo/fixes/{fix_id}/assign-product")
