@@ -63,6 +63,7 @@ class PageAudit(Base):
     word_count: Mapped[int] = mapped_column(Integer, default=0)
     internal_links: Mapped[int] = mapped_column(Integer, default=0)
     missing_fields: Mapped[str] = mapped_column(String(512), default="")
+    page_type: Mapped[str] = mapped_column(String(32), default="unknown")
     seo_score: Mapped[float] = mapped_column(Float, default=0.0)
     seo_score_delta: Mapped[float] = mapped_column(Float, default=0.0)
     crawled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
@@ -85,6 +86,7 @@ class PageAudit(Base):
             "word_count": self.word_count,
             "internal_links": self.internal_links,
             "missing_fields": [field for field in self.missing_fields.split(",") if field],
+            "page_type": self.page_type or "unknown",
             "seo_score": self.seo_score or 0.0,
             "seo_score_delta": self.seo_score_delta or 0.0,
             "crawled_at": self.crawled_at.isoformat() if self.crawled_at else None,

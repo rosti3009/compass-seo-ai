@@ -36,6 +36,7 @@ def ensure_sqlite_schema_compatibility(bind_engine=None) -> None:
     compatibility_columns = {
         "page_audits": {
             "seo_score_delta": "FLOAT DEFAULT 0.0",
+            "page_type": "VARCHAR(32) DEFAULT 'unknown'",
         },
         "istore_seo_approvals": {
             "target_type": "VARCHAR(32) DEFAULT 'product'",

@@ -1,7 +1,7 @@
-from collections import deque
-from dataclasses import dataclass
+from collections import Counter, deque
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from urllib.parse import urldefrag, urljoin, urlparse
+from urllib.parse import unquote, urldefrag, urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -10,6 +10,43 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.models import CrawlRun, PageAudit, PageScoreSnapshot
 from app.services.browser_fetcher import fetch_rendered_html
+
+VALID_PAGE_TYPES = {"product", "category", "brand", "blog", "article", "home", "system", "unknown"}
+SYSTEM_PATH_TOKENS = (
+    "/about",
+    "/contact",
+    "/accessibility",
+    "/login",
+    "/account",
+    "/cart",
+    "/checkout",
+    "/search",
+    "/sitemap",
+    "/privacy",
+    "/terms",
+    "/policy",
+    "/404",
+)
+GENERIC_SLUGS = {
+    "p",
+    "page",
+    "pages",
+    "product",
+    "products",
+    "category",
+    "categories",
+    "collection",
+    "collections",
+    "brand",
+    "brands",
+    "blog",
+    "article",
+    "articles",
+    "shop",
+    "store",
+    "item",
+    "items",
+}
 
 
 @dataclass(frozen=True)
@@ -47,15 +84,6 @@ class SEOCrawler:
             results = self._crawl()
 
             for result in results:
-                missing_fields = list(result.missing_fields)
-
-                if result.is_product:
-                    missing_fields.append("page_type:product")
-                elif result.is_category:
-                    missing_fields.append("page_type:category")
-                else:
-                    missing_fields.append(f"page_type:{result.page_type}")
-
                 previous_snapshot = (
                     db.query(PageScoreSnapshot)
                     .filter(PageScoreSnapshot.url == result.url)
@@ -74,9 +102,10 @@ class SEOCrawler:
                     canonical=result.canonical,
                     word_count=result.word_count,
                     internal_links=result.internal_links,
-                    missing_fields=",".join(missing_fields),
+                    missing_fields=",".join(result.missing_fields),
                     seo_score=result.seo_score,
                     seo_score_delta=score_delta,
+                    page_type=result.page_type,
                 )
                 db.add(audit)
                 db.flush()
@@ -119,6 +148,7 @@ class SEOCrawler:
         queue: deque[str] = deque([self.start_url])
         visited: set[str] = set()
         results: list[PageSEOResult] = []
+        meta_description_counts: Counter[str] = Counter()
 
         headers = {
             "User-Agent": (
@@ -186,14 +216,34 @@ class SEOCrawler:
                     if link not in visited and len(visited) + len(queue) < self.max_pages:
                         queue.append(link)
 
-                results.append(
-                    self._audit_page(
-                        url=url,
-                        status_code=response.status_code,
-                        soup=soup,
-                        internal_links=len(discovered_links),
-                    )
+                result = self._audit_page(
+                    url=url,
+                    status_code=response.status_code,
+                    soup=soup,
+                    internal_links=len(discovered_links),
                 )
+
+                if result.meta_description:
+                    normalized_description = result.meta_description.casefold()
+                    meta_description_counts[normalized_description] += 1
+                    if meta_description_counts[normalized_description] > 1:
+                        missing_fields = [*result.missing_fields, "duplicate_meta_description"]
+                        result = replace(
+                            result,
+                            missing_fields=missing_fields,
+                            seo_score=self._score(
+                                status_code=result.status_code,
+                                title=result.title,
+                                meta_description=result.meta_description,
+                                h1=result.h1,
+                                canonical=result.canonical,
+                                word_count=result.word_count,
+                                page_type=result.page_type,
+                                missing_fields=missing_fields,
+                            ),
+                        )
+
+                results.append(result)
 
         return results
 
@@ -206,11 +256,12 @@ class SEOCrawler:
     ) -> PageSEOResult:
         title = self._text_or_none(soup.title.string if soup.title else None)
 
-        description_tag = soup.find("meta", attrs={"name": "description"})
+        description_tags = soup.find_all("meta", attrs={"name": "description"})
+        description_tag = description_tags[0] if description_tags else None
         meta_description = self._text_or_none(description_tag.get("content") if description_tag else None)
 
-        h1_tag = soup.find("h1")
-        h1 = self._text_or_none(h1_tag.get_text(" ") if h1_tag else None)
+        h1_tags = soup.find_all("h1")
+        h1 = self._text_or_none(h1_tags[0].get_text(" ") if h1_tags else None)
 
         canonical_tag = soup.find("link", attrs={"rel": "canonical"})
         canonical = self._text_or_none(canonical_tag.get("href") if canonical_tag else None)
@@ -229,14 +280,29 @@ class SEOCrawler:
             if not value
         ]
 
-        if title and len(title) > 70:
+        if title and len(title) < 30:
+            missing.append("title_too_short")
+
+        if title and len(title) > 60:
             missing.append("title_too_long")
 
-        if meta_description and len(meta_description) > 170:
+        if meta_description and len(meta_description) < 120:
+            missing.append("meta_description_too_short")
+
+        if meta_description and len(meta_description) > 160:
             missing.append("meta_description_too_long")
 
-        if word_count < 250:
+        if len(description_tags) > 1:
+            missing.append("duplicate_meta_description_tags")
+
+        if len(h1_tags) > 1:
+            missing.append("multiple_h1")
+
+        minimum_words = self._minimum_word_count(page_type)
+        if word_count < minimum_words:
             missing.append("thin_content")
+
+        missing.extend(self._slug_validation_issues(url, page_type))
 
         seo_score = self._score(
             status_code=status_code,
@@ -246,6 +312,7 @@ class SEOCrawler:
             canonical=canonical,
             word_count=word_count,
             page_type=page_type,
+            missing_fields=missing,
         )
 
         return PageSEOResult(
@@ -282,22 +349,50 @@ class SEOCrawler:
         return sorted(links)
 
     def _detect_page_type(self, url: str, soup: BeautifulSoup) -> tuple[str, bool, bool]:
-        path = urlparse(url).path.lower()
+        parsed = urlparse(url)
+        path = parsed.path.lower()
+        path_segments = [segment for segment in path.split("/") if segment]
 
         og_type = soup.find("meta", attrs={"property": "og:type"})
-        og_type_content = ""
-        if og_type:
-            og_type_content = str(og_type.get("content", "")).lower()
+        og_type_content = str(og_type.get("content", "")).lower() if og_type else ""
+        schema_types = {
+            str(node.get("itemtype", "")).lower()
+            for node in soup.find_all(attrs={"itemtype": True})
+            if node.get("itemtype")
+        }
+        body_text = soup.get_text(" ").casefold()
 
+        has_product_schema = any("product" in schema_type for schema_type in schema_types)
+        has_article_schema = any("article" in schema_type or "posting" in schema_type for schema_type in schema_types)
         has_price = bool(
             soup.find(attrs={"itemprop": "price"})
             or soup.find("meta", attrs={"property": "product:price:amount"})
             or soup.find(string=lambda text: bool(text and "₪" in text))
         )
+        has_add_to_cart = any(token in body_text for token in ("add to cart", "הוסף לסל", "הוספה לסל"))
 
-        is_product = bool(og_type_content == "product" or has_price or "/product" in path or "/products" in path)
+        is_product = bool(
+            og_type_content == "product"
+            or has_product_schema
+            or has_price
+            or has_add_to_cart
+            or "/product" in path
+            or "/products" in path
+            or "/p/" in path
+        )
+        is_category = bool(
+            "/category" in path
+            or "/categories" in path
+            or "/collections" in path
+            or "/catalog" in path
+            or path.rstrip("/").endswith("/shop")
+        )
 
-        is_category = bool("/category" in path or "/categories" in path or "/brand/" in path or "/collections" in path)
+        if path in {"", "/"}:
+            return "home", False, False
+
+        if any(token in path for token in SYSTEM_PATH_TOKENS):
+            return "system", False, False
 
         if is_product:
             return "product", True, False
@@ -305,13 +400,19 @@ class SEOCrawler:
         if is_category:
             return "category", False, True
 
+        if "/brand" in path or "/brands" in path:
+            return "brand", False, False
+
+        if og_type_content == "article" or has_article_schema:
+            return "article", False, False
+
         if "/blog" in path:
-            return "blog", False, False
+            return ("article" if len(path_segments) > 1 else "blog"), False, False
 
-        if any(token in path for token in ["/about", "/contact", "/accessibility", "/login", "/account"]):
-            return "information", False, False
+        if any(segment in {"news", "guides", "guide", "articles"} for segment in path_segments):
+            return "article", False, False
 
-        return "page", False, False
+        return "unknown", False, False
 
     def _empty_result(
         self,
@@ -335,6 +436,53 @@ class SEOCrawler:
             is_category=False,
         )
 
+    def _minimum_word_count(self, page_type: str) -> int:
+        return {
+            "product": 200,
+            "category": 150,
+            "brand": 200,
+            "blog": 300,
+            "article": 600,
+            "home": 250,
+            "system": 50,
+            "unknown": 250,
+        }.get(page_type, 250)
+
+    def _slug_validation_issues(self, url: str, page_type: str) -> list[str]:
+        if page_type in {"home", "system"}:
+            return []
+
+        path_segments = [unquote(segment) for segment in urlparse(url).path.strip("/").split("/") if segment]
+        if not path_segments:
+            return []
+
+        issues: list[str] = []
+        descriptive_segments = 0
+
+        for segment in path_segments:
+            normalized_segment = segment.strip().casefold()
+            if not normalized_segment:
+                continue
+
+            if normalized_segment not in GENERIC_SLUGS and any(char.isalpha() for char in normalized_segment):
+                descriptive_segments += 1
+
+            if (
+                " " in segment
+                or "_" in segment
+                or len(segment) > 80
+                or normalized_segment.startswith("-")
+                or normalized_segment.endswith("-")
+                or "--" in normalized_segment
+            ):
+                issues.append("invalid_slug")
+                break
+
+        if descriptive_segments == 0:
+            issues.append("non_descriptive_slug")
+
+        return issues
+
     def _score(
         self,
         status_code: int,
@@ -344,20 +492,51 @@ class SEOCrawler:
         canonical: str | None,
         word_count: int,
         page_type: str,
+        missing_fields: list[str] | None = None,
     ) -> float:
-        score = 0
+        issues = set(missing_fields or [])
+        score = 100.0
 
-        score += 20 if 200 <= status_code < 300 else 0
-        score += 20 if title and 10 <= len(title) <= 70 else 5 if title else 0
-        score += 20 if meta_description and 50 <= len(meta_description) <= 170 else 5 if meta_description else 0
-        score += 20 if h1 else 0
-        score += 10 if canonical else 0
-        score += 10 if word_count >= 250 else 5 if word_count >= 100 else 0
+        if not 200 <= status_code < 300:
+            score -= 45
+
+        if not title:
+            score -= 18
+        elif not 30 <= len(title) <= 60:
+            score -= 8
+
+        if not meta_description:
+            score -= 18
+        elif not 120 <= len(meta_description) <= 160:
+            score -= 8
+
+        if not h1:
+            score -= 14
+
+        if not canonical:
+            score -= 10
+
+        minimum_words = self._minimum_word_count(page_type)
+        if word_count < minimum_words:
+            score -= 14 if word_count < minimum_words / 2 else 8
+
+        issue_penalties = {
+            "duplicate_meta_description": 10,
+            "duplicate_meta_description_tags": 8,
+            "multiple_h1": 6,
+            "invalid_slug": 8,
+            "non_descriptive_slug": 5,
+            "title_too_short": 4,
+            "title_too_long": 4,
+            "meta_description_too_short": 4,
+            "meta_description_too_long": 4,
+        }
+        score -= sum(issue_penalties.get(issue, 0) for issue in issues)
 
         if page_type == "product" and title and any(word in title for word in ["מחיר", "גריל", "שיפוד", "בשר"]):
-            score += 5
+            score += 3
 
-        return float(min(score, 100))
+        return round(max(0.0, min(score, 100.0)), 2)
 
     def _normalize_url(self, url: str) -> str:
         parsed = urlparse(url if "://" in url else f"https://{url}")
