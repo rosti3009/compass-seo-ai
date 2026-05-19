@@ -417,6 +417,26 @@ def test_simple_workspace_verify_live_endpoint(
     assert resp.json()["message"] == "השינוי מופיע באתר"
 
 
+
+
+def test_simple_workspace_publish_actions_use_explicit_approval_and_confirmation(
+    client: TestClient, db_session: Session
+) -> None:
+    safe_fix, _, _ = _seed_simple_workspace_fixes(db_session)
+    safe_fix.status = "APPROVED"
+    db_session.add(safe_fix)
+    db_session.commit()
+
+    response = client.get("/seo/simple-workspace")
+
+    assert response.status_code == 200
+    html = response.text
+    assert 'data-action="fetch" data-endpoint="/integrations/istore/seo-approvals/' in html
+    assert "data-body='{\"approval\":true,\"dry_run\":true}'" in html
+    assert 'data-action="confirm-fetch"' in html
+    assert "data-body='{\"approval\":true,\"dry_run\":false}'" in html
+    assert 'data-action="confirm-fetch"' in html
+
 def test_simple_workspace_dry_run_publish_does_not_mark_published(client: TestClient, db_session: Session) -> None:
     safe_fix, _, _ = _seed_simple_workspace_fixes(db_session)
     safe_fix.status = "APPROVED"
@@ -425,7 +445,7 @@ def test_simple_workspace_dry_run_publish_does_not_mark_published(client: TestCl
 
     response = client.post(
         f"/integrations/istore/seo-approvals/{safe_fix.id}/publish",
-        json={"approval": False, "dry_run": True},
+        json={"approval": True, "dry_run": True},
     )
     assert response.status_code in {200, 400, 403}
     db_session.refresh(safe_fix)
