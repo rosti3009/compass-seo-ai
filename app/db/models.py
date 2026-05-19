@@ -617,6 +617,11 @@ class IStoreSEOApproval(Base):
     approved_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     approval_action: Mapped[str | None] = mapped_column(String(64), nullable=True)
     approval_metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    generated_engine_version: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    invalidated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    invalidation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    regenerated_from_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
@@ -662,6 +667,11 @@ class IStoreSEOApproval(Base):
             "approved_by": self.approved_by,
             "approval_action": self.approval_action,
             "approval_metadata": _json_load(self.approval_metadata_json),
+            "generated_engine_version": self.generated_engine_version,
+            "generated_at": self.generated_at.isoformat() if self.generated_at else None,
+            "invalidated_at": self.invalidated_at.isoformat() if self.invalidated_at else None,
+            "invalidation_reason": self.invalidation_reason,
+            "regenerated_from_id": self.regenerated_from_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
