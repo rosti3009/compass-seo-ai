@@ -323,6 +323,8 @@ def test_simple_workspace_loads_with_plain_hebrew_cards_and_preview(client: Test
     assert "כותרת טובה יותר יכולה לגרום ליותר אנשים ללחוץ על התוצאה בגוגל." in html
     assert "תיאור ייחודי עוזר לגוגל להבין במה העמוד שונה מעמודים אחרים." in html
     assert "ממתין לבדיקה" in html
+    assert "בדיקת פרסום יבשה" in html
+    assert "פרטים טכניים" in html
     assert "צריך לחבר למוצר בחנות" in html
     assert "עדיין לא ניתן לפרסם" in html
     assert "מצב מתקדם" in html
@@ -351,6 +353,7 @@ def test_simple_workspace_hides_technical_fields_and_raw_payloads(client: TestCl
     assert "rollback_payload" not in html
     assert "JSON" not in html
     assert "dry-run publish" not in html
+    assert "בדוק שהשינוי הופיע באתר" in html
 
 
 def test_simple_bulk_approve_only_includes_safe_publishable_fixes(client: TestClient, db_session: Session) -> None:
@@ -379,3 +382,51 @@ def test_simple_bulk_approve_only_includes_safe_publishable_fixes(client: TestCl
     assert unsafe_fix.status == "PENDING_APPROVAL"
     assert system_fix.status == "PENDING_APPROVAL"
     assert safe_fix.publish_timestamp is None
+
+
+def test_simple_workspace_publish_visibility_and_block_reason(client: TestClient, db_session: Session) -> None:
+    safe_fix, unsafe_fix, _ = _seed_simple_workspace_fixes(db_session)
+    safe_fix.status = "APPROVED"
+    db_session.add(safe_fix)
+    db_session.commit()
+
+    response = client.get("/seo/simple-workspace")
+    html = response.text
+    assert response.status_code == 200
+    assert "בדיקת פרסום יבשה" in html
+    assert "אי אפשר לפרסם עדיין כי המוצר לא חובר בוודאות לחנות." in html
+
+
+def test_simple_workspace_verify_live_endpoint(
+    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    safe_fix, _, _ = _seed_simple_workspace_fixes(db_session)
+    safe_fix.status = "PUBLISHED"
+    db_session.add(safe_fix)
+    db_session.commit()
+
+    class Resp:
+        text = (
+            "<html><head><title>x</title><meta name=\"description\" "
+            "content=\"תיאור חדש וברור לגריל גז איכותי לחצר\"></head></html>"
+        )
+
+    monkeypatch.setattr("app.api.routes.requests.get", lambda *a, **k: Resp())
+    resp = client.post(f"/seo/simple-workspace/{safe_fix.id}/verify-live")
+    assert resp.status_code == 200
+    assert resp.json()["message"] == "השינוי מופיע באתר"
+
+
+def test_simple_workspace_dry_run_publish_does_not_mark_published(client: TestClient, db_session: Session) -> None:
+    safe_fix, _, _ = _seed_simple_workspace_fixes(db_session)
+    safe_fix.status = "APPROVED"
+    db_session.add(safe_fix)
+    db_session.commit()
+
+    response = client.post(
+        f"/integrations/istore/seo-approvals/{safe_fix.id}/publish",
+        json={"approval": False, "dry_run": True},
+    )
+    assert response.status_code in {200, 400, 403}
+    db_session.refresh(safe_fix)
+    assert safe_fix.status != "PUBLISHED"

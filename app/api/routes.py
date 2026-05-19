@@ -177,13 +177,17 @@ SIMPLE_IMPORTANCE_BY_FIELD = {
 
 SIMPLE_STATUS_LABELS = {
     "PENDING_APPROVAL": "ממתין לבדיקה",
-    "APPROVED": "אושר",
+    "APPROVED": "אושר ומוכן לבדיקה",
+    "DRY_RUN_PASSED": "בדיקת פרסום עברה",
     "REJECTED": "נדחה",
     "PUBLISHED": "פורסם באתר",
     "VERIFIED": "אומת באתר",
+    "FAILED": "נכשל",
+    "ROLLED_BACK": "שוחזר",
+    "INVALIDATED": "טיוטה ישנה / בוטלה",
 }
 
-SIMPLE_SAFE_FIELDS = {"meta_title", "meta_description"}
+SIMPLE_SAFE_FIELDS = {"meta_title", "meta_description", "keyword", "product_description"}
 
 SEO_STRATEGY_STATUSES = {"pending", "accepted", "ignored", "completed"}
 SEO_STRATEGY_RECOMMENDATION_TYPES = {
@@ -1198,6 +1202,33 @@ def _is_simple_bulk_safe_fix(fix: IStoreSEOApproval) -> bool:
     )
 
 
+
+
+def _simple_publish_block_reason(fix: IStoreSEOApproval) -> str | None:
+    if fix.mapping_conflict or not fix.publish_mapping_verified:
+        return "אי אפשר לפרסם עדיין כי המוצר לא חובר בוודאות לחנות."
+    if not settings.istore_publish_enabled:
+        return "פרסום לא פעיל בסביבת Render. צריך להפעיל ISTORE_PUBLISH_ENABLED."
+    if settings.istore_safe_mode:
+        return "מצב בטוח פעיל כרגע ולכן אי אפשר לפרסם אוטומטית."
+    if fix.target_type != "product":
+        return "פרסום זמין רק לדפי מוצר בטוחים."
+    if fix.field_path not in SIMPLE_SAFE_FIELDS:
+        return "השדה הזה אינו שדה SEO בטוח לפרסום."
+    return None
+
+
+def _simple_next_action(status: str) -> str:
+    return {
+        "PENDING_APPROVAL": "אשר שינוי",
+        "APPROVED": "בדיקת פרסום יבשה",
+        "DRY_RUN_PASSED": "פרסם באתר",
+        "PUBLISHED": "בדוק שהשינוי הופיע באתר",
+        "VERIFIED": "הושלם",
+        "FAILED": "צריך בדיקה",
+        "ROLLED_BACK": "שוחזר",
+    }.get(status, "צריך בדיקה")
+
 def _simple_fix_card(fix: IStoreSEOApproval) -> dict[str, object]:
     can_approve, approval_label = _simple_review_state(fix)
     status_label = SIMPLE_STATUS_LABELS.get(fix.status, "ממתין לבדיקה")
@@ -1210,6 +1241,12 @@ def _simple_fix_card(fix: IStoreSEOApproval) -> dict[str, object]:
     else:
         safety_label = "מוכן לאישור בטוח"
     stale = is_stale_draft(fix)
+    publish_block_reason = _simple_publish_block_reason(fix)
+    can_publish = (
+        fix.status in {"APPROVED", "DRY_RUN_PASSED"}
+        and publish_block_reason is None
+        and publishable_mapping(fix)
+    )
     freshness_label = "טיוטה ישנה" if stale else "טיוטה חדשה"
     engine_label = "נוצר עם מנוע ישן" if stale else "מנוע עדכני"
     regen_label = "נוצר מחדש" if fix.regenerated_from_id else ""
@@ -1240,13 +1277,33 @@ def _simple_fix_card(fix: IStoreSEOApproval) -> dict[str, object]:
         "engine_label": engine_label,
         "regen_label": regen_label,
         "stale": stale,
+        "can_publish": can_publish,
+        "publish_block_reason": publish_block_reason,
+        "next_action": _simple_next_action(fix.status),
+        "is_system": (fix.to_dict().get("approval_metadata", {}) or {}).get("page_type") == "system",
+        "publish_timestamp": fix.publish_timestamp,
+        "field_path": fix.field_path,
     }
 
 
 def _simple_workspace_context(db: Session) -> dict[str, object]:
     fixes = (
         db.query(IStoreSEOApproval)
-        .filter(IStoreSEOApproval.status.in_(["PENDING_APPROVAL", "APPROVED", "REJECTED", "PUBLISHED", "VERIFIED"]))
+        .filter(
+            IStoreSEOApproval.status.in_(
+                [
+                    "PENDING_APPROVAL",
+                    "APPROVED",
+                    "DRY_RUN_PASSED",
+                    "REJECTED",
+                    "PUBLISHED",
+                    "VERIFIED",
+                    "FAILED",
+                    "ROLLED_BACK",
+                    "INVALIDATED",
+                ]
+            )
+        )
         .order_by(IStoreSEOApproval.priority_score.desc(), IStoreSEOApproval.id.desc())
         .limit(50)
         .all()
@@ -1400,6 +1457,39 @@ def seo_operations_view(request: Request, db: DatabaseSession) -> HTMLResponse:
 def seo_simple_workspace(request: Request, db: DatabaseSession) -> HTMLResponse:
     """Render a jargon-free employee SEO review workspace."""
     return templates.TemplateResponse(request, "seo_simple_workspace.html", _simple_workspace_context(db))
+
+
+@router.post("/seo/simple-workspace/{fix_id}/verify-live")
+def verify_simple_workspace_fix_live(fix_id: int, db: DatabaseSession) -> dict[str, object]:
+    fix = _get_istore_approval_or_404(db, fix_id)
+    if not (fix.target_url and fix.proposed_value):
+        return {"success": False, "message": "לא נמצאו נתונים מספיקים לאימות"}
+    html = requests.get(fix.target_url, timeout=20).text
+    title = re.search(r"<title>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
+    meta = re.search(
+        r"<meta[^>]+name=[\"']description[\"'][^>]+content=[\"'](.*?)[\"']",
+        html,
+        re.IGNORECASE | re.DOTALL,
+    )
+    og = re.search(
+        r"<meta[^>]+property=[\"']og:title[\"'][^>]+content=[\"'](.*?)[\"']",
+        html,
+        re.IGNORECASE | re.DOTALL,
+    )
+    candidate = " ".join(
+        [
+            title.group(1).strip() if title else "",
+            meta.group(1).strip() if meta else "",
+            og.group(1).strip() if og else "",
+        ]
+    )
+    ok = fix.proposed_value.strip() in candidate
+    if ok:
+        fix.status = "VERIFIED"
+        db.add(fix)
+        db.commit()
+        return {"success": True, "message": "השינוי מופיע באתר"}
+    return {"success": False, "message": "השינוי עדיין לא מופיע באתר — ייתכן שיש cache."}
 
 
 @router.post("/seo/simple-workspace/bulk-approve")
