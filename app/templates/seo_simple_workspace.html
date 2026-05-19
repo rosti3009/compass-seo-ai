@@ -80,7 +80,7 @@
             <section><h3>מה הבעיה?</h3><p>{{ fix.problem }}</p></section>
             <section><h3>למה זה חשוב?</h3><p>{{ fix.importance }}</p></section>
             <section><h3>מה המערכת מציעה?</h3><p>{{ fix.suggestion }}</p></section>
-            <section><h3>האם אפשר לאשר עכשיו?</h3><p>{{ fix.approval_label }}</p>{% if not fix.can_approve %}<p class="notice error">אי אפשר לפרסם עדיין כי המוצר לא חובר בוודאות למערכת החנות.</p>{% endif %}</section>
+            <section><h3>הפעולה הבאה</h3><p>{{ fix.next_action }}</p>{% if fix.publish_block_reason %}<p class="notice error">{{ fix.publish_block_reason }}</p>{% endif %}</section>
           </div>
 
           <details class="simple-guided-flow" open>
@@ -94,9 +94,10 @@
           </details>
 
           <div class="diff-viewer simple-before-after">
-            <section class="diff-pane diff-old"><h3>לפני</h3><pre>{{ fix.before }}</pre></section>
+            <section class="diff-pane diff-old"><h3>לפני</h3>{% if fix.is_system %}<p>שם העמוד: {{ fix.page_name }}</p><p>סוג עמוד: מערכת</p><p>הסבר קצר: העמוד לא מיועד לקידום.</p><p>המלצה: לאנדקס בזהירות או לחסום לפי הצורך.</p>{% else %}<pre>{{ fix.before }}</pre>{% endif %}</section>
             <section class="diff-pane diff-new"><h3>אחרי</h3><pre>{{ fix.after }}</pre></section>
           </div>
+          <details><summary>פרטים טכניים</summary><p>שדה: {{ fix.field_path }}</p></details>
 
           {% if fix.show_google_preview %}
           <section class="google-preview" aria-label="איך זה עשוי להיראות בגוגל">
@@ -115,8 +116,10 @@
 
           <div class="actions review-actions" aria-label="פעולות פשוטות">
             <button type="button" class="inline-action" data-result-target="simple-action-result" data-action="confirm-fetch" data-endpoint="/integrations/istore/seo-approvals/{{ fix.id }}/approve" data-method="POST" data-confirm="בדקת שהטקסט החדש נשמע נכון ומתאים למוצר?" data-label="אשר שינוי">אשר שינוי</button>
-            <button type="button" class="secondary-button inline-action danger-button" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/integrations/istore/seo-approvals/{{ fix.id }}/reject" data-method="POST" data-label="דחה">דחה</button>
-            <a class="button-link inline-action" href="/seo/fixes/pending-view">צריך בדיקה</a>
+            <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/integrations/istore/seo-approvals/{{ fix.id }}/publish" data-method="POST" data-body='{"approval":false,"dry_run":true}' data-label="בדיקת פרסום יבשה">בדיקת פרסום יבשה</button>
+            {% if fix.can_publish %}<button type="button" class="inline-action" data-result-target="simple-action-result" data-action="confirm-fetch" data-endpoint="/integrations/istore/seo-approvals/{{ fix.id }}/publish" data-method="POST" data-body='{"approval":true,"dry_run":false}' data-confirm="בדקת שהטקסט נכון ומתאים למוצר? פעולה זו תעדכן את האתר." data-label="פרסם באתר">פרסם באתר</button>{% endif %}
+            <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/seo/simple-workspace/{{ fix.id }}/verify-live" data-method="POST" data-label="בדוק שהשינוי הופיע באתר">בדוק שהשינוי הופיע באתר</button>
+            <button type="button" class="secondary-button inline-action danger-button" data-result-target="simple-action-result" data-action="confirm-fetch" data-endpoint="/integrations/istore/seo-approvals/{{ fix.id }}/rollback" data-method="POST" data-body='{"approval":true,"dry_run":false}' data-confirm="פעולה זו תחזיר את הערך הקודם. להמשיך?" data-label="שחזר שינוי">שחזר שינוי</button>
           </div>
         </article>
         {% else %}
