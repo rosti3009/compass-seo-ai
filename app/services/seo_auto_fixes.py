@@ -10,7 +10,11 @@ from sqlalchemy.orm import Session
 
 from app.db.models import CrawlRun, IStoreSEOApproval, PageAudit
 from app.services.istore_approval import ALLOWED_ISTORE_FIELDS, BLOCKED_ISTORE_FIELDS
-from app.services.seo_copy_quality import sanitize_generated_seo_copy, truncate_without_ellipsis
+from app.services.seo_copy_quality import (
+    contains_forbidden_hebrew_phrase,
+    sanitize_generated_seo_copy,
+    truncate_without_ellipsis,
+)
 from app.services.seo_engine_version import CURRENT_SEO_ENGINE_VERSION
 from app.services.seo_url_filters import get_url_exclusion_reason
 
@@ -50,6 +54,7 @@ ISSUE_WEIGHT = {
     "missing_h1": 8,
     "h1": 8,
 }
+WEAK_DRAFT_THRESHOLD = 66
 
 
 @dataclass(frozen=True)
@@ -104,9 +109,16 @@ def pending_fixes_review(db: Session, limit: int = 250) -> dict[str, object]:
         .all()
     )
     review_items = [fix_to_review_dict(fix) for fix in fixes]
+    weak_drafts = [
+        item
+        for item in review_items
+        if item.get("quality", {}).get("overall_score", 100) < WEAK_DRAFT_THRESHOLD
+    ]
     return {
         "pending_count": len(review_items),
         "fixes": review_items,
+        "quick_approval_fixes": [item for item in review_items if item not in weak_drafts],
+        "weak_drafts_rewrite_required": weak_drafts,
         "grouped_by_issue_type": _group(review_items, "issue_type"),
         "grouped_by_page_type": _group(review_items, "page_type"),
         "safety": _safety_payload(),
@@ -115,6 +127,7 @@ def pending_fixes_review(db: Session, limit: int = 250) -> dict[str, object]:
 
 def fix_to_review_dict(fix: IStoreSEOApproval) -> dict[str, object]:
     metadata = _json_dict(fix.approval_metadata_json)
+    quality = metadata.get("quality") if isinstance(metadata.get("quality"), dict) else {}
     page_type = str(metadata.get("page_type") or fix.target_type or "unknown")
     safe_publish_status = _safe_publish_status(fix)
     return {
@@ -133,6 +146,8 @@ def fix_to_review_dict(fix: IStoreSEOApproval) -> dict[str, object]:
             "safe_publish_status": safe_publish_status,
         },
         "safe_publish_status": safe_publish_status,
+        "quality": quality,
+        "weak_draft_rewrite_required": (quality.get("overall_score", 100) < WEAK_DRAFT_THRESHOLD),
     }
 
 
@@ -228,11 +243,17 @@ def _build_fix(
     target_type = _target_type(page, field_path)
     payload = _proposed_payload(field_path, proposed_value)
     rollback = _rollback_payload(field_path, current_value)
+    classification = _classify_page_context(page)
+    quality = _quality_score(page, proposed_value, classification)
     metadata = {
         "page_type": page.page_type or "unknown",
         "primary_intent": page.primary_intent or "general",
         "context_keywords": _json_list(page.context_keywords),
+        "classification": classification,
+        "quality": quality,
         "safe_publish_status": _safe_publish_status_for(target_type, field_path),
+        "quick_approval_visible": quality["overall_score"] >= WEAK_DRAFT_THRESHOLD,
+        "weak_draft_bucket": "טיוטות חלשות / דורש שכתוב" if quality["overall_score"] < WEAK_DRAFT_THRESHOLD else None,
         "auto_generated_from_latest_crawl": True,
     }
     approval = IStoreSEOApproval(
@@ -330,17 +351,126 @@ def _keyword_slug(page: PageAudit) -> str:
 
 def _content_expansion(page: PageAudit) -> str:
     base = _hebrew_entity_name(page)
+    classification = _classify_page_context(page)
+    template = _content_template(base, classification)
     value = (
-        f"<section><h2>מידע נוסף על {base}</h2>"
-        f"<p>{base} מתאים ללקוחות שרוצים להבין במהירות מה חשוב לבדוק לפני רכישה. "
-        "מומלץ להשוות מאפיינים, שימושים מרכזיים, אחריות ותנאי שירות לפני החלטה.</p>"
-        "<h3>שאלות נפוצות</h3><ul>"
-        f"<li>למי {base} מתאים?</li><li>אילו מאפיינים חשוב לבדוק לפני רכישה?</li>"
-        "<li>איך משווים בין אפשרויות דומות?</li>"
-        "</ul><h3>קישורים פנימיים מוצעים</h3><p>לקשר לעמודי קטגוריה, מדריכים ומוצרים "
-        "משלימים באופן טבעי וללא דחיסת מילות מפתח.</p></section>"
+        f"<section><h2>{template['h2']}</h2>"
+        f"<p>{template['body']}</p>"
+        f"<h3>שאלות נפוצות</h3><ul>{template['faq_html']}</ul>"
+        f"<h3>קישורים פנימיים מוצעים</h3><p>{template['internal_links']}</p></section>"
     )
     return _sanitize_customer_copy(page, _remove_forbidden_phrases(value))
+
+
+def _classify_page_context(page: PageAudit) -> dict[str, str]:
+    text = f"{_hebrew_entity_name(page)} {' '.join(_hebrew_keywords(page))}".lower()
+    if "כנף" in text or "עוף" in text:
+        return {
+            "product_type": "poultry",
+            "food_type": "ready_to_cook",
+            "cooking_method": "grill",
+            "usage_context": "bbq",
+            "customer_intent": "family_cooking",
+            "business_vertical": "meat",
+            "seo_intent": "organic_food_intent",
+        }
+    if "שבב" in text or "עישון" in text:
+        return {
+            "product_type": "smoking_accessory",
+            "food_type": "flavor_enhancement",
+            "cooking_method": "smoking",
+            "usage_context": "bbq",
+            "customer_intent": "enthusiast",
+            "business_vertical": "bbq_accessories",
+            "seo_intent": "informational_commercial",
+        }
+    if "גריל גז" in text or ("גריל" in text and "גז" in text):
+        return {
+            "product_type": "outdoor_appliance",
+            "food_type": "equipment",
+            "cooking_method": "grill",
+            "usage_context": "hosting",
+            "customer_intent": "comparison",
+            "business_vertical": "outdoor_cooking",
+            "seo_intent": "commercial_investigation",
+        }
+    if "טאבון" in text:
+        return {
+            "product_type": "pizza_oven",
+            "food_type": "appliance",
+            "cooking_method": "high_heat_bake",
+            "usage_context": "outdoor_cooking",
+            "customer_intent": "premium_buyer",
+            "business_vertical": "outdoor_cooking",
+            "seo_intent": "commercial_investigation",
+        }
+    return {
+        "product_type": "bbq_product",
+        "food_type": "culinary",
+        "cooking_method": "grill",
+        "usage_context": "outdoor_cooking",
+        "customer_intent": "commercial",
+        "business_vertical": "bbq",
+        "seo_intent": "organic_search",
+    }
+
+
+def _content_template(base: str, classification: dict[str, str]) -> dict[str, str]:
+    product_type = classification["product_type"]
+    if product_type == "poultry":
+        return {
+            "h2": f"{base} לצלייה, תנור ומנגל",
+            "body": f"{base} מתאים להכנה מהירה על האש, בתנור או בגריל גז, עם דגש על עסיסיות, תיבול וחריכה מאוזנת.",
+            "faq_html": "<li>איך מומלץ לצלות את המוצר כדי לשמור על עסיסיות?</li><li>האם מתאים גם לתנור וגם למנגל?</li>",
+            "internal_links": "לקשר למרינדות, שיפודים, גרילי גז, פחמים ואביזרי מנגל משלימים.",
+        }
+    if product_type == "smoking_accessory":
+        return {
+            "h2": f"{base} לעישון בשר ודגים",
+            "body": f"{base} מוסיף עומק טעמים טבעי לעישון איטי, ומתאים למעשנה, גריל סגור ומתכוני BBQ ארוכים.",
+            "faq_html": "<li>איזה עץ מתאים לעישון בקר?</li><li>כמה זמן להשרות שבבי עץ לפני עישון?</li>",
+            "internal_links": "לקשר למעשנות, מדחומי בשר, נתחי בריסקט וכלי ניקוי לגריל.",
+        }
+    return {
+        "h2": f"{base} לעולם הצלייה וה-BBQ",
+        "body": f"{base} נכתב לקהל שאוהב בישול חוץ, אירוח, על האש ועבודה עם ציוד אמין לפיזור חום אחיד.",
+        "faq_html": "<li>מה ההבדל בין דגמים דומים בשימוש אמיתי?</li><li>לאיזה שימוש יומיומי המוצר מתאים?</li>",
+        "internal_links": "לקשר לקטגוריות רלוונטיות בלבד: גרילים, פחמים, כלים, כיסויים ואביזרי תחזוקה.",
+    }
+
+
+def _quality_score(page: PageAudit, proposed_value: str, classification: dict[str, str]) -> dict[str, object]:
+    text = (proposed_value or "").lower()
+    culinary_terms = {"צלייה", "עישון", "מנגל", "טאבון", "על האש", "עסיסיות", "פחמים", "מעשנה", "תיבול", "נתח"}
+    term_hits = sum(1 for term in culinary_terms if term in text)
+    generic_penalty = 25 if contains_forbidden_hebrew_phrase(text) else 0
+    uniqueness = 90 if len(set(text.split())) > 12 else 65
+    organic_intent = 88 if any(term in text for term in ("איך", "איזה", "לעישון", "לצלייה", "מבערים")) else 62
+    premium_vertical = classification["business_vertical"] in {"meat", "bbq", "outdoor_cooking"}
+    culinary_relevance = min(100, 45 + term_hits * 9 + (10 if premium_vertical else 0))
+    naturalness = 90 if "קטגוריית הקטגוריה" not in text else 20
+    semantic_quality = round((culinary_relevance + uniqueness + naturalness) / 3)
+    overall = max(
+        0,
+        round(
+            (culinary_relevance * 0.25)
+            + (semantic_quality * 0.2)
+            + (uniqueness * 0.15)
+            + (naturalness * 0.2)
+            + (organic_intent * 0.2)
+            - generic_penalty
+        ),
+    )
+    return {
+        "culinary_relevance": culinary_relevance,
+        "semantic_quality": semantic_quality,
+        "uniqueness": uniqueness,
+        "naturalness": naturalness,
+        "organic_search_intent_match": organic_intent,
+        "anti_generic_score": max(0, 100 - generic_penalty),
+        "overall_score": overall,
+        "blocked_from_quick_approval": overall < WEAK_DRAFT_THRESHOLD,
+    }
 
 
 def _system_recommendation(page: PageAudit) -> str:

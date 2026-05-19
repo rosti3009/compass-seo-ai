@@ -203,6 +203,40 @@ def test_forbidden_hebrew_phrases_are_removed_from_proposals(client: TestClient,
     assert all(phrase not in fix.proposed_value for phrase in forbidden)
 
 
+def test_fix_metadata_includes_culinary_classification_and_quality_score(
+    client: TestClient, db_session: Session
+) -> None:
+    _page(
+        db_session,
+        _crawl(db_session),
+        title="שבבי עץ לעישון בשר",
+        h1="שבבי עץ לעישון",
+        missing_fields="generic_ai_meta",
+        context_keywords=json.dumps(["שבבי עץ", "מעשנה"]),
+    )
+    client.post("/seo/fixes/generate-from-latest-crawl", json={"dry_run": False})
+    fix = db_session.query(IStoreSEOApproval).one()
+    metadata = json.loads(fix.approval_metadata_json)
+    assert metadata["classification"]["product_type"] == "smoking_accessory"
+    assert metadata["quality"]["overall_score"] > 0
+    assert "blocked_from_quick_approval" in metadata["quality"]
+
+
+def test_pending_fixes_splits_weak_drafts_bucket(client: TestClient, db_session: Session) -> None:
+    _page(
+        db_session,
+        _crawl(db_session),
+        title="מוצר מוביל בתחום",
+        h1="מוצר מוביל בתחום",
+        missing_fields="generic_ai_meta",
+        context_keywords=json.dumps(["גריל"]),
+    )
+    client.post("/seo/fixes/generate-from-latest-crawl", json={"dry_run": False})
+    pending = client.get("/seo/fixes/pending").json()
+    assert "weak_drafts_rewrite_required" in pending
+    assert "quick_approval_fixes" in pending
+
+
 def test_publishing_safety_gates_remain_unchanged() -> None:
     validate_istore_payload({"meta_title": "כותרת מאושרת"})
     with pytest.raises(ValueError, match="price"):
