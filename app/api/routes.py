@@ -73,6 +73,13 @@ from app.services.seo_auto_fixes import (
     pending_fixes_review,
 )
 from app.services.seo_automation import run_seo_automation
+from app.services.seo_draft_lifecycle import (
+    fresh_drafts,
+    invalidate_stale_drafts,
+    is_stale_draft,
+    regenerate_stale_drafts,
+    stale_drafts,
+)
 from app.services.seo_scheduler import (
     create_schedule_config,
     ensure_default_schedule_config,
@@ -1202,6 +1209,10 @@ def _simple_fix_card(fix: IStoreSEOApproval) -> dict[str, object]:
         safety_label = "עדיין לא ניתן לפרסם"
     else:
         safety_label = "מוכן לאישור בטוח"
+    stale = is_stale_draft(fix)
+    freshness_label = "טיוטה ישנה" if stale else "טיוטה חדשה"
+    engine_label = "נוצר עם מנוע ישן" if stale else "מנוע עדכני"
+    regen_label = "נוצר מחדש" if fix.regenerated_from_id else ""
     return {
         "id": fix.id,
         "page_name": _simple_page_name(fix),
@@ -1225,6 +1236,10 @@ def _simple_fix_card(fix: IStoreSEOApproval) -> dict[str, object]:
             else (fix.current_value or "תיאור העמוד יופיע כאן.")
         ),
         "bulk_safe": _is_simple_bulk_safe_fix(fix),
+        "freshness_label": freshness_label,
+        "engine_label": engine_label,
+        "regen_label": regen_label,
+        "stale": stale,
     }
 
 
@@ -1236,7 +1251,10 @@ def _simple_workspace_context(db: Session) -> dict[str, object]:
         .limit(50)
         .all()
     )
-    cards = [_simple_fix_card(fix) for fix in fixes]
+    show_stale = False
+    visible_fixes = [fix for fix in fixes if fix.status != "INVALIDATED"]
+    visible_fixes = [fix for fix in visible_fixes if (show_stale or not is_stale_draft(fix))]
+    cards = [_simple_fix_card(fix) for fix in visible_fixes]
     pending = [card for card in cards if card["status_label"] == "ממתין לבדיקה"]
     safe = [card for card in cards if card["bulk_safe"]]
     needs_product = [
@@ -1244,7 +1262,7 @@ def _simple_workspace_context(db: Session) -> dict[str, object]:
         for card in cards
         if card["safety_label"] in {"צריך לחבר למוצר בחנות", "נמצאו כמה מוצרים דומים — צריך לבחור ידנית"}
     ]
-    approved_count = sum(1 for fix in fixes if fix.status in {"APPROVED", "PUBLISHED", "VERIFIED"})
+    approved_count = sum(1 for fix in visible_fixes if fix.status in {"APPROVED", "PUBLISHED", "VERIFIED"})
     if pending:
         if safe:
             next_message = f"יש {len(pending)} תיקונים מוכנים לבדיקה. מומלץ להתחיל מהתיקונים הבטוחים."
@@ -1262,6 +1280,8 @@ def _simple_workspace_context(db: Session) -> dict[str, object]:
         next_message = "אין תיקונים מוכנים. מומלץ להריץ סריקה חדשה."
         primary_label = "הרץ סריקה"
         primary_href = "/seo/operations-view"
+    invalidated_count = db.query(IStoreSEOApproval).filter(IStoreSEOApproval.status == "INVALIDATED").count()
+    regenerated_count = db.query(IStoreSEOApproval).filter(IStoreSEOApproval.regenerated_from_id.is_not(None)).count()
     return {
         "cards": cards,
         "safe_cards": safe,
@@ -1273,6 +1293,12 @@ def _simple_workspace_context(db: Session) -> dict[str, object]:
             "approved": approved_count,
         },
         "next_message": next_message,
+        "draft_stats": {
+            "stale": len(stale_drafts(db)),
+            "fresh": len(fresh_drafts(db)),
+            "invalidated": invalidated_count,
+            "regenerated": regenerated_count,
+        },
         "primary_label": primary_label,
         "primary_href": primary_href,
     }
@@ -1997,6 +2023,29 @@ def verify_seo_fixes_against_latest_crawl(db: DatabaseSession) -> dict[str, obje
         "safety": {"auto_publish": False, "changed_publish_gates": False},
         "fixes": [fix_to_review_dict(fix) for fix in verified[:10]],
     }
+
+
+@router.post("/seo/fixes/invalidate-stale")
+def invalidate_stale_seo_fixes(db: DatabaseSession) -> dict[str, object]:
+    return {"success": True, **invalidate_stale_drafts(db, reason="manual_stale_cleanup")}
+
+
+@router.post("/seo/fixes/regenerate-stale")
+def regenerate_stale_seo_fixes(db: DatabaseSession) -> dict[str, object]:
+    return {"success": True, **regenerate_stale_drafts(db)}
+
+
+@router.get("/seo/fixes/stale")
+def list_stale_seo_fixes(db: DatabaseSession) -> dict[str, object]:
+    fixes = stale_drafts(db)
+    return {"count": len(fixes), "fixes": [fix_to_review_dict(fix) for fix in fixes]}
+
+
+@router.get("/seo/fixes/fresh")
+def list_fresh_seo_fixes(db: DatabaseSession) -> dict[str, object]:
+    fixes = fresh_drafts(db)
+    return {"count": len(fixes), "fixes": [fix_to_review_dict(fix) for fix in fixes]}
+
 
 @router.get("/seo/fixes")
 def list_seo_fixes(

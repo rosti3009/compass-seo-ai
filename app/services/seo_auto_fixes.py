@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 from sqlalchemy.orm import Session
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.db.models import CrawlRun, IStoreSEOApproval, PageAudit
 from app.services.istore_approval import ALLOWED_ISTORE_FIELDS, BLOCKED_ISTORE_FIELDS
 from app.services.seo_copy_quality import sanitize_generated_seo_copy, truncate_without_ellipsis
+from app.services.seo_engine_version import CURRENT_SEO_ENGINE_VERSION
 from app.services.seo_url_filters import get_url_exclusion_reason
 
 PENDING_AUTOFIX_STATUSES = {"PENDING_APPROVAL", "APPROVED", "READY_FOR_MANUAL_PUBLISH"}
@@ -254,6 +256,8 @@ def _build_fix(
         proposed_payload_json=json.dumps(payload, ensure_ascii=False),
         rollback_payload_json=json.dumps(rollback, ensure_ascii=False),
         approval_metadata_json=json.dumps(metadata, ensure_ascii=False),
+        generated_engine_version=CURRENT_SEO_ENGINE_VERSION,
+        generated_at=datetime.now(UTC),
     )
     _append_log(approval, "טיוטת SEO נוצרה מתוצאות זחילה אחרונות; לא בוצע פרסום אוטומטי")
     return approval

@@ -20,6 +20,12 @@
         <h1>לוח עבודה פשוט לקידום בגוגל</h1>
         <p>מקום אחד לבדוק טקסטים שהמערכת הכינה, להבין למה הם חשובים, ולאשר רק כשזה בטוח.</p>
         <div class="recommended-next-step">
+          <div class="actions">
+            <button type="button" class="inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/seo/fixes/invalidate-stale" data-method="POST" data-label="מחיקת טיוטות ישנות">מחק טיוטות ישנות</button>
+            <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/seo/fixes/regenerate-stale" data-method="POST" data-label="יצירת טיוטות מחדש">צור טיוטות מחדש</button>
+            <a class="button-link" href="/seo/fixes/fresh">הצג רק טיוטות חדשות</a>
+            <a class="button-link" href="/seo/fixes/stale">טיוטות ישנות</a>
+          </div>
           <h2>פעולה מומלצת הבאה</h2>
           <p>{{ next_message }}</p>
           <a class="button-link primary-link" href="{{ primary_href }}">{{ primary_label }}</a>
@@ -32,6 +38,10 @@
         <article class="card"><span class="label">כמה תיקונים בטוחים לאישור</span><strong>{{ summary.safe_approval }}</strong></article>
         <article class="card"><span class="label">כמה תיקונים צריכים בדיקת מוצר</span><strong>{{ summary.needs_product_check }}</strong></article>
         <article class="card"><span class="label">כמה תיקונים כבר אושרו</span><strong>{{ summary.approved }}</strong></article>
+        <article class="card"><span class="label">טיוטות ישנות</span><strong>{{ draft_stats.stale }}</strong></article>
+        <article class="card"><span class="label">טיוטות חדשות</span><strong>{{ draft_stats.fresh }}</strong></article>
+        <article class="card"><span class="label">טיוטות שנפסלו</span><strong>{{ draft_stats.invalidated }}</strong></article>
+        <article class="card"><span class="label">טיוטות שנוצרו מחדש</span><strong>{{ draft_stats.regenerated }}</strong></article>
       </section>
 
       <section class="panel" id="simple-action-result" aria-live="polite">
@@ -59,6 +69,9 @@
             </div>
             <div class="badge-row" aria-label="סטטוס ידידותי">
               <span class="badge status-badge status-pending">{{ fix.status_label }}</span>
+              <span class="badge status-badge {{ "status-missing" if fix.stale else "status-approved" }}">{{ fix.freshness_label }}</span>
+              <span class="badge status-badge {{ "status-missing" if fix.stale else "status-approved" }}">{{ fix.engine_label }}</span>
+              {% if fix.regen_label %}<span class="badge status-badge status-approved">{{ fix.regen_label }}</span>{% endif %}
               <span class="badge status-badge {{ 'status-approved' if fix.can_approve else 'status-missing' }}">{{ fix.safety_label }}</span>
             </div>
           </header>
