@@ -183,6 +183,7 @@ SIMPLE_STATUS_LABELS = {
     "PUBLISHED": "פורסם באתר",
     "VERIFIED": "אומת באתר",
     "FAILED": "נכשל",
+    "FAILED_VERIFICATION": "הפרסום נשלח אך לא אומת",
     "ROLLED_BACK": "שוחזר",
     "INVALIDATED": "טיוטה ישנה / בוטלה",
 }
@@ -1226,6 +1227,7 @@ def _simple_next_action(status: str) -> str:
         "PUBLISHED": "בדוק שהשינוי הופיע באתר",
         "VERIFIED": "הושלם",
         "FAILED": "צריך בדיקה",
+        "FAILED_VERIFICATION": "צריך בדיקת מיפוי title",
         "ROLLED_BACK": "שוחזר",
     }.get(status, "צריך בדיקה")
 
@@ -1250,8 +1252,12 @@ def _simple_fix_card(fix: IStoreSEOApproval) -> dict[str, object]:
     freshness_label = "טיוטה ישנה" if stale else "טיוטה חדשה"
     engine_label = "נוצר עם מנוע ישן" if stale else "מנוע עדכני"
     regen_label = "נוצר מחדש" if fix.regenerated_from_id else ""
+    verification_message = None
+    if fix.status == "FAILED_VERIFICATION":
+        verification_message = "הפרסום נשלח לחנות, אבל הכותרת באתר עדיין לא השתנתה. ייתכן שהשדה לא נכון או שיש cache."
     return {
         "id": fix.id,
+        "verification_message": verification_message,
         "page_name": _simple_page_name(fix),
         "page_url": fix.target_url or fix.source_url or "",
         "problem": _simple_issue_label(fix.issue_type),
@@ -1283,6 +1289,7 @@ def _simple_fix_card(fix: IStoreSEOApproval) -> dict[str, object]:
         "is_system": (fix.to_dict().get("approval_metadata", {}) or {}).get("page_type") == "system",
         "publish_timestamp": fix.publish_timestamp,
         "field_path": fix.field_path,
+        "technical_details": (fix.to_dict().get("publish_response", {}) or {}).get("technical_details", {}),
     }
 
 
@@ -1299,6 +1306,7 @@ def _simple_workspace_context(db: Session) -> dict[str, object]:
                     "PUBLISHED",
                     "VERIFIED",
                     "FAILED",
+                    "FAILED_VERIFICATION",
                     "ROLLED_BACK",
                     "INVALIDATED",
                 ]
