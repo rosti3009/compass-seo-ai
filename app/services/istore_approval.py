@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from html import escape, unescape
 from typing import Any
 
+import requests
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -15,7 +16,16 @@ from app.integrations.istore import IStoreAPIError, IStoreClient, _redact_token
 from app.services.istore_mapping import publishable_mapping
 from app.services.seo_copy_quality import sanitize_generated_seo_copy, truncate_without_ellipsis
 
-ALLOWED_ISTORE_FIELDS = {"product_description", "keyword", "meta_title", "meta_description"}
+ALLOWED_ISTORE_FIELDS = {
+    "product_description",
+    "keyword",
+    "meta_title",
+    "meta_description",
+    "title",
+    "seo_title",
+    "page_title",
+}
+TITLE_FIELD_CANDIDATES = ("meta_title", "title", "seo_title", "page_title")
 BLOCKED_ISTORE_FIELDS = {
     "price",
     "quantity",
@@ -171,7 +181,7 @@ def publish_approved_fix(
 
         return export_content_draft_for_manual_publish(db, approval)
 
-    payload = _json_dict(approval.proposed_payload_json)
+    payload = _publish_payload_for_approval(approval)
     validate_istore_payload(payload)
 
     if not publishable_mapping(approval):
@@ -234,18 +244,33 @@ def publish_approved_fix(
             "fix": approval.to_dict(),
         }
 
-    if _field_value(fetched, approval.field_path) == approval.proposed_value:
+    verification = _verify_publish_result(approval, fetched)
+    approval.publish_response_json = json.dumps(
+        {
+            **_json_dict(approval.publish_response_json),
+            "technical_details": {
+                "target_istore_product_id": approval.istore_product_id,
+                "payload_fields_sent": sorted(payload.keys()),
+                "updated_fields": verification["updated_fields"],
+                "live_verification": verification["live"],
+            },
+        },
+        ensure_ascii=False,
+    )
+    if verification["verified"]:
         approval.status = "PUBLISHED"
         verified = True
         _append_publish_log(approval, "Published and verified in ISTORE")
         _append_publish_log(approval, "פורסם ואומת ב-ISTORE")
     else:
-        approval.status = "FAILED_REVIEW_REQUIRED"
+        approval.status = "FAILED_VERIFICATION"
         verified = False
         _append_publish_log(
             approval,
             "התקבלה תגובת עדכון מ-ISTORE, אך האימות לא תאם לערך המוצע",
         )
+        if verification["description_updated_but_title_mismatch"]:
+            _append_publish_log(approval, "התיאור עודכן אך כותרת ה-SEO לא עודכנה. נדרש תיקון מיפוי שדה title.")
 
     db.add(approval)
     db.commit()
@@ -792,6 +817,53 @@ def _payload_for_field(field_path: str, value: str) -> dict[str, Any]:
         return {"product_description": {language_id: {leaf: value}}}
 
     return {field_path: value}
+
+
+def _publish_payload_for_approval(approval: IStoreSEOApproval) -> dict[str, Any]:
+    payload = _json_dict(approval.proposed_payload_json)
+    if approval.field_path == "meta_title":
+        mapped = {field: approval.proposed_value for field in TITLE_FIELD_CANDIDATES}
+        payload = {**payload, **mapped}
+    return payload
+
+
+def _verify_publish_result(approval: IStoreSEOApproval, fetched: Any) -> dict[str, Any]:
+    updated_fields = [
+        field for field in TITLE_FIELD_CANDIDATES if _field_value(fetched, field) == approval.proposed_value
+    ]
+    verified_by_api = _field_value(fetched, approval.field_path) == approval.proposed_value or bool(updated_fields)
+    live = _verify_live_page(approval.target_url, approval.proposed_value, approval.field_path)
+    verified = verified_by_api and live["verified"]
+    return {
+        "verified": verified,
+        "updated_fields": updated_fields,
+        "live": live,
+        "description_updated_but_title_mismatch": live["description_updated"] and not live["title_matches"],
+    }
+
+
+def _verify_live_page(url: str | None, proposed_value: str, field_path: str) -> dict[str, Any]:
+    if not url:
+        return {"verified": False, "title_matches": False, "description_updated": False, "warning": "missing_url"}
+    try:
+        html = requests.get(url, timeout=20).text
+    except requests.RequestException:
+        return {"verified": False, "title_matches": False, "description_updated": False, "warning": "fetch_failed"}
+    title_match = re.search(r"<title>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
+    meta_match = re.search(
+        r"<meta[^>]+name=[\"']description[\"'][^>]+content=[\"'](.*?)[\"']",
+        html,
+        re.IGNORECASE | re.DOTALL,
+    )
+    title = _clean(title_match.group(1) if title_match else "")
+    meta = _clean(meta_match.group(1) if meta_match else "")
+    title_matches = _clean(proposed_value) == title if field_path == "meta_title" else True
+    return {
+        "verified": title_matches,
+        "title_matches": title_matches,
+        "description_updated": _clean(proposed_value) in meta,
+        "live_title": title,
+    }
 
 
 def _field_value(product_payload: Any, field_path: str) -> str:

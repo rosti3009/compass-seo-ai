@@ -56,7 +56,7 @@ class MockIStoreClient:
 
     def get_product(self, product_id: str) -> dict[str, object]:
         assert product_id == "123"
-        return {"product": {"meta_title": self.verified_value}}
+        return {"product": {"meta_title": self.verified_value, "title": self.verified_value}}
 
 
 def _approved_fix(db_session: Session, *, proposed_payload: dict[str, object] | None = None) -> IStoreSEOApproval:
@@ -145,6 +145,15 @@ def test_only_one_fix_publishes_per_request(db_session: Session, monkeypatch: py
     client = MockIStoreClient()
     monkeypatch.setattr("app.services.istore_approval.settings.istore_publish_enabled", True)
     monkeypatch.setattr("app.services.istore_approval.settings.istore_safe_mode", False)
+    monkeypatch.setattr(
+        "app.services.istore_approval._verify_live_page",
+        lambda *_args, **_kwargs: {
+            "verified": True,
+            "title_matches": True,
+            "description_updated": False,
+            "live_title": "Better title",
+        },
+    )
 
     publish_approved_fix(db_session, first, approval_confirmed=True, client=client)
 
@@ -164,11 +173,25 @@ def test_successful_publish_verifies_before_marking_published(
     client = MockIStoreClient(verified_value="Better title")
     monkeypatch.setattr("app.services.istore_approval.settings.istore_publish_enabled", True)
     monkeypatch.setattr("app.services.istore_approval.settings.istore_safe_mode", False)
+    monkeypatch.setattr(
+        "app.services.istore_approval._verify_live_page",
+        lambda *_args, **_kwargs: {
+            "verified": True,
+            "title_matches": True,
+            "description_updated": False,
+            "live_title": "Better title",
+        },
+    )
 
     result = publish_approved_fix(db_session, fix, approval_confirmed=True, client=client)
 
     assert result["verified"] is True
     assert result["fix"]["status"] == "PUBLISHED"
+    sent = client.put_payloads[0]
+    assert sent["meta_title"] == "Better title"
+    assert sent["title"] == "Better title"
+    assert sent["seo_title"] == "Better title"
+    assert sent["page_title"] == "Better title"
 
 
 def test_failed_verification_does_not_mark_published(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -176,11 +199,44 @@ def test_failed_verification_does_not_mark_published(db_session: Session, monkey
     client = MockIStoreClient(verified_value="Still bad")
     monkeypatch.setattr("app.services.istore_approval.settings.istore_publish_enabled", True)
     monkeypatch.setattr("app.services.istore_approval.settings.istore_safe_mode", False)
+    monkeypatch.setattr(
+        "app.services.istore_approval._verify_live_page",
+        lambda *_args, **_kwargs: {
+            "verified": False,
+            "title_matches": False,
+            "description_updated": True,
+            "live_title": "Still bad",
+        },
+    )
 
     result = publish_approved_fix(db_session, fix, approval_confirmed=True, client=client)
 
     assert result["verified"] is False
-    assert result["fix"]["status"] == "FAILED_REVIEW_REQUIRED"
+    assert result["fix"]["status"] == "FAILED_VERIFICATION"
+
+
+def test_meta_description_publish_only_sends_description_field(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fix = _approved_fix(db_session, proposed_payload={"meta_description": "New description"})
+    fix.field_path = "meta_description"
+    fix.proposed_value = "New description"
+    db_session.add(fix)
+    db_session.commit()
+    client = MockIStoreClient(verified_value="New description")
+    monkeypatch.setattr("app.services.istore_approval.settings.istore_publish_enabled", True)
+    monkeypatch.setattr("app.services.istore_approval.settings.istore_safe_mode", False)
+    monkeypatch.setattr(
+        "app.services.istore_approval._verify_live_page",
+        lambda *_args, **_kwargs: {
+            "verified": True,
+            "title_matches": True,
+            "description_updated": True,
+            "live_title": "ok",
+        },
+    )
+    publish_approved_fix(db_session, fix, approval_confirmed=True, client=client)
+    assert set(client.put_payloads[0].keys()) == {"meta_description"}
 
 
 def test_token_is_never_exposed_in_publish_response(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:

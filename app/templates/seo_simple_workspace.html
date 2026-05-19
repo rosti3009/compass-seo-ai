@@ -97,7 +97,14 @@
             <section class="diff-pane diff-old"><h3>לפני</h3>{% if fix.is_system %}<p>שם העמוד: {{ fix.page_name }}</p><p>סוג עמוד: מערכת</p><p>הסבר קצר: העמוד לא מיועד לקידום.</p><p>המלצה: לאנדקס בזהירות או לחסום לפי הצורך.</p>{% else %}<pre>{{ fix.before }}</pre>{% endif %}</section>
             <section class="diff-pane diff-new"><h3>אחרי</h3><pre>{{ fix.after }}</pre></section>
           </div>
-          <details><summary>פרטים טכניים</summary><p>שדה: {{ fix.field_path }}</p></details>
+          {% if fix.verification_message %}<p class="notice error">{{ fix.verification_message }}</p>{% endif %}
+          <details><summary>פרטים טכניים</summary><p>שדה: {{ fix.field_path }}</p>
+          {% if fix.technical_details %}
+          <p>מוצר יעד: {{ fix.technical_details.target_istore_product_id or '—' }}</p>
+          <p>שדות שנשלחו: {{ fix.technical_details.payload_fields_sent|join(', ') if fix.technical_details.payload_fields_sent else '—' }}</p>
+          <p>שדות שעודכנו: {{ fix.technical_details.updated_fields|join(', ') if fix.technical_details.updated_fields else '—' }}</p>
+          {% endif %}
+          </details>
 
           {% if fix.show_google_preview %}
           <section class="google-preview" aria-label="איך זה עשוי להיראות בגוגל">
