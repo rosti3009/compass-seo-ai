@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     istore_base_url: str | None = None
     istore_company_id: str | None = None
     istore_x_token: str | None = None
+    istore_api_token: str | None = None
     istore_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
     istore_publish_enabled: bool = False
     istore_safe_mode: bool = True
@@ -41,3 +42,11 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
+
+
+def get_istore_token() -> str | None:
+    """Return ISTORE auth token with backward compatibility for legacy key names."""
+    token = getattr(settings, "istore_x_token", None)
+    if token:
+        return token
+    return getattr(settings, "istore_api_token", None)
