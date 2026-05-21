@@ -83,6 +83,20 @@ def ensure_sqlite_schema_compatibility(bind_engine=None) -> None:
         "istore_products": {
             "normalized_slug": "VARCHAR(512)",
         },
+        "content_article_drafts": {
+            "target_site_section": "VARCHAR(64) DEFAULT 'blog' NOT NULL",
+            "target_publish_type": "VARCHAR(64) DEFAULT 'article' NOT NULL",
+            "target_blog_base_url": "VARCHAR(512) DEFAULT 'https://compassgrill.co.il/blog/' NOT NULL",
+            "target_path": "VARCHAR(512) DEFAULT '' NOT NULL",
+            "target_url": "VARCHAR(1024) DEFAULT '' NOT NULL",
+            "publish_destination_status": "VARCHAR(64) DEFAULT 'ready' NOT NULL",
+            "featured_image_status": "VARCHAR(64) DEFAULT 'planned' NOT NULL",
+            "featured_image_url": "VARCHAR(1024)",
+            "featured_image_local_path": "VARCHAR(1024)",
+            "verification_status": "VARCHAR(64) DEFAULT 'NOT_VERIFIED' NOT NULL",
+            "published_url": "VARCHAR(1024)",
+            "published_at": "DATETIME",
+        },
         "seo_strategy_recommendations": {
             "priority_score": "FLOAT DEFAULT 0.0",
             "traffic_potential_score": "FLOAT DEFAULT 0.0",
@@ -116,6 +130,7 @@ def ensure_sqlite_schema_compatibility(bind_engine=None) -> None:
                             f"ADD COLUMN {column_name} {column_definition}"
                         )
                     )
+                    print(f"[DB MIGRATION] Added missing column {table_name}.{column_name}")
 
         compatibility_indexes = {
             "ix_istore_products_normalized_slug": ("istore_products", "normalized_slug"),
