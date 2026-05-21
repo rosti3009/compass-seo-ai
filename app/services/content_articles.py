@@ -119,10 +119,23 @@ def generate_daily_article_draft(db: Session) -> ContentArticleDraft:
         image_title=f"תמונת שער: {title}",
         image_caption="הכנה נכונה וצלייה מדויקת משדרגות כל נתח.",
         image_filename_slug=f"compass-grill-{_slugify(prompt_hint)}",
-        image_style_rules="realistic premium bbq; no fake logos; no distorted hebrew text; safe cooking",
+        image_style_rules=(
+            "ultra realistic BBQ / grill / meat / outdoor cooking photography; "
+            "premium but natural Israeli BBQ style; realistic meat texture; realistic grill smoke and fire; "
+            "clean composition suitable for blog hero image; horizontal website article header format; "
+            "no fake logos; no text inside the image; no distorted Hebrew text; no unrealistic food; "
+            "no unsafe cooking behavior; no people unless explicitly needed"
+        ),
         generated_image_url=None,
         uploaded_media_id=None,
         image_publish_status="NOT_PUBLISHED",
+        target_site_section="blog",
+        target_publish_type="article",
+        target_blog_base_url="https://compassgrill.co.il/blog/",
+        target_path=f"/blog/{_slugify(prompt_hint)}",
+        target_url=f"https://compassgrill.co.il/blog/{_slugify(prompt_hint)}",
+        publish_destination_status="ready",
+        featured_image_status="planned",
     )
     db.add(draft)
     db.commit()

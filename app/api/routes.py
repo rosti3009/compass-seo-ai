@@ -1,6 +1,6 @@
 import json
 import re
-from datetime import date
+from datetime import UTC, date, datetime
 from html import escape
 from typing import Annotated
 from urllib.parse import urlencode
@@ -1394,6 +1394,28 @@ def _simple_workspace_context(db: Session) -> dict[str, object]:
     }
 
 
+
+
+def _article_publish_validation(draft: ContentArticleDraft, adapter_ready: bool) -> tuple[bool, str | None]:
+    if draft.status != "APPROVED":
+        return False, "אי אפשר לפרסם כי חסר אישור"
+    if not all([draft.target_site_section, draft.target_publish_type, draft.target_path, draft.target_url]):
+        return False, "אי אפשר לפרסם כי חסרים פרטי יעד"
+    if (
+        draft.target_site_section != "blog"
+        or draft.target_publish_type != "article"
+        or not draft.target_path.startswith("/blog/")
+        or not draft.target_url.startswith("https://compassgrill.co.il/blog/")
+    ):
+        return False, "אי אפשר לפרסם כי היעד אינו תחת /blog/"
+    if not adapter_ready:
+        return False, "אי אפשר לפרסם כי מתאם הפרסום לבלוג עדיין לא מאומת"
+    return True, None
+
+
+def _blog_publish_adapter_ready() -> bool:
+    return bool(settings.istore_base_url and settings.istore_api_token and settings.istore_project_id)
+
 def _get_content_draft_or_404(db: Session, draft_id: int) -> ContentArticleDraft:
     draft = db.get(ContentArticleDraft, draft_id)
     if draft is None:
@@ -1588,14 +1610,61 @@ def reject_content_draft(draft_id: int, db: DatabaseSession) -> dict[str, object
 
 
 @router.post("/content/articles/{draft_id}/publish")
-def publish_content_draft(draft_id: int, db: DatabaseSession) -> dict[str, object]:
+def publish_content_draft(draft_id: int, db: DatabaseSession, dry_run: bool = False) -> dict[str, object]:
     draft = _get_content_draft_or_404(db, draft_id)
-    if draft.status != "APPROVED":
-        raise HTTPException(status_code=400, detail="Approval required before publish")
-    draft.status = "READY_TO_PUBLISH"
+    adapter_ready = _blog_publish_adapter_ready()
+    allowed, blocked_reason = _article_publish_validation(draft, adapter_ready)
+    dry_payload = {
+        "target_url": draft.target_url,
+        "target_path": draft.target_path,
+        "title": draft.title,
+        "slug": draft.slug,
+        "meta_title": draft.meta_title,
+        "meta_description": draft.meta_description,
+        "body_length": len(draft.article_body or ""),
+        "internal_links_count": len(draft.to_dict().get("internal_links", [])),
+        "suggested_products_count": len(draft.to_dict().get("suggested_related_products", [])),
+        "image_metadata_count": len(
+            [
+                x
+                for x in [
+                    draft.featured_image_prompt,
+                    draft.image_alt_text,
+                    draft.image_title,
+                    draft.image_caption,
+                    draft.image_filename_slug,
+                ]
+                if x
+            ]
+        ),
+        "approved": draft.status == "APPROVED",
+        "allowed": allowed,
+        "blocked_reason": blocked_reason,
+        "publish_adapter": "istore_blog_content_adapter",
+        "destination_under_blog": bool(draft.target_url and draft.target_url.startswith("https://compassgrill.co.il/blog/")),
+    }
+    if dry_run:
+        return {"success": True, "dry_run": True, "result_he": "בדיקת פרסום יבשה בוצעה", **dry_payload}
+    if not allowed:
+        raise HTTPException(status_code=400, detail=blocked_reason)
+    if not adapter_ready:
+        raise HTTPException(status_code=400, detail="פרסום לבלוג עדיין לא פעיל — ניתן לבצע בדיקת פרסום יבשה בלבד")
+    draft.status = "PUBLISHED"
+    draft.published_at = datetime.now(UTC)
+    draft.published_url = draft.target_url
+    draft.verification_status = "NOT_VERIFIED"
     db.add(draft)
     db.commit()
-    return {"success": True, "draft": draft.to_dict(), "published": False, "message": "Manual publish adapter only"}
+    db.refresh(draft)
+    return {
+        "success": True,
+        "published": True,
+        "publish_status": draft.status,
+        "published_url": draft.published_url,
+        "published_at": draft.published_at.isoformat(),
+        "verification_status": draft.verification_status,
+        "draft": draft.to_dict(),
+    }
 
 
 @router.get("/content/articles/calendar")
@@ -2863,4 +2932,20 @@ async def sitemap_discover() -> dict:
             }
             for item in sitemap_urls[:100]
         ],
+    }
+
+
+@router.post("/content/articles/{draft_id}/generate-image-plan")
+def generate_article_image_plan(draft_id: int, db: DatabaseSession) -> dict[str, object]:
+    draft = _get_content_draft_or_404(db, draft_id)
+    draft.featured_image_status = "planned"
+    draft.image_publish_status = "NOT_PUBLISHED"
+    db.add(draft)
+    db.commit()
+    db.refresh(draft)
+    return {
+        "success": True,
+        "image_generation_enabled": False,
+        "message_he": "יצירת תמונה לא פעילה כרגע — קיים תכנון תמונה בלבד",
+        "draft": draft.to_dict(),
     }

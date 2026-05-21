@@ -33,6 +33,11 @@
       </section>
 
       <section class="panel" aria-label="מאמרים לאישור">
+        <div class="actions">
+          <button type="button" class="inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/generate-daily-draft" data-method="POST" data-label="צור מאמר חדש">צור מאמר חדש</button>
+          <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/drafts" data-method="GET" data-label="רענן מאמרים">רענן מאמרים</button>
+          <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/seo/fixes/regenerate-stale" data-method="POST" data-label="רענן תיקונים">רענן תיקונים</button>
+        </div>
         <h2>מאמרים לאישור</h2>
         {% for article in article_drafts %}
         <article class="fix-card simple-fix-card">
@@ -44,6 +49,23 @@
           <details><summary>תצוגה מקדימה</summary><div>{{ article.article_body|safe }}</div></details>
           <p><strong>קישורים פנימיים:</strong> {{ article.internal_links }}</p>
           <p><strong>סטטוס:</strong> {{ article.status }}</p>
+          <p><strong>המאמר יעלה ל:</strong> <span dir="ltr">{{ article.target_url }}</span></p>
+          <p><strong>מוצרים מוצעים:</strong> {{ article.suggested_related_products }}</p>
+          <p><strong>prompt לתמונה ראשית:</strong> {{ article.featured_image_prompt }}</p>
+          <p><strong>טקסט ALT:</strong> {{ article.image_alt_text }}</p>
+          <p><strong>כותרת תמונה:</strong> {{ article.image_title }}</p>
+          <p><strong>כיתוב תמונה:</strong> {{ article.image_caption }}</p>
+          <p><strong>שם קובץ:</strong> {{ article.image_filename_slug }}</p>
+          <p><strong>סטטוס תמונה:</strong> {{ article.featured_image_status }}</p>
+          <div class="actions">
+            <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/{{ article.id }}" data-method="GET">תצוגה מקדימה</button>
+            <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/{{ article.id }}/approve" data-method="POST">אשר מאמר</button>
+            <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/{{ article.id }}/reject" data-method="POST">דחה מאמר</button>
+            <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/{{ article.id }}/publish?dry_run=true" data-method="POST">בדיקת פרסום יבשה</button>
+            <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/{{ article.id }}/publish" data-method="POST">פרסם ידנית</button>
+            <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/{{ article.id }}/generate-image-plan" data-method="POST">צור תכנון תמונה</button>
+            <button type="button" disabled>צור תמונה</button>
+          </div>
         </article>
         {% else %}
         <p class="empty">אין מאמרים ממתינים לאישור כרגע.</p>
