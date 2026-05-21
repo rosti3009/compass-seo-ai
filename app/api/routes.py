@@ -95,6 +95,7 @@ router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 DatabaseSession = Annotated[Session, Depends(get_db)]
 
+
 class IStoreApprovalAction(BaseModel):
     approved_by: str | None = None
     metadata: dict[str, object] | None = None
@@ -151,7 +152,6 @@ SEO_FIX_TYPES = {
 }
 SEO_FIX_STATUSES = {"draft", "ready_for_review", "approved", "rejected", "exported", "applied_manually"}
 PUBLISHING_PACKAGE_STATUSES = {"draft", "ready", "exported", "applied_manually", "failed"}
-
 
 
 SIMPLE_ISSUE_LABELS = {
@@ -218,6 +218,7 @@ def _raise_if_url_excluded(page_url: str) -> None:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"message": "URL is excluded from SEO content workflows", "excluded_reason": reason},
         )
+
 
 def _get_schedule_config_or_404(db: Session, config_id: int) -> SEOScheduleConfig:
     config = db.get(SEOScheduleConfig, config_id)
@@ -1134,8 +1135,6 @@ def _latest_crawl_context(db: Session, limit: int | None = None) -> tuple[CrawlR
     return latest_run, query.all()
 
 
-
-
 def _operations_view_context(db: Session, *, legacy_root_markers: bool = False) -> dict[str, object]:
     """Build the shared context for the SEO operations dashboard and result views."""
     latest_run, latest_pages = _latest_crawl_context(db, limit=25)
@@ -1203,8 +1202,6 @@ def _is_simple_bulk_safe_fix(fix: IStoreSEOApproval) -> bool:
     )
 
 
-
-
 def _simple_publish_block_reason(fix: IStoreSEOApproval) -> str | None:
     if fix.mapping_conflict or not fix.publish_mapping_verified:
         return "אי אפשר לפרסם עדיין כי המוצר לא חובר בוודאות לחנות."
@@ -1231,6 +1228,7 @@ def _simple_next_action(status: str) -> str:
         "ROLLED_BACK": "שוחזר",
     }.get(status, "צריך בדיקה")
 
+
 def _simple_fix_card(fix: IStoreSEOApproval) -> dict[str, object]:
     can_approve, approval_label = _simple_review_state(fix)
     status_label = SIMPLE_STATUS_LABELS.get(fix.status, "ממתין לבדיקה")
@@ -1245,9 +1243,7 @@ def _simple_fix_card(fix: IStoreSEOApproval) -> dict[str, object]:
     stale = is_stale_draft(fix)
     publish_block_reason = _simple_publish_block_reason(fix)
     can_publish = (
-        fix.status in {"APPROVED", "DRY_RUN_PASSED"}
-        and publish_block_reason is None
-        and publishable_mapping(fix)
+        fix.status in {"APPROVED", "DRY_RUN_PASSED"} and publish_block_reason is None and publishable_mapping(fix)
     )
     freshness_label = "טיוטה ישנה" if stale else "טיוטה חדשה"
     engine_label = "נוצר עם מנוע ישן" if stale else "מנוע עדכני"
@@ -1255,6 +1251,9 @@ def _simple_fix_card(fix: IStoreSEOApproval) -> dict[str, object]:
     verification_message = None
     if fix.status == "FAILED_VERIFICATION":
         verification_message = "הפרסום נשלח לחנות, אבל הכותרת באתר עדיין לא השתנתה. ייתכן שהשדה לא נכון או שיש cache."
+    metadata = fix.to_dict().get("approval_metadata", {}) or {}
+    decision_payload = metadata.get("decision", {}) if isinstance(metadata, dict) else {}
+    decision_label = decision_payload.get("decision", "REWRITE") if isinstance(decision_payload, dict) else "REWRITE"
     return {
         "id": fix.id,
         "verification_message": verification_message,
@@ -1290,6 +1289,9 @@ def _simple_fix_card(fix: IStoreSEOApproval) -> dict[str, object]:
         "publish_timestamp": fix.publish_timestamp,
         "field_path": fix.field_path,
         "technical_details": (fix.to_dict().get("publish_response", {}) or {}).get("technical_details", {}),
+        "decision": decision_label,
+        "recommendation_only": decision_label == "KEEP_EXISTING",
+        "group_key": (fix.target_url or fix.source_url or "") + "::" + (fix.field_path or ""),
     }
 
 
@@ -1320,6 +1322,15 @@ def _simple_workspace_context(db: Session) -> dict[str, object]:
     visible_fixes = [fix for fix in fixes if fix.status != "INVALIDATED"]
     visible_fixes = [fix for fix in visible_fixes if (show_stale or not is_stale_draft(fix))]
     cards = [_simple_fix_card(fix) for fix in visible_fixes]
+    cards = [c for c in cards if c["field_path"] != "keyword" and not c["is_system"] and not c["recommendation_only"]]
+    grouped: dict[str, dict[str, object]] = {}
+    for card in cards:
+        key = card["page_url"] or str(card["id"])
+        if key not in grouped:
+            grouped[key] = {**card, "additional_suggestions": []}
+            continue
+        grouped[key]["additional_suggestions"].append(card)
+    cards = list(grouped.values())
     pending = [card for card in cards if card["status_label"] == "ממתין לבדיקה"]
     safe = [card for card in cards if card["bulk_safe"]]
     needs_product = [
@@ -1385,7 +1396,6 @@ def _bulk_approve_simple_safe_fixes(db: Session, fix_ids: list[int]) -> dict[str
         "approved_fix_ids": approved,
         "skipped_fix_ids": skipped,
     }
-
 
 
 @router.get("/auth/google/start")
@@ -1572,15 +1582,19 @@ def create_seo_scheduler_config(
     enabled: bool = False,
 ) -> dict[str, object]:
     """Create a disabled-by-default scheduler config for safe SEO preparation work."""
-    values = payload.model_dump() if payload is not None else {
-        "name": name,
-        "frequency": frequency,
-        "hour_utc": hour_utc,
-        "max_tasks": max_tasks,
-        "generate_articles": generate_articles,
-        "sync_gsc": sync_gsc,
-        "enabled": enabled,
-    }
+    values = (
+        payload.model_dump()
+        if payload is not None
+        else {
+            "name": name,
+            "frequency": frequency,
+            "hour_utc": hour_utc,
+            "max_tasks": max_tasks,
+            "generate_articles": generate_articles,
+            "sync_gsc": sync_gsc,
+            "enabled": enabled,
+        }
+    )
     try:
         config = create_schedule_config(
             db,
@@ -1932,8 +1946,6 @@ def latest_crawler_results(db: DatabaseSession) -> dict[str, object]:
     return {"crawl_run": crawl_run.to_dict(), "results": [page.to_dict() for page in pages]}
 
 
-
-
 @router.get("/crawler/results-view/latest", response_class=HTMLResponse)
 def latest_crawler_results_view(request: Request, db: DatabaseSession) -> HTMLResponse:
     """Render the latest crawl results as readable HTML instead of a raw API payload."""
@@ -1943,6 +1955,7 @@ def latest_crawler_results_view(request: Request, db: DatabaseSession) -> HTMLRe
         "crawler_results_latest.html",
         {"crawl_run": latest_run, "pages": pages, "target_domain": settings.target_domain},
     )
+
 
 @router.get("/stats")
 def stats(db: DatabaseSession) -> dict[str, object]:
@@ -2052,7 +2065,6 @@ def create_seo_fixes_for_task(task_id: int, db: DatabaseSession) -> dict[str, ob
     return {"created_count": len(new_fixes), "fixes": [fix.to_dict() for fix in new_fixes]}
 
 
-
 @router.post("/seo/fixes/generate-from-latest-crawl", status_code=status.HTTP_201_CREATED)
 def generate_seo_fixes_from_latest_crawl(
     db: DatabaseSession, payload: Annotated[SEOAutoFixGenerationRequest | None, Body()] = None
@@ -2080,12 +2092,11 @@ def verify_istore_fix_mappings(db: DatabaseSession) -> dict[str, object]:
     except IStoreAPIError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
+
 @router.get("/seo/fixes/pending")
 def pending_seo_fixes(db: DatabaseSession, limit: int = 250) -> dict[str, object]:
     """Return pending auto-fix drafts grouped and sorted for human review."""
     return pending_fixes_review(db, limit=limit)
-
-
 
 
 @router.get("/seo/fixes/pending-view", response_class=HTMLResponse)
@@ -2294,8 +2305,6 @@ def mark_publishing_package_applied(package_id: int, db: DatabaseSession) -> dic
     return {"success": True, "package": package.to_dict()}
 
 
-
-
 @router.post("/istore/sync-products")
 def sync_istore_product_catalog(db: DatabaseSession) -> dict[str, object]:
     """Synchronize the local ISTORE product catalog without publishing changes."""
@@ -2356,6 +2365,7 @@ def assign_seo_fix_product(
         },
         "fix": fix_to_review_dict(fix),
     }
+
 
 @router.post("/integrations/istore/seo-approvals/scan", status_code=status.HTTP_201_CREATED)
 def scan_istore_seo_approvals(db: DatabaseSession, limit: int = 50) -> dict[str, object]:
@@ -2698,6 +2708,7 @@ def istore_products() -> dict[str, object]:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except IStoreAPIError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
 
 @router.get("/integrations/istore/products/{product_id}/seo-analysis")
 def istore_product_seo_analysis_view(product_id: str, request: Request) -> HTMLResponse:

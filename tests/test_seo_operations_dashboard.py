@@ -110,7 +110,7 @@ def test_seo_operations_view_loads(client: TestClient, db_session: Session) -> N
     assert "לוח תפעול SEO" in response.text
     assert "הרץ סריקה" in response.text
     assert "Generic AI meta" in response.text
-    assert "data-endpoint=\"/crawler/run\"" in response.text
+    assert 'data-endpoint="/crawler/run"' in response.text
 
 
 def test_latest_crawler_results_view_loads(client: TestClient, db_session: Session) -> None:
@@ -178,7 +178,7 @@ def test_pending_fixes_view_has_rtl_review_workflow_filters_and_badges(client: T
     assert "ממתין לאישור" in html
     assert "מיפוי חסר" in html
     assert "לא ניתן לפרסום" in html
-    assert "data-action=\"edit-fix\"" in html
+    assert 'data-action="edit-fix"' in html
     assert "verify-mapping" in html
 
 
@@ -319,14 +319,12 @@ def test_simple_workspace_loads_with_plain_hebrew_cards_and_preview(client: Test
     assert "פעולה מומלצת הבאה" in html
     assert "התיאור נשמע גנרי מדי ולא מספיק משכנע ללקוחות." in html
     assert "הכותרת ארוכה מדי וגוגל עלול לחתוך אותה." in html
-    assert "זה עמוד מערכת שלא צריך לקדם בגוגל." in html
     assert "כותרת טובה יותר יכולה לגרום ליותר אנשים ללחוץ על התוצאה בגוגל." in html
     assert "תיאור ייחודי עוזר לגוגל להבין במה העמוד שונה מעמודים אחרים." in html
     assert "ממתין לבדיקה" in html
     assert "בדיקת פרסום יבשה" in html
     assert "פרטים טכניים" in html
     assert "צריך לחבר למוצר בחנות" in html
-    assert "עדיין לא ניתן לפרסם" in html
     assert "מצב מתקדם" in html
     assert 'href="/seo/operations-view"' in html
     assert "בדקת שהטקסט החדש נשמע נכון ומתאים למוצר?" in html
@@ -407,16 +405,14 @@ def test_simple_workspace_verify_live_endpoint(
 
     class Resp:
         text = (
-            "<html><head><title>x</title><meta name=\"description\" "
-            "content=\"תיאור חדש וברור לגריל גז איכותי לחצר\"></head></html>"
+            '<html><head><title>x</title><meta name="description" '
+            'content="תיאור חדש וברור לגריל גז איכותי לחצר"></head></html>'
         )
 
     monkeypatch.setattr("app.api.routes.requests.get", lambda *a, **k: Resp())
     resp = client.post(f"/seo/simple-workspace/{safe_fix.id}/verify-live")
     assert resp.status_code == 200
     assert resp.json()["message"] == "השינוי מופיע באתר"
-
-
 
 
 def test_simple_workspace_publish_actions_use_explicit_approval_and_confirmation(
@@ -432,10 +428,11 @@ def test_simple_workspace_publish_actions_use_explicit_approval_and_confirmation
     assert response.status_code == 200
     html = response.text
     assert 'data-action="fetch" data-endpoint="/integrations/istore/seo-approvals/' in html
-    assert "data-body='{\"approval\":true,\"dry_run\":true}'" in html
+    assert 'data-body=\'{"approval":true,"dry_run":true}\'' in html
     assert 'data-action="confirm-fetch"' in html
-    assert "data-body='{\"approval\":true,\"dry_run\":false}'" in html
+    assert 'data-body=\'{"approval":true,"dry_run":false}\'' in html
     assert 'data-action="confirm-fetch"' in html
+
 
 def test_simple_workspace_dry_run_publish_does_not_mark_published(client: TestClient, db_session: Session) -> None:
     safe_fix, _, _ = _seed_simple_workspace_fixes(db_session)
@@ -450,3 +447,49 @@ def test_simple_workspace_dry_run_publish_does_not_mark_published(client: TestCl
     assert response.status_code in {200, 400, 403}
     db_session.refresh(safe_fix)
     assert safe_fix.status != "PUBLISHED"
+
+
+def test_simple_workspace_hides_system_slug_and_recommendation_only_rows(
+    client: TestClient, db_session: Session
+) -> None:
+    safe_fix, _, system_fix = _seed_simple_workspace_fixes(db_session)
+    slug_fix = IStoreSEOApproval(
+        target_type="product",
+        target_id="slug-1",
+        target_url="https://example.com/products/slug",
+        publish_mapping_verified=True,
+        mapping_conflict=False,
+        field_path="keyword",
+        current_value="bad",
+        proposed_value="better",
+        seo_reason="slug",
+        risk_level="medium",
+        issue_type="invalid_slug",
+        priority_score=10,
+        status="PENDING_APPROVAL",
+        approval_metadata_json=json.dumps({"page_type": "product"}),
+    )
+    keep_fix = IStoreSEOApproval(
+        target_type="product",
+        target_id="keep-1",
+        target_url="https://example.com/products/keep",
+        publish_mapping_verified=True,
+        mapping_conflict=False,
+        field_path="meta_title",
+        current_value="טוב",
+        proposed_value="אין צורך בשינוי",
+        seo_reason="keep",
+        risk_level="low",
+        issue_type="title_too_short",
+        priority_score=5,
+        status="PENDING_APPROVAL",
+        approval_metadata_json=json.dumps({"page_type": "product", "decision": {"decision": "KEEP_EXISTING"}}),
+    )
+    db_session.add_all([slug_fix, keep_fix])
+    db_session.commit()
+
+    html = client.get("/seo/simple-workspace").text
+    assert "https://example.com/cart" not in html
+    assert "https://example.com/products/slug" not in html
+    assert "https://example.com/products/keep" not in html
+    assert (safe_fix.target_url or "") in html

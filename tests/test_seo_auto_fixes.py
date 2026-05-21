@@ -360,3 +360,33 @@ def test_homepage_generates_manual_strategy_recommendation_not_title_or_meta_rew
     assert fix.field_path == "content_draft"
     assert "homepage SEO copy requires manual brand strategy review" in fix.proposed_value
     assert json.loads(fix.proposed_payload_json)["api_publish_allowed"] is False
+
+
+def test_weak_title_with_forbidden_generic_phrase_gets_rewrite_decision(
+    client: TestClient, db_session: Session
+) -> None:
+    _page(
+        db_session,
+        _crawl(db_session),
+        title='לולה שיפוד נירוסטה, שטוח - קבב 560 * 3 * 20 מ"מ - המוצר המוביל בתחום | COMPASS GRILL',
+        missing_fields="title_too_long",
+    )
+    client.post("/seo/fixes/generate-from-latest-crawl", json={"dry_run": False})
+    fix = db_session.query(IStoreSEOApproval).one()
+    metadata = json.loads(fix.approval_metadata_json)
+    assert metadata["decision"]["decision"] == "REWRITE"
+    assert "generic_phrase" in metadata["decision"]["weakness_flags"]
+
+
+def test_good_boretti_title_marks_keep_existing_recommendation_only() -> None:
+    from app.services.seo_quality_decision import evaluate_seo_text
+
+    decision = evaluate_seo_text(
+        target_url="https://example.com/brand/boretti",
+        field_path="meta_title",
+        old_text="BORETTI ADDIZIO – גריל גז מעוצב עם 3 מבערים בעוצמה גבוהה | COMPASS GRILL",
+        new_text="BORETTI ADDIZIO – גריל גז מעוצב עם 3 מבערים בעוצמה גבוהה | COMPASS GRILL",
+        page_type="brand",
+    )
+    assert decision.decision == "KEEP_EXISTING"
+    assert decision.publishable is False
