@@ -58,6 +58,7 @@ from app.services.istore_approval import (
 from app.services.istore_approval import (
     reject_fix as reject_istore_approval_fix,
 )
+from app.services.istore_blog_publisher import IStoreBlogPublisher, IStoreBlogPublishError
 from app.services.istore_mapping import (
     PUBLISHABLE_CONFIDENCE_THRESHOLD,
     assign_product_mapping,
@@ -1675,10 +1676,15 @@ def publish_content_draft(draft_id: int, db: DatabaseSession, dry_run: bool = Fa
         raise HTTPException(status_code=400, detail=blocked_reason)
     if not adapter_ready:
         raise HTTPException(status_code=400, detail="פרסום לבלוג עדיין לא פעיל — ניתן לבצע בדיקת פרסום יבשה בלבד")
+    try:
+        result = IStoreBlogPublisher.from_settings().publish(draft)
+    except IStoreBlogPublishError as exc:
+        raise HTTPException(status_code=400, detail=f"פרסום נכשל: {exc}") from exc
+
     draft.status = "PUBLISHED"
     draft.published_at = datetime.now(UTC)
     draft.published_url = draft.target_url
-    draft.verification_status = "NOT_VERIFIED"
+    draft.verification_status = "VERIFIED"
     db.add(draft)
     db.commit()
     db.refresh(draft)
@@ -1689,6 +1695,9 @@ def publish_content_draft(draft_id: int, db: DatabaseSession, dry_run: bool = Fa
         "published_url": draft.published_url,
         "published_at": draft.published_at.isoformat(),
         "verification_status": draft.verification_status,
+        "result_he": "פורסם בהצלחה",
+        "publish_adapter": "IStoreBlogPublisher",
+        "publish_result": result,
         "draft": draft.to_dict(),
     }
 
