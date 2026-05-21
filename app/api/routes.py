@@ -12,7 +12,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
+from app.core.config import get_istore_token, settings
 from app.db.database import get_db
 from app.db.models import (
     ContentArticleDraft,
@@ -1409,12 +1409,14 @@ def _article_publish_validation(draft: ContentArticleDraft, adapter_ready: bool)
     ):
         return False, "אי אפשר לפרסם כי היעד אינו תחת /blog/"
     if not adapter_ready:
-        return False, "אי אפשר לפרסם כי מתאם הפרסום לבלוג עדיין לא מאומת"
+        return False, "פרסום לבלוג עדיין לא מוגדר במערכת"
     return True, None
 
 
 def _blog_publish_adapter_ready() -> bool:
-    return bool(settings.istore_base_url and settings.istore_api_token and settings.istore_project_id)
+    token = get_istore_token()
+    project_or_company_id = getattr(settings, "istore_project_id", None) or getattr(settings, "istore_company_id", None)
+    return bool(getattr(settings, "istore_base_url", None) and token and project_or_company_id)
 
 def _get_content_draft_or_404(db: Session, draft_id: int) -> ContentArticleDraft:
     draft = db.get(ContentArticleDraft, draft_id)

@@ -6,6 +6,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.api.routes import _blog_publish_adapter_ready
 from app.db.database import Base, get_db
 from app.db.models import IStoreProduct
 from app.main import app
@@ -96,3 +97,24 @@ def test_generate_article_handles_missing_title_field_safely(client: TestClient,
     links = draft['internal_links']
     assert any(link['title'] == 'גריל מומלץ' for link in links)
     assert all(link['url'] for link in links)
+
+
+def test_blog_publish_adapter_uses_istore_x_token_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.api.routes.settings.istore_base_url", "https://api.istore.local")
+    monkeypatch.setattr("app.api.routes.settings.istore_company_id", "company-1")
+    monkeypatch.setattr("app.api.routes.settings.istore_x_token", "token-x")
+    monkeypatch.setattr("app.api.routes.settings.istore_api_token", None)
+
+    assert _blog_publish_adapter_ready() is True
+
+
+def test_dry_run_returns_safe_block_when_blog_publish_not_configured(client: TestClient) -> None:
+    draft = client.post('/content/articles/generate-daily-draft').json()['draft']
+    client.post(f"/content/articles/{draft['id']}/approve")
+
+    response = client.post(f"/content/articles/{draft['id']}/publish?dry_run=true")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['allowed'] is False
+    assert payload['blocked_reason'] == 'פרסום לבלוג עדיין לא מוגדר במערכת'
+
