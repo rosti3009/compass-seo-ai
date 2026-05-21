@@ -24,7 +24,11 @@ TOPIC_POOL = [
 
 
 def _slugify(text: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    custom = {"טאבון": "tabun", "גז": "gas", "עצים": "wood", "או": "vs"}
+    normalized = text
+    if re.search(r"[\u0590-\u05FF]", text):
+        normalized = " ".join(custom.get(token, token) for token in re.split(r"\s+", text.strip()))
+    slug = re.sub(r"[^a-z0-9]+", "-", normalized.lower()).strip("-")
     return slug or "compass-grill-article"
 
 
@@ -157,7 +161,7 @@ def generate_daily_article_draft(db: Session) -> ContentArticleDraft:
         status="CONTENT_DRAFT",
         topic_title=title,
         title=title,
-        slug=_slugify(prompt_hint),
+        slug=_slugify(title),
         meta_title=f"{title} | Compass Grill",
         meta_description=f"{title} – מדריך מעשי בעברית עם טיפים לצלייה, עישון ובחירת ציוד נכון.",
         focus_keyword=keyword,
@@ -174,7 +178,7 @@ def generate_daily_article_draft(db: Session) -> ContentArticleDraft:
         image_alt_text=f"{title} על גריל איכותי בחצר",
         image_title=f"תמונת שער: {title}",
         image_caption="הכנה נכונה וצלייה מדויקת משדרגות כל נתח.",
-        image_filename_slug=f"compass-grill-{_slugify(prompt_hint)}",
+        image_filename_slug=f"compass-grill-{_slugify(title)}",
         image_style_rules=(
             "ultra realistic BBQ / grill / meat / outdoor cooking photography; "
             "premium but natural Israeli BBQ style; realistic meat texture; realistic grill smoke and fire; "
@@ -188,8 +192,8 @@ def generate_daily_article_draft(db: Session) -> ContentArticleDraft:
         target_site_section="blog",
         target_publish_type="article",
         target_blog_base_url="https://compassgrill.co.il/blog/",
-        target_path=f"/blog/{_slugify(prompt_hint)}",
-        target_url=f"https://compassgrill.co.il/blog/{_slugify(prompt_hint)}",
+        target_path=f"/blog/{_slugify(title)}",
+        target_url=f"https://compassgrill.co.il/blog/{_slugify(title)}",
         publish_destination_status="ready",
         featured_image_status="planned",
     )

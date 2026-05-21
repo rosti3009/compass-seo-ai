@@ -62,12 +62,19 @@
           <p><strong>Suggested link relevance:</strong> {{ article.suggested_link_relevance }}</p>
           <p><strong>Article quality score:</strong> {{ article.article_quality_score }}</p>
           <p><strong>Publish readiness:</strong> {{ article.publish_readiness }}</p>
+          {% set blocked_article = article.publish_readiness != 'READY_FOR_REVIEW' or article.semantic_relevance_score < 70 or article.article_quality_score < 75 or article.suggested_link_relevance < 70 %}
+          {% if blocked_article %}
+            <p class="empty"><strong>נדרש שיפור לפני אישור</strong></p>
+          {% endif %}
           <div class="actions">
             <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/{{ article.id }}" data-method="GET">תצוגה מקדימה</button>
-            <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/{{ article.id }}/approve" data-method="POST">אשר מאמר</button>
+            <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/{{ article.id }}/approve" data-method="POST" {% if blocked_article %}disabled title="נדרש שיפור לפני אישור"{% endif %}>אשר מאמר</button>
             <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/{{ article.id }}/reject" data-method="POST">דחה מאמר</button>
             <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/{{ article.id }}/publish?dry_run=true" data-method="POST">בדיקת פרסום יבשה</button>
-            <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/{{ article.id }}/publish" data-method="POST">פרסם ידנית</button>
+            <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/{{ article.id }}/publish" data-method="POST" {% if blocked_article %}disabled title="נדרש שיפור לפני אישור"{% endif %}>פרסם ידנית</button>
+            {% if article.publish_readiness == 'NEEDS_IMPROVEMENT' %}
+              <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/generate-daily-draft" data-method="POST">צור מאמר מחדש</button>
+            {% endif %}
             <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/{{ article.id }}/generate-image-plan" data-method="POST">צור תכנון תמונה</button>
             <button type="button" disabled>צור תמונה</button>
           </div>
