@@ -231,3 +231,93 @@ def test_snapshot_table_has_expected_model_columns(db_session: Session) -> None:
     assert payload["seo_score"] == 55.0
     assert payload["previous_seo_score"] == 50.0
     assert payload["seo_score_delta"] == 5.0
+
+def test_sqlite_startup_migrates_content_article_draft_columns_and_preserves_rows(tmp_path) -> None:
+    db_path = tmp_path / "legacy_drafts.sqlite"
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE content_article_drafts (
+                    id INTEGER PRIMARY KEY,
+                    status VARCHAR(32) NOT NULL,
+                    topic_title VARCHAR(512) NOT NULL,
+                    title VARCHAR(512) NOT NULL,
+                    slug VARCHAR(255) NOT NULL,
+                    meta_title VARCHAR(512) NOT NULL,
+                    meta_description TEXT NOT NULL,
+                    focus_keyword VARCHAR(255) NOT NULL,
+                    target_intent VARCHAR(128) NOT NULL,
+                    article_body TEXT NOT NULL,
+                    suggested_related_products_json TEXT,
+                    internal_links_json TEXT,
+                    faq_schema_json TEXT,
+                    featured_image_prompt TEXT,
+                    section_image_prompts_json TEXT,
+                    image_alt_text VARCHAR(512),
+                    image_title VARCHAR(512),
+                    image_caption VARCHAR(512),
+                    image_filename_slug VARCHAR(255),
+                    image_style_rules TEXT,
+                    generated_image_url VARCHAR(1024),
+                    uploaded_media_id VARCHAR(255),
+                    image_publish_status VARCHAR(32),
+                    review_notes TEXT,
+                    approved_by VARCHAR(255),
+                    created_at DATETIME,
+                    updated_at DATETIME
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO content_article_drafts (
+                    id, status, topic_title, title, slug, meta_title, meta_description,
+                    focus_keyword, target_intent, article_body, suggested_related_products_json,
+                    internal_links_json, faq_schema_json, featured_image_prompt, section_image_prompts_json,
+                    image_alt_text, image_title, image_caption, image_filename_slug, image_style_rules,
+                    generated_image_url, uploaded_media_id, image_publish_status, review_notes,
+                    approved_by, created_at, updated_at
+                ) VALUES (
+                    1, 'CONTENT_DRAFT', 'Legacy Topic', 'Legacy Title', 'legacy-title', 'Legacy Meta', 'Legacy Desc',
+                    'legacy-keyword', 'informational', 'Legacy body', '[]', '[]', '{}', '', '[]',
+                    '', '', '', '', '', NULL, NULL, 'NOT_PUBLISHED', NULL,
+                    NULL, '2026-05-20 00:00:00', '2026-05-20 00:00:00'
+                )
+                """
+            )
+        )
+
+    Base.metadata.create_all(bind=engine)
+    ensure_sqlite_schema_compatibility(engine)
+
+    inspector = inspect(engine)
+    columns = {column["name"] for column in inspector.get_columns("content_article_drafts")}
+    expected_new_columns = {
+        "target_site_section",
+        "target_publish_type",
+        "target_blog_base_url",
+        "target_path",
+        "target_url",
+        "publish_destination_status",
+        "featured_image_status",
+        "featured_image_url",
+        "featured_image_local_path",
+        "verification_status",
+        "published_url",
+        "published_at",
+    }
+    assert expected_new_columns.issubset(columns)
+
+    with engine.connect() as connection:
+        row_count = connection.execute(text("SELECT COUNT(*) FROM content_article_drafts")).scalar_one()
+        legacy_row = connection.execute(
+            text("SELECT topic_title, slug FROM content_article_drafts WHERE id = 1")
+        ).one()
+
+    assert row_count == 1
+    assert legacy_row.topic_title == "Legacy Topic"
+    assert legacy_row.slug == "legacy-title"
