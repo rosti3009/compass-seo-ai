@@ -57,6 +57,11 @@
           <p><strong>כיתוב תמונה:</strong> {{ article.image_caption }}</p>
           <p><strong>שם קובץ:</strong> {{ article.image_filename_slug }}</p>
           <p><strong>סטטוס תמונה:</strong> {{ article.featured_image_status }}</p>
+          <p><strong>SEO quality score:</strong> {{ article.seo_quality_score }}</p>
+          <p><strong>Semantic relevance score:</strong> {{ article.semantic_relevance_score }}</p>
+          <p><strong>Suggested link relevance:</strong> {{ article.suggested_link_relevance }}</p>
+          <p><strong>Article quality score:</strong> {{ article.article_quality_score }}</p>
+          <p><strong>Publish readiness:</strong> {{ article.publish_readiness }}</p>
           <div class="actions">
             <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/{{ article.id }}" data-method="GET">תצוגה מקדימה</button>
             <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/{{ article.id }}/approve" data-method="POST">אשר מאמר</button>

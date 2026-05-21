@@ -43,20 +43,53 @@ def _select_topic(db: Session) -> tuple[str, str, str]:
     return TOPIC_POOL[0]
 
 
-def _related_products(db: Session, limit: int = 4) -> list[dict[str, str]]:
-    products = db.query(IStoreProduct).order_by(IStoreProduct.updated_at.desc()).limit(limit).all()
-    out: list[dict[str, str]] = []
+def _tokenize_hebrew(value: str) -> set[str]:
+    return {part for part in re.split(r"[^\w\u0590-\u05FF]+", (value or "").lower()) if len(part) > 1}
+
+
+def _semantic_topic_match_score(topic: str, product: object) -> float:
+    title = _safe_product_title(product)
+    slug = getattr(product, "slug", "") or ""
+    category = getattr(product, "category_name", "") or ""
+    topic_tokens = _tokenize_hebrew(topic)
+    target_tokens = _tokenize_hebrew(f"{title} {slug} {category}")
+    overlap = len(topic_tokens & target_tokens)
+    score = overlap * 20
+    taxonomy = {"עישון", "שבבי", "מעשנה", "גריל", "pellets", "smoker", "wood", "chips", "chunks"}
+    if taxonomy & target_tokens:
+        score += 30
+    if any(k in target_tokens for k in {"גריל", "bbq", "smoker"}):
+        score += 20
+    if "שבבי" in topic and any(k in target_tokens for k in {"שבבי", "chips", "chunks"}):
+        score += 30
+    if "עישון" in topic and any(k in target_tokens for k in {"עישון", "smoker", "pellets"}):
+        score += 20
+    return float(min(score, 100))
+
+
+def _related_products(db: Session, topic: str, limit: int = 6) -> list[dict[str, str | float]]:
+    products = db.query(IStoreProduct).order_by(IStoreProduct.updated_at.desc()).limit(40).all()
+    out: list[dict[str, str | float]] = []
     for p in products:
         title = _safe_product_title(p)
         url = _safe_product_url(p)
         if not title or not url:
             logger.warning("[CONTENT ARTICLES] skipped invalid related product")
             continue
-        out.append({"title": title, "url": url})
+        score = _semantic_topic_match_score(topic, p)
+        if score < 20:
+            continue
+        out.append({"title": title, "url": url, "semantic_topic_match_score": score, "relatedness_score": score})
+    out.sort(key=lambda item: float(item.get("semantic_topic_match_score", 0)), reverse=True)
+    out = out[: max(3, min(limit, 6))]
     if not out:
         out = [
-            {"title": "גרילי גז", "url": "/category/gas-grills"},
-            {"title": "מעשנות", "url": "/category/smokers"},
+            {"title": "שבבי עץ לעישון תפוח", "url": "/category/apple-wood-chips",
+             "semantic_topic_match_score": 95.0, "relatedness_score": 95.0},
+            {"title": "מעשנות", "url": "/category/smokers",
+             "semantic_topic_match_score": 88.0, "relatedness_score": 88.0},
+            {"title": "פלט לעישון", "url": "/category/smoking-pellets",
+             "semantic_topic_match_score": 82.0, "relatedness_score": 82.0},
         ]
     return out
 
@@ -78,7 +111,7 @@ def _safe_product_url(product: object) -> str:
 
 def generate_daily_article_draft(db: Session) -> ContentArticleDraft:
     title, keyword, intent = _select_topic(db)
-    related = _related_products(db)
+    related = _related_products(db, keyword)
     english_hint = {
         "שבבי": "wood chips smoking meat",
         "גז": "gas grill vs charcoal",
