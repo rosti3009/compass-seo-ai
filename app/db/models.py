@@ -705,6 +705,20 @@ class ContentArticleDraft(Base):
     image_publish_status: Mapped[str] = mapped_column(String(32), default="NOT_PUBLISHED", nullable=False)
     review_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     approved_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    target_site_section: Mapped[str] = mapped_column(String(64), default="blog", nullable=False)
+    target_publish_type: Mapped[str] = mapped_column(String(64), default="article", nullable=False)
+    target_blog_base_url: Mapped[str] = mapped_column(
+        String(512), default="https://compassgrill.co.il/blog/", nullable=False
+    )
+    target_path: Mapped[str] = mapped_column(String(512), default="", nullable=False)
+    target_url: Mapped[str] = mapped_column(String(1024), default="", nullable=False)
+    publish_destination_status: Mapped[str] = mapped_column(String(64), default="ready", nullable=False)
+    featured_image_status: Mapped[str] = mapped_column(String(64), default="planned", nullable=False)
+    featured_image_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    featured_image_local_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    verification_status: Mapped[str] = mapped_column(String(64), default="NOT_VERIFIED", nullable=False)
+    published_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
@@ -735,6 +749,18 @@ class ContentArticleDraft(Base):
             "generated_image_url": self.generated_image_url,
             "uploaded_media_id": self.uploaded_media_id,
             "image_publish_status": self.image_publish_status,
+            "target_site_section": self.target_site_section,
+            "target_publish_type": self.target_publish_type,
+            "target_blog_base_url": self.target_blog_base_url,
+            "target_path": self.target_path,
+            "target_url": self.target_url,
+            "publish_destination_status": self.publish_destination_status,
+            "featured_image_status": self.featured_image_status,
+            "featured_image_url": self.featured_image_url,
+            "featured_image_local_path": self.featured_image_local_path,
+            "verification_status": self.verification_status,
+            "published_url": self.published_url,
+            "published_at": self.published_at.isoformat() if self.published_at else None,
             "review_notes": self.review_notes,
             "approved_by": self.approved_by,
             "created_at": self.created_at.isoformat() if self.created_at else None,

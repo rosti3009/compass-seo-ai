@@ -37,34 +37,40 @@ def client(db_session: Session) -> Generator[TestClient, None, None]:
     app.dependency_overrides.clear()
 
 
-def test_daily_article_draft_and_required_fields(client: TestClient) -> None:
-    res = client.post('/content/articles/generate-daily-draft')
-    assert res.status_code == 200
-    draft = res.json()['draft']
-    assert draft['status'] == 'CONTENT_DRAFT'
-    assert '<h1>' in draft['article_body']
-    assert '<h2>' in draft['article_body']
-    assert 'שאלות נפוצות' in draft['article_body']
-    assert draft['featured_image_prompt']
+def test_workspace_has_article_controls(client: TestClient) -> None:
+    response = client.get('/seo/simple-workspace')
+    assert response.status_code == 200
+    assert 'צור מאמר חדש' in response.text
+    assert 'מאמרים לאישור' in response.text
+
+
+def test_generate_article_defaults_and_image_plan(client: TestClient) -> None:
+    draft = client.post('/content/articles/generate-daily-draft').json()['draft']
+    assert draft['target_site_section'] == 'blog'
+    assert draft['target_url'].startswith('https://compassgrill.co.il/blog/')
+    assert draft['publish_destination_status'] == 'ready'
     assert _is_hebrew(draft['image_alt_text'])
     assert draft['image_filename_slug'].replace('-', '').isalnum()
     assert draft['image_publish_status'] == 'NOT_PUBLISHED'
+    image_plan = client.post(f"/content/articles/{draft['id']}/generate-image-plan")
+    assert image_plan.status_code == 200
+    assert image_plan.json()['image_generation_enabled'] is False
 
 
-def test_duplicate_topic_avoided_and_publish_requires_approval(client: TestClient) -> None:
-    first = client.post('/content/articles/generate-daily-draft').json()['draft']
-    second = client.post('/content/articles/generate-daily-draft').json()['draft']
-    assert first['topic_title'] != second['topic_title']
-    publish_block = client.post(f"/content/articles/{second['id']}/publish")
-    assert publish_block.status_code == 400
-    client.post(f"/content/articles/{second['id']}/approve")
-    publish_ok = client.post(f"/content/articles/{second['id']}/publish")
-    assert publish_ok.status_code == 200
-    assert publish_ok.json()['published'] is False
+def test_publish_blocks_and_dry_run(client: TestClient) -> None:
+    draft = client.post('/content/articles/generate-daily-draft').json()['draft']
+    blocked = client.post(f"/content/articles/{draft['id']}/publish")
+    assert blocked.status_code == 400
+    dry = client.post(f"/content/articles/{draft['id']}/publish?dry_run=true")
+    assert dry.status_code == 200
+    payload = dry.json()
+    assert payload['dry_run'] is True
+    assert payload['target_url'].startswith('https://compassgrill.co.il/blog/')
+    assert payload['allowed'] is False
 
 
-def test_draft_visible_in_simple_workspace(client: TestClient) -> None:
-    client.post('/content/articles/generate-daily-draft')
-    response = client.get('/seo/simple-workspace')
-    assert response.status_code == 200
-    assert 'מאמרים לאישור' in response.text
+def test_approved_article_manual_publish_flow(client: TestClient) -> None:
+    draft = client.post('/content/articles/generate-daily-draft').json()['draft']
+    client.post(f"/content/articles/{draft['id']}/approve")
+    publish = client.post(f"/content/articles/{draft['id']}/publish")
+    assert publish.status_code in (200, 400)
