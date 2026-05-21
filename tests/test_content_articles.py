@@ -118,3 +118,48 @@ def test_dry_run_returns_safe_block_when_blog_publish_not_configured(client: Tes
     assert payload['allowed'] is False
     assert payload['blocked_reason'] == 'פרסום לבלוג עדיין לא מוגדר במערכת'
 
+
+
+def test_publish_updates_status_only_after_live_verification(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    draft = client.post('/content/articles/generate-daily-draft').json()['draft']
+    client.post(f"/content/articles/{draft['id']}/approve")
+
+    monkeypatch.setattr('app.api.routes._blog_publish_adapter_ready', lambda: True)
+
+    class _Publisher:
+        def publish(self, _draft):
+            return {"verification": {"status_code": 200, "title_found": True, "meta_title_found": True}}
+
+    monkeypatch.setattr('app.api.routes.IStoreBlogPublisher.from_settings', lambda: _Publisher())
+
+    response = client.post(f"/content/articles/{draft['id']}/publish")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['verification_status'] == 'VERIFIED'
+    assert payload['publish_status'] == 'PUBLISHED'
+
+
+def test_publish_404_verification_keeps_draft_not_published(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    draft = client.post('/content/articles/generate-daily-draft').json()['draft']
+    client.post(f"/content/articles/{draft['id']}/approve")
+
+    monkeypatch.setattr('app.api.routes._blog_publish_adapter_ready', lambda: True)
+
+    from app.services.istore_blog_publisher import IStoreBlogPublishError
+
+    class _Publisher:
+        def publish(self, _draft):
+            raise IStoreBlogPublishError('Live URL verification failed with HTTP 404')
+
+    monkeypatch.setattr('app.api.routes.IStoreBlogPublisher.from_settings', lambda: _Publisher())
+
+    response = client.post(f"/content/articles/{draft['id']}/publish")
+    assert response.status_code == 400
+
+    check = client.get(f"/content/articles/{draft['id']}").json()['draft']
+    assert check['status'] == 'APPROVED'
+    assert check['verification_status'] == 'NOT_VERIFIED'
