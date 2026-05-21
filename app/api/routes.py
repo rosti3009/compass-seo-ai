@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.database import get_db
 from app.db.models import (
+    ContentArticleDraft,
     CrawlRun,
     GoogleOAuthToken,
     GSCKeywordMetric,
@@ -36,6 +37,7 @@ from app.integrations.gsc import GSCAPIError, GSCClient
 from app.integrations.gsc import MissingGoogleCredentialsError as MissingGSCCredentialsError
 from app.integrations.istore import IStoreAPIError, IStoreClient, MissingIStoreSettingsError
 from app.integrations.openai_client import OpenAIClient
+from app.services.content_articles import generate_daily_article_draft
 from app.services.crawler import SEOCrawler
 from app.services.hebrew_seo import analyze_page_hebrew_seo, israeli_seasonality, summarize_hebrew_insights
 from app.services.internal_links import authority_score, best_anchor_text, opportunity_score
@@ -113,6 +115,14 @@ class IStoreDraftEditRequest(BaseModel):
 class SimpleBulkApprovalRequest(BaseModel):
     fix_ids: list[int] = []
     confirmed: bool = False
+
+
+class ContentArticleEditRequest(BaseModel):
+    title: str | None = None
+    slug: str | None = None
+    meta_title: str | None = None
+    meta_description: str | None = None
+    article_body: str | None = None
 
 
 class IStorePayloadValidationRequest(BaseModel):
@@ -1358,6 +1368,7 @@ def _simple_workspace_context(db: Session) -> dict[str, object]:
         primary_href = "/seo/operations-view"
     invalidated_count = db.query(IStoreSEOApproval).filter(IStoreSEOApproval.status == "INVALIDATED").count()
     regenerated_count = db.query(IStoreSEOApproval).filter(IStoreSEOApproval.regenerated_from_id.is_not(None)).count()
+    article_drafts = db.query(ContentArticleDraft).order_by(ContentArticleDraft.created_at.desc()).limit(20).all()
     return {
         "cards": cards,
         "safe_cards": safe,
@@ -1377,7 +1388,17 @@ def _simple_workspace_context(db: Session) -> dict[str, object]:
         },
         "primary_label": primary_label,
         "primary_href": primary_href,
+        "article_drafts": [
+            d.to_dict() for d in article_drafts if d.status in {"CONTENT_DRAFT", "APPROVED", "REJECTED"}
+        ],
     }
+
+
+def _get_content_draft_or_404(db: Session, draft_id: int) -> ContentArticleDraft:
+    draft = db.get(ContentArticleDraft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Content draft not found")
+    return draft
 
 
 def _bulk_approve_simple_safe_fixes(db: Session, fix_ids: list[int]) -> dict[str, object]:
@@ -1516,6 +1537,75 @@ def seo_simple_bulk_approve(payload: SimpleBulkApprovalRequest, db: DatabaseSess
     if not payload.confirmed:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Approval confirmation is required.")
     return _bulk_approve_simple_safe_fixes(db, payload.fix_ids)
+
+
+@router.post("/content/articles/generate-daily-draft")
+def generate_daily_content_article(db: DatabaseSession) -> dict[str, object]:
+    draft = generate_daily_article_draft(db)
+    return {"success": True, "draft": draft.to_dict(), "auto_publish": False}
+
+
+@router.get("/content/articles/drafts")
+def list_content_drafts(db: DatabaseSession) -> dict[str, object]:
+    drafts = db.query(ContentArticleDraft).order_by(ContentArticleDraft.created_at.desc()).all()
+    return {"drafts": [d.to_dict() for d in drafts]}
+
+
+@router.get("/content/articles/{draft_id}")
+def get_content_draft(draft_id: int, db: DatabaseSession) -> dict[str, object]:
+    return {"draft": _get_content_draft_or_404(db, draft_id).to_dict()}
+
+
+@router.post("/content/articles/{draft_id}/edit")
+def edit_content_draft(draft_id: int, payload: ContentArticleEditRequest, db: DatabaseSession) -> dict[str, object]:
+    draft = _get_content_draft_or_404(db, draft_id)
+    for field in ("title", "slug", "meta_title", "meta_description", "article_body"):
+        value = getattr(payload, field)
+        if value is not None:
+            setattr(draft, field, value)
+    db.add(draft)
+    db.commit()
+    db.refresh(draft)
+    return {"success": True, "draft": draft.to_dict()}
+
+
+@router.post("/content/articles/{draft_id}/approve")
+def approve_content_draft(draft_id: int, db: DatabaseSession) -> dict[str, object]:
+    draft = _get_content_draft_or_404(db, draft_id)
+    draft.status = "APPROVED"
+    db.add(draft)
+    db.commit()
+    return {"success": True, "draft": draft.to_dict(), "publish_allowed": True}
+
+
+@router.post("/content/articles/{draft_id}/reject")
+def reject_content_draft(draft_id: int, db: DatabaseSession) -> dict[str, object]:
+    draft = _get_content_draft_or_404(db, draft_id)
+    draft.status = "REJECTED"
+    db.add(draft)
+    db.commit()
+    return {"success": True, "draft": draft.to_dict()}
+
+
+@router.post("/content/articles/{draft_id}/publish")
+def publish_content_draft(draft_id: int, db: DatabaseSession) -> dict[str, object]:
+    draft = _get_content_draft_or_404(db, draft_id)
+    if draft.status != "APPROVED":
+        raise HTTPException(status_code=400, detail="Approval required before publish")
+    draft.status = "READY_TO_PUBLISH"
+    db.add(draft)
+    db.commit()
+    return {"success": True, "draft": draft.to_dict(), "published": False, "message": "Manual publish adapter only"}
+
+
+@router.get("/content/articles/calendar")
+def content_calendar(db: DatabaseSession) -> dict[str, object]:
+    drafts = db.query(ContentArticleDraft).order_by(ContentArticleDraft.created_at.desc()).limit(60).all()
+    history = [
+        {"date": d.created_at.date().isoformat(), "topic": d.topic_title, "keyword": d.focus_keyword}
+        for d in drafts
+    ]
+    return {"history": history}
 
 
 def _build_hebrew_insights_payload(db: Session, enrich: bool = False) -> dict[str, object]:

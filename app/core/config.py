@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     istore_safe_mode: bool = True
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
+    content_daily_articles_enabled: bool = False
 
 
 @lru_cache
