@@ -40,6 +40,7 @@ from app.integrations.openai_client import OpenAIClient
 from app.services.content_articles import generate_daily_article_draft
 from app.services.crawler import SEOCrawler
 from app.services.hebrew_seo import analyze_page_hebrew_seo, israeli_seasonality, summarize_hebrew_insights
+from app.services.image_generation import build_realistic_hero_prompt, get_image_provider
 from app.services.internal_links import authority_score, best_anchor_text, opportunity_score
 from app.services.istore_approval import (
     approve_fix as approve_istore_approval_fix,
@@ -1389,11 +1390,34 @@ def _simple_workspace_context(db: Session) -> dict[str, object]:
         "primary_label": primary_label,
         "primary_href": primary_href,
         "article_drafts": [
-            d.to_dict() for d in article_drafts if d.status in {"CONTENT_DRAFT", "APPROVED", "REJECTED"}
+            {**d.to_dict(), **_article_quality_summary(d)}
+            for d in article_drafts
+            if d.status in {"CONTENT_DRAFT", "APPROVED", "REJECTED"}
         ],
     }
 
 
+
+
+def _article_quality_summary(draft: ContentArticleDraft) -> dict[str, float | str]:
+    links = json.loads(draft.internal_links_json or "[]") if draft.internal_links_json else []
+    products = (
+        json.loads(draft.suggested_related_products_json or "[]")
+        if draft.suggested_related_products_json
+        else []
+    )
+    semantic = round(sum(float(item.get("semantic_topic_match_score", 0)) for item in links) / max(len(links), 1), 1)
+    suggestion = round(sum(float(item.get("relatedness_score", 0)) for item in products) / max(len(products), 1), 1)
+    seo = 90.0 if len(draft.meta_title) <= 65 and 70 <= len(draft.meta_description) <= 160 else 72.0
+    article_quality = min(100.0, round((seo * 0.3) + (semantic * 0.35) + (suggestion * 0.35), 1))
+    readiness = "READY_FOR_REVIEW" if article_quality >= 75 else "NEEDS_IMPROVEMENT"
+    return {
+        "seo_quality_score": seo,
+        "semantic_relevance_score": semantic,
+        "suggested_link_relevance": suggestion,
+        "article_quality_score": article_quality,
+        "publish_readiness": readiness,
+    }
 
 
 def _article_publish_validation(draft: ContentArticleDraft, adapter_ready: bool) -> tuple[bool, str | None]:
@@ -2940,14 +2964,19 @@ async def sitemap_discover() -> dict:
 @router.post("/content/articles/{draft_id}/generate-image-plan")
 def generate_article_image_plan(draft_id: int, db: DatabaseSession) -> dict[str, object]:
     draft = _get_content_draft_or_404(db, draft_id)
-    draft.featured_image_status = "planned"
+    provider = get_image_provider()
+    draft.featured_image_prompt = build_realistic_hero_prompt(draft.featured_image_prompt)
+    result = provider.generate_hero_image(draft.featured_image_prompt, draft_slug=draft.slug)
+    draft.featured_image_status = result.status
     draft.image_publish_status = "NOT_PUBLISHED"
+    draft.generated_image_url = result.image_url
     db.add(draft)
     db.commit()
     db.refresh(draft)
     return {
         "success": True,
-        "image_generation_enabled": False,
-        "message_he": "יצירת תמונה לא פעילה כרגע — קיים תכנון תמונה בלבד",
+        "image_generation_enabled": result.enabled,
+        "image_provider": result.provider,
+        "message_he": result.message_he,
         "draft": draft.to_dict(),
     }

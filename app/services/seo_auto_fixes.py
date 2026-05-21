@@ -231,13 +231,15 @@ def _page_fix_proposals(page: PageAudit) -> list[IStoreSEOApproval]:
     return [
         proposal
         for proposal in proposals
-        if proposal.proposed_value and proposal.proposed_value != (proposal.current_value or "")
+        if proposal is not None
+        and proposal.proposed_value
+        and proposal.proposed_value != (proposal.current_value or "")
     ]
 
 
 def _build_fix(
     page: PageAudit, issue_type: str, field_path: str, current_value: str, proposed_value: str
-) -> IStoreSEOApproval:
+) -> IStoreSEOApproval | None:
     proposed_value = _remove_forbidden_phrases(proposed_value)
     target_type = _target_type(page, field_path)
     payload = _proposed_payload(field_path, proposed_value)
@@ -251,6 +253,10 @@ def _build_fix(
         new_text=proposed_value,
         page_type=page.page_type or "",
     )
+    if decision.decision == "NO_ACTION_NEEDED" or proposed_value in {
+        "נראה שהטקסט הקיים כבר איכותי", "אין צורך בשינוי", "אין צורך בשינוי כרגע"
+    }:
+        return None
     metadata = {
         "page_type": page.page_type or "unknown",
         "primary_intent": page.primary_intent or "general",

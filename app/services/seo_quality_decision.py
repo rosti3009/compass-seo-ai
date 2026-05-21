@@ -33,6 +33,12 @@ def evaluate_seo_text(
         return SEOQualityDecision("HIDE_FROM_EMPLOYEE", "system_page", 0.98, ["system_page"], False, False)
     if field_path == "keyword":
         return SEOQualityDecision("HIDE_FROM_EMPLOYEE", "slug_dangerous", 0.95, ["slug_dangerous"], False, False)
+    no_action_texts = {"נראה שהטקסט הקיים כבר איכותי", "אין צורך בשינוי", "אין צורך בשינוי כרגע"}
+    if new in no_action_texts:
+        return SEOQualityDecision("NO_ACTION_NEEDED", "אין צורך בשינוי", 0.92, [], False, False, "אין צורך בשינוי כרגע")
+    if old == new:
+        return SEOQualityDecision("KEEP_EXISTING", "אין צורך בשינוי", 0.9, [], False, False, "אין צורך בשינוי כרגע")
+
     if len(old) > 65 and field_path == "meta_title" and page_type in {"product", "category", "article", "blog"}:
         flags.append("too_long")
     if any(p in old for p in GENERIC_PHRASES):
@@ -46,7 +52,4 @@ def evaluate_seo_text(
 
     if flags:
         return SEOQualityDecision("REWRITE", "דורש שכתוב", 0.9, flags, True, True)
-
-    if new in {"נראה שהטקסט הקיים כבר איכותי", "אין צורך בשינוי", "אין צורך בשינוי כרגע"}:
-        return SEOQualityDecision("KEEP_EXISTING", "אין צורך בשינוי", 0.92, [], False, False, "אין צורך בשינוי כרגע")
     return SEOQualityDecision("KEEP_EXISTING", "אין צורך בשינוי", 0.85, [], False, False, "אין צורך בשינוי כרגע")

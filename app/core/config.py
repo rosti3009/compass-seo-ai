@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
     content_daily_articles_enabled: bool = False
+    image_provider: str | None = None
 
 
 @lru_cache
