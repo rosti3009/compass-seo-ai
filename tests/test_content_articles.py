@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db.database import Base, get_db
+from app.db.models import IStoreProduct
 from app.main import app
 
 
@@ -74,3 +75,24 @@ def test_approved_article_manual_publish_flow(client: TestClient) -> None:
     client.post(f"/content/articles/{draft['id']}/approve")
     publish = client.post(f"/content/articles/{draft['id']}/publish")
     assert publish.status_code in (200, 400)
+
+
+def test_generate_article_handles_missing_title_field_safely(client: TestClient, db_session: Session) -> None:
+    db_session.add_all(
+        [
+            IStoreProduct(istore_product_id="sku-no-url", product_name=""),
+            IStoreProduct(
+                istore_product_id="sku-valid",
+                product_name="גריל מומלץ",
+                product_url="https://compassgrill.co.il/products/recommended-grill",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.post('/content/articles/generate-daily-draft')
+    assert response.status_code == 200
+    draft = response.json()['draft']
+    links = draft['internal_links']
+    assert any(link['title'] == 'גריל מומלץ' for link in links)
+    assert all(link['url'] for link in links)
