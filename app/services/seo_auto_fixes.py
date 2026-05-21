@@ -16,6 +16,7 @@ from app.services.seo_copy_quality import (
     truncate_without_ellipsis,
 )
 from app.services.seo_engine_version import CURRENT_SEO_ENGINE_VERSION
+from app.services.seo_quality_decision import evaluate_seo_text
 from app.services.seo_url_filters import get_url_exclusion_reason
 
 PENDING_AUTOFIX_STATUSES = {"PENDING_APPROVAL", "APPROVED", "READY_FOR_MANUAL_PUBLISH"}
@@ -110,9 +111,7 @@ def pending_fixes_review(db: Session, limit: int = 250) -> dict[str, object]:
     )
     review_items = [fix_to_review_dict(fix) for fix in fixes]
     weak_drafts = [
-        item
-        for item in review_items
-        if item.get("quality", {}).get("overall_score", 100) < WEAK_DRAFT_THRESHOLD
+        item for item in review_items if item.get("quality", {}).get("overall_score", 100) < WEAK_DRAFT_THRESHOLD
     ]
     return {
         "pending_count": len(review_items),
@@ -245,6 +244,13 @@ def _build_fix(
     rollback = _rollback_payload(field_path, current_value)
     classification = _classify_page_context(page)
     quality = _quality_score(page, proposed_value, classification)
+    decision = evaluate_seo_text(
+        target_url=page.url,
+        field_path=field_path,
+        old_text=current_value,
+        new_text=proposed_value,
+        page_type=page.page_type or "",
+    )
     metadata = {
         "page_type": page.page_type or "unknown",
         "primary_intent": page.primary_intent or "general",
@@ -252,7 +258,16 @@ def _build_fix(
         "classification": classification,
         "quality": quality,
         "safe_publish_status": _safe_publish_status_for(target_type, field_path),
-        "quick_approval_visible": quality["overall_score"] >= WEAK_DRAFT_THRESHOLD,
+        "decision": {
+            "decision": decision.decision,
+            "reason": decision.reason,
+            "confidence": decision.confidence,
+            "weakness_flags": decision.weakness_flags,
+            "safe_for_quick_approval": decision.safe_for_quick_approval,
+            "publishable": decision.publishable,
+            "recommendation_text": decision.recommendation_text,
+        },
+        "quick_approval_visible": quality["overall_score"] >= WEAK_DRAFT_THRESHOLD and decision.safe_for_quick_approval,
         "weak_draft_bucket": "טיוטות חלשות / דורש שכתוב" if quality["overall_score"] < WEAK_DRAFT_THRESHOLD else None,
         "auto_generated_from_latest_crawl": True,
     }
@@ -332,14 +347,10 @@ def _meta_description(page: PageAudit) -> str:
         )
     elif page_type in {"article", "blog"}:
         meta = (
-            f"קראו על {base} ב-Compass עם הסברים מעשיים, דגשים להשוואה "
-            "וקישורים למוצרים או קטגוריות רלוונטיים באתר."
+            f"קראו על {base} ב-Compass עם הסברים מעשיים, דגשים להשוואה " "וקישורים למוצרים או קטגוריות רלוונטיים באתר."
         )
     else:
-        meta = (
-            f"{base} ב-Compass עם מידע ממוקד, פרטים שימושיים וקישורים רלוונטיים "
-            "להמשך בדיקה באתר."
-        )
+        meta = f"{base} ב-Compass עם מידע ממוקד, פרטים שימושיים וקישורים רלוונטיים " "להמשך בדיקה באתר."
     return _sanitize_customer_copy(page, _pad_meta(meta, base, keyword or "הנושא"), limit=155)
 
 

@@ -98,6 +98,12 @@
             <section class="diff-pane diff-new"><h3>אחרי</h3><pre>{{ fix.after }}</pre></section>
           </div>
           {% if fix.verification_message %}<p class="notice error">{{ fix.verification_message }}</p>{% endif %}
+          {% if fix.additional_suggestions %}
+          <details><summary>עוד הצעות לעמוד הזה ({{ fix.additional_suggestions|length }})</summary>
+            <ul>{% for extra in fix.additional_suggestions %}<li><strong>{{ extra.problem }}</strong>: {{ extra.suggestion }}</li>{% endfor %}</ul>
+          </details>
+          {% endif %}
+
           <details><summary>פרטים טכניים</summary><p>שדה: {{ fix.field_path }}</p>
           {% if fix.technical_details %}
           <p>מוצר יעד: {{ fix.technical_details.target_istore_product_id or '—' }}</p>
