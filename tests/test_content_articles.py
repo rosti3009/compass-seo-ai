@@ -141,6 +141,84 @@ def test_publish_updates_status_only_after_live_verification(
     assert payload['publish_status'] == 'PUBLISHED'
 
 
+def test_low_semantic_score_cannot_approve(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    draft = client.post('/content/articles/generate-daily-draft').json()['draft']
+    monkeypatch.setattr(
+        "app.api.routes._article_quality_summary",
+        lambda _draft: {
+            "seo_quality_score": 90.0,
+            "semantic_relevance_score": 20.0,
+            "suggested_link_relevance": 80.0,
+            "article_quality_score": 80.0,
+            "publish_readiness": "READY_FOR_REVIEW",
+        },
+    )
+    response = client.post(f"/content/articles/{draft['id']}/approve")
+    assert response.status_code == 400
+    assert response.json()['detail'] == 'אי אפשר לאשר מאמר כי איכות/רלוונטיות נמוכה מדי'
+
+
+def test_low_article_quality_cannot_approve(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    draft = client.post('/content/articles/generate-daily-draft').json()['draft']
+
+    def _mock_summary(_draft):
+        return {
+            "seo_quality_score": 90.0,
+            "semantic_relevance_score": 90.0,
+            "suggested_link_relevance": 90.0,
+            "article_quality_score": 74.9,
+            "publish_readiness": "NEEDS_IMPROVEMENT",
+        }
+
+    monkeypatch.setattr("app.api.routes._article_quality_summary", _mock_summary)
+    response = client.post(f"/content/articles/{draft['id']}/approve")
+    assert response.status_code == 400
+    assert response.json()['detail'] == 'אי אפשר לאשר מאמר כי איכות/רלוונטיות נמוכה מדי'
+
+
+def test_needs_improvement_cannot_publish_and_publish_rechecks_gates(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    draft = client.post('/content/articles/generate-daily-draft').json()['draft']
+    monkeypatch.setattr('app.api.routes._blog_publish_adapter_ready', lambda: True)
+    monkeypatch.setattr(
+        "app.api.routes._content_quality_gate_passed",
+        lambda _draft: False,
+    )
+    response = client.post(f"/content/articles/{draft['id']}/publish")
+    assert response.status_code == 400
+    assert response.json()['detail'] == 'אי אפשר לאשר מאמר כי איכות/רלוונטיות נמוכה מדי'
+
+
+def test_simple_workspace_shows_blocked_warning_and_regen_button(client: TestClient) -> None:
+    client.post('/content/articles/generate-daily-draft')
+    import app.api.routes as routes
+
+    original = routes._article_quality_summary
+    routes._article_quality_summary = lambda draft: {  # type: ignore[assignment]
+        **original(draft),
+        "semantic_relevance_score": 20.0,
+        "suggested_link_relevance": 20.0,
+        "article_quality_score": 41.0,
+        "publish_readiness": "NEEDS_IMPROVEMENT",
+    }
+    response = client.get('/seo/simple-workspace')
+    routes._article_quality_summary = original
+    assert response.status_code == 200
+    assert 'נדרש שיפור לפני אישור' in response.text
+    assert 'צור מאמר מחדש' in response.text
+
+
+def test_hebrew_tabun_slug_is_not_gas_grill_vs_charcoal(client: TestClient) -> None:
+    for _ in range(8):
+        draft = client.post('/content/articles/generate-daily-draft').json()['draft']
+        if draft['title'] == 'טאבון גז או טאבון עצים':
+            assert draft['slug'] != 'gas-grill-vs-charcoal'
+            assert draft['slug'] in {'gas-oven-vs-wood-oven', 'tabun-gas-vs-wood', 'tabun-gas-vs-tabun-wood'}
+            return
+    pytest.fail('Did not generate the expected tabun topic in 8 attempts')
+
+
 def test_publish_404_verification_keeps_draft_not_published(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

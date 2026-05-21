@@ -1424,6 +1424,16 @@ def _article_quality_summary(draft: ContentArticleDraft) -> dict[str, float | st
     }
 
 
+def _content_quality_gate_passed(draft: ContentArticleDraft) -> bool:
+    summary = _article_quality_summary(draft)
+    return (
+        summary["publish_readiness"] == "READY_FOR_REVIEW"
+        and float(summary["semantic_relevance_score"]) >= 70
+        and float(summary["article_quality_score"]) >= 75
+        and float(summary["suggested_link_relevance"]) >= 70
+    )
+
+
 def _article_publish_validation(draft: ContentArticleDraft, adapter_ready: bool) -> tuple[bool, str | None]:
     def _blog_target_allowed() -> bool:
         return bool(
@@ -1638,6 +1648,11 @@ def edit_content_draft(draft_id: int, payload: ContentArticleEditRequest, db: Da
 @router.post("/content/articles/{draft_id}/approve")
 def approve_content_draft(draft_id: int, db: DatabaseSession) -> dict[str, object]:
     draft = _get_content_draft_or_404(db, draft_id)
+    if not _content_quality_gate_passed(draft):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="אי אפשר לאשר מאמר כי איכות/רלוונטיות נמוכה מדי",
+        )
     draft.status = "APPROVED"
     db.add(draft)
     db.commit()
@@ -1656,6 +1671,11 @@ def reject_content_draft(draft_id: int, db: DatabaseSession) -> dict[str, object
 @router.post("/content/articles/{draft_id}/publish")
 def publish_content_draft(draft_id: int, db: DatabaseSession, dry_run: bool = False) -> dict[str, object]:
     draft = _get_content_draft_or_404(db, draft_id)
+    if not _content_quality_gate_passed(draft):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="אי אפשר לאשר מאמר כי איכות/רלוונטיות נמוכה מדי",
+        )
     adapter_ready = _blog_publish_adapter_ready()
     allowed, blocked_reason = _article_publish_validation(draft, adapter_ready)
     dry_payload = {
