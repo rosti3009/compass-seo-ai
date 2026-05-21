@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from datetime import UTC, date, datetime
 from html import escape
@@ -94,6 +95,8 @@ from app.services.seo_strategy_engine import generate_strategy_recommendations, 
 from app.services.seo_url_filters import get_url_exclusion_reason, is_seo_eligible_url
 from app.services.sitemap import discover_sitemap_urls
 from app.services.topical_clusters import build_cluster_summary
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -1422,19 +1425,33 @@ def _article_quality_summary(draft: ContentArticleDraft) -> dict[str, float | st
 
 
 def _article_publish_validation(draft: ContentArticleDraft, adapter_ready: bool) -> tuple[bool, str | None]:
+    def _blog_target_allowed() -> bool:
+        return bool(
+            draft.target_path in {"/blog", "/blog/"}
+            or (draft.target_path or "").startswith("/blog/")
+            and (
+                draft.target_url == "https://compassgrill.co.il/blog/"
+                or (draft.target_url or "").startswith("https://compassgrill.co.il/blog/")
+            )
+        )
+
     if draft.status != "APPROVED":
+        logger.info("[BLOG VALIDATION] allowed=false exclusion_reason=missing_approval target=%s", draft.target_url)
         return False, "אי אפשר לפרסם כי חסר אישור"
     if not all([draft.target_site_section, draft.target_publish_type, draft.target_path, draft.target_url]):
+        logger.info("[BLOG VALIDATION] allowed=false exclusion_reason=missing_target target=%s", draft.target_url)
         return False, "אי אפשר לפרסם כי חסרים פרטי יעד"
-    if (
-        draft.target_site_section != "blog"
-        or draft.target_publish_type != "article"
-        or not draft.target_path.startswith("/blog/")
-        or not draft.target_url.startswith("https://compassgrill.co.il/blog/")
-    ):
+    if draft.target_site_section != "blog" or draft.target_publish_type != "article" or not _blog_target_allowed():
+        logger.info(
+            "[BLOG VALIDATION] allowed=false exclusion_reason=target_not_under_blog target_path=%s target_url=%s",
+            draft.target_path,
+            draft.target_url,
+        )
         return False, "אי אפשר לפרסם כי היעד אינו תחת /blog/"
     if not adapter_ready:
+        logger.info("[BLOG VALIDATION] allowed=false exclusion_reason=adapter_not_ready target=%s", draft.target_url)
         return False, "פרסום לבלוג עדיין לא מוגדר במערכת"
+    logger.info("[BLOG VALIDATION] allowed=true exclusion_reason=None target=%s", draft.target_url)
     return True, None
 
 
