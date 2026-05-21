@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
 from app.db.models import ContentArticleDraft, IStoreProduct
+
+logger = logging.getLogger(__name__)
 
 TOPIC_POOL = [
     ("איך לבחור שבבי עץ לעישון בשר", "שבבי עץ לעישון", "informational"),
@@ -44,13 +47,33 @@ def _related_products(db: Session, limit: int = 4) -> list[dict[str, str]]:
     products = db.query(IStoreProduct).order_by(IStoreProduct.updated_at.desc()).limit(limit).all()
     out: list[dict[str, str]] = []
     for p in products:
-        out.append({"title": p.title or "מוצר גריל", "url": p.product_url or ""})
+        title = _safe_product_title(p)
+        url = _safe_product_url(p)
+        if not title or not url:
+            logger.warning("[CONTENT ARTICLES] skipped invalid related product")
+            continue
+        out.append({"title": title, "url": url})
     if not out:
         out = [
             {"title": "גרילי גז", "url": "/category/gas-grills"},
             {"title": "מעשנות", "url": "/category/smokers"},
         ]
     return out
+
+
+def _safe_product_title(product: object) -> str:
+    for field_name in ("name", "product_name", "seo_title", "slug", "external_title"):
+        value = getattr(product, field_name, None)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return "מוצר גריל"
+
+
+def _safe_product_url(product: object) -> str:
+    value = getattr(product, "product_url", None)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return ""
 
 
 def generate_daily_article_draft(db: Session) -> ContentArticleDraft:
