@@ -32,6 +32,24 @@
         </div>
       </section>
 
+      <section class="panel" aria-label="מאמרים לאישור">
+        <h2>מאמרים לאישור</h2>
+        {% for article in article_drafts %}
+        <article class="fix-card simple-fix-card">
+          <h3>{{ article.title }}</h3>
+          <p><strong>מילת מפתח:</strong> {{ article.focus_keyword }} | <strong>כוונה:</strong> {{ article.target_intent }}</p>
+          <p><strong>Slug:</strong> {{ article.slug }}</p>
+          <p><strong>Meta Title:</strong> {{ article.meta_title }}</p>
+          <p><strong>Meta Description:</strong> {{ article.meta_description }}</p>
+          <details><summary>תצוגה מקדימה</summary><div>{{ article.article_body|safe }}</div></details>
+          <p><strong>קישורים פנימיים:</strong> {{ article.internal_links }}</p>
+          <p><strong>סטטוס:</strong> {{ article.status }}</p>
+        </article>
+        {% else %}
+        <p class="empty">אין מאמרים ממתינים לאישור כרגע.</p>
+        {% endfor %}
+      </section>
+
       <section class="cards simple-summary" aria-label="מה צריך טיפול היום">
         <article class="card"><span class="label">מה צריך טיפול היום</span><strong>{{ summary.needs_today }}</strong></article>
         <article class="card"><span class="label">כמה תיקונים מוכנים לבדיקה</span><strong>{{ summary.ready_review }}</strong></article>

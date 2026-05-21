@@ -675,3 +675,68 @@ class IStoreSEOApproval(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+class ContentArticleDraft(Base):
+    __tablename__ = "content_article_drafts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="CONTENT_DRAFT", nullable=False, index=True)
+    topic_title: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(512), nullable=False)
+    slug: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    meta_title: Mapped[str] = mapped_column(String(512), nullable=False)
+    meta_description: Mapped[str] = mapped_column(Text, nullable=False)
+    focus_keyword: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    target_intent: Mapped[str] = mapped_column(String(128), default="informational", nullable=False)
+    article_body: Mapped[str] = mapped_column(Text, nullable=False)
+    suggested_related_products_json: Mapped[str] = mapped_column(Text, default="[]")
+    internal_links_json: Mapped[str] = mapped_column(Text, default="[]")
+    faq_schema_json: Mapped[str] = mapped_column(Text, default="{}")
+    featured_image_prompt: Mapped[str] = mapped_column(Text, default="")
+    section_image_prompts_json: Mapped[str] = mapped_column(Text, default="[]")
+    image_alt_text: Mapped[str] = mapped_column(String(512), default="")
+    image_title: Mapped[str] = mapped_column(String(512), default="")
+    image_caption: Mapped[str] = mapped_column(String(512), default="")
+    image_filename_slug: Mapped[str] = mapped_column(String(255), default="")
+    image_style_rules: Mapped[str] = mapped_column(Text, default="")
+    generated_image_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    uploaded_media_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    image_publish_status: Mapped[str] = mapped_column(String(32), default="NOT_PUBLISHED", nullable=False)
+    review_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    approved_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+    )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "status": self.status,
+            "topic_title": self.topic_title,
+            "title": self.title,
+            "slug": self.slug,
+            "meta_title": self.meta_title,
+            "meta_description": self.meta_description,
+            "focus_keyword": self.focus_keyword,
+            "target_intent": self.target_intent,
+            "article_body": self.article_body,
+            "suggested_related_products": _json_load(self.suggested_related_products_json, []),
+            "internal_links": _json_load(self.internal_links_json, []),
+            "faq_schema": _json_load(self.faq_schema_json, {}),
+            "featured_image_prompt": self.featured_image_prompt,
+            "section_image_prompts": _json_load(self.section_image_prompts_json, []),
+            "image_alt_text": self.image_alt_text,
+            "image_title": self.image_title,
+            "image_caption": self.image_caption,
+            "image_filename_slug": self.image_filename_slug,
+            "image_style_rules": self.image_style_rules,
+            "generated_image_url": self.generated_image_url,
+            "uploaded_media_id": self.uploaded_media_id,
+            "image_publish_status": self.image_publish_status,
+            "review_notes": self.review_notes,
+            "approved_by": self.approved_by,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }

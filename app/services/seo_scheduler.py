@@ -3,7 +3,9 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.db.models import SEOAutomationRun, SEOScheduleConfig
+from app.services.content_articles import generate_daily_article_draft
 from app.services.seo_automation import run_seo_automation
 
 DEFAULT_SCHEDULE_CONFIG = {
@@ -157,12 +159,23 @@ def run_due_schedules(db: Session, now: datetime | None = None) -> dict[str, obj
     due = get_due_schedules(db, now=now)
     runs: list[SEOAutomationRun] = []
     for config in due:
+        article_draft_id = None
+        if settings.content_daily_articles_enabled:
+            article = generate_daily_article_draft(db)
+            article_draft_id = article.id
         run = run_seo_automation(
             db,
             max_tasks=config.max_tasks,
             generate_articles=config.generate_articles,
             sync_gsc=config.sync_gsc,
         )
+        if article_draft_id:
+            summary = run.summary if isinstance(run.summary, dict) else {}
+            summary["content_daily_article_draft_id"] = article_draft_id
+            run.summary_json = json.dumps(summary, ensure_ascii=False)
+            db.add(run)
+            db.commit()
+            db.refresh(run)
         runs.append(_tag_run_with_schedule(db, run, config))
         update_schedule_after_run(db, config, ran_at=now)
     return {
