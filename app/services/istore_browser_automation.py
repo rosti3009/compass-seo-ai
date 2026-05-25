@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from re import search
 
 from app.core.config import settings
 
@@ -21,6 +22,21 @@ class IStoreBrowserStatus:
     screenshot_path: str | None
     error: str | None
     message: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass
+class IStoreBrowserCreateResult:
+    success: bool
+    current_url: str
+    external_content_id: str | None
+    otp_required: bool
+    error: str | None
+    screenshot_path: str | None
+    selector_availability: dict[str, object] | None = None
+    planned_fields: dict[str, object] | None = None
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -160,3 +176,131 @@ def check_istore_browser_status() -> IStoreBrowserStatus:
             screenshot_path=None,
             error=str(exc),
         )
+
+
+def create_shop_information_page(payload: dict[str, object], dry_run: bool = True) -> IStoreBrowserCreateResult:
+    try:
+        from playwright.sync_api import Error as PlaywrightError
+        from playwright.sync_api import sync_playwright
+    except Exception as exc:  # noqa: BLE001
+        return IStoreBrowserCreateResult(False, "", None, False, f"Playwright import failed: {exc}", None)
+
+    storage_state_path = Path(settings.istore_browser_storage_state_path)
+    screenshot_path = storage_state_path.with_name("istore_browser_create_test.png")
+    planned_fields = {
+        "title": str(payload.get("title") or ""),
+        "description": str(payload.get("description") or ""),
+        "meta_title": str(payload.get("meta_title") or ""),
+        "meta_description": str(payload.get("meta_description") or ""),
+        "slug": str(payload.get("slug") or ""),
+        "status": payload.get("status"),
+        "is_blog": payload.get("is_blog"),
+    }
+    selector_matrix: dict[str, list[str]] = {
+        "title": ["input[name='title']", "input#title", "input[name*='title']"],
+        "description": ["textarea[name='description']", "textarea[name='body']", "[contenteditable='true']"],
+        "meta_title": ["input[name='meta_title']", "input[name='metaTitle']", "input[name*='meta'][name*='title']"],
+        "meta_description": ["textarea[name='meta_description']", "textarea[name='metaDescription']", "textarea[name*='meta'][name*='description']"],
+        "slug": ["input[name='keyword']", "input[name='slug']", "input[name*='slug']", "input[name*='keyword']"],
+        "status": ["select[name='status']", "input[name='status']", "[name='status']"],
+        "is_blog": ["input[name='is_blog']", "select[name='is_blog']", "[name='is_blog']"],
+        "submit": ["button[type='submit']", "button:has-text('Save')", "button:has-text('שמור')", "form button"],
+    }
+
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(
+                headless=_bool_like(settings.istore_browser_headless, default=True),
+                slow_mo=settings.istore_browser_slowmo_ms,
+            )
+            context_kwargs: dict[str, object] = {}
+            if storage_state_path.exists():
+                context_kwargs["storage_state"] = str(storage_state_path)
+            context = browser.new_context(**context_kwargs)
+            page = context.new_page()
+            page.set_default_timeout(settings.istore_browser_timeout_ms)
+            page.goto(CREATE_PAGE_URL, wait_until="domcontentloaded")
+            current_url = page.url or ""
+            title = _safe_title(page)
+            content = page.content()
+            _, otp_required, can_access_create_page = _infer_state(current_url=current_url, title=title, content=content)
+            if otp_required or not can_access_create_page:
+                return IStoreBrowserCreateResult(
+                    False,
+                    current_url,
+                    None,
+                    otp_required,
+                    OTP_MESSAGE if otp_required else "Browser not logged in or create page inaccessible.",
+                    None,
+                )
+
+            selector_availability: dict[str, object] = {}
+            for key, selectors in selector_matrix.items():
+                available = None
+                for selector in selectors:
+                    if page.locator(selector).count() > 0:
+                        available = selector
+                        break
+                selector_availability[key] = {"found": bool(available), "selector": available, "candidates": selectors}
+
+            if dry_run:
+                return IStoreBrowserCreateResult(True, page.url or "", None, False, None, None, selector_availability, planned_fields)
+
+            def fill_with_value(field_key: str, value: str) -> None:
+                selected = selector_availability.get(field_key, {})
+                selector = selected.get("selector") if isinstance(selected, dict) else None
+                if not selector or value == "":
+                    return
+                if selector == "[contenteditable='true']":
+                    page.locator(selector).first.click()
+                    page.locator(selector).first.fill(value)
+                    return
+                page.fill(selector, value)
+
+            fill_with_value("title", planned_fields["title"])
+            fill_with_value("description", planned_fields["description"])
+            fill_with_value("meta_title", planned_fields["meta_title"])
+            fill_with_value("meta_description", planned_fields["meta_description"])
+            fill_with_value("slug", planned_fields["slug"])
+
+            status_selector = selector_availability.get("status", {}).get("selector") if isinstance(selector_availability.get("status"), dict) else None
+            if status_selector and planned_fields["status"] is not None:
+                page.select_option(status_selector, str(planned_fields["status"]))
+            is_blog_selector = selector_availability.get("is_blog", {}).get("selector") if isinstance(selector_availability.get("is_blog"), dict) else None
+            if is_blog_selector and planned_fields["is_blog"] is not None:
+                value = "1" if _bool_like(planned_fields["is_blog"], default=True) else "0"
+                if is_blog_selector.startswith("select"):
+                    page.select_option(is_blog_selector, value)
+                else:
+                    page.check(is_blog_selector) if value == "1" else page.uncheck(is_blog_selector)
+
+            submit_selector = selector_availability.get("submit", {}).get("selector") if isinstance(selector_availability.get("submit"), dict) else None
+            if submit_selector:
+                with page.expect_navigation(wait_until="domcontentloaded", timeout=settings.istore_browser_timeout_ms):
+                    page.locator(submit_selector).first.click()
+            else:
+                page.evaluate("document.querySelector('form')?.submit()")
+                page.wait_for_timeout(1500)
+
+            current_url = page.url or ""
+            matched = search(r"/client/shop_information/edit/(\d+)", current_url)
+            external_content_id = matched.group(1) if matched else None
+
+            screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+            page.screenshot(path=str(screenshot_path), full_page=True)
+            context.storage_state(path=str(storage_state_path))
+
+            return IStoreBrowserCreateResult(
+                success=bool(external_content_id),
+                current_url=current_url,
+                external_content_id=external_content_id,
+                otp_required=False,
+                error=None if external_content_id else "Create did not redirect to edit page.",
+                screenshot_path=str(screenshot_path) if screenshot_path.exists() else None,
+                selector_availability=selector_availability,
+                planned_fields=planned_fields,
+            )
+    except PlaywrightError as exc:
+        return IStoreBrowserCreateResult(False, "", None, False, f"Playwright runtime error: {exc}", None)
+    except Exception as exc:  # noqa: BLE001
+        return IStoreBrowserCreateResult(False, "", None, False, str(exc), None)
