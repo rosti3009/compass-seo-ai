@@ -87,6 +87,7 @@ def test_dry_run_shows_payload_without_tokens_or_cookies() -> None:
     out = publisher.publish(_Draft(), dry_run=True)
     text = str(out)
     assert out["dry_run"] is True
+    assert out["submit_mode"] == "form"
     assert "session=abc" not in text
     assert "token123" not in text
     assert out["headers"]["X-XSRF-TOKEN"] == "[REDACTED]"
@@ -178,6 +179,34 @@ def test_create_headers_include_browser_and_inertia_fields(monkeypatch: pytest.M
     assert headers["X-Inertia"] == "true"
     assert headers["X-Requested-With"] == "XMLHttpRequest"
     assert headers["X-Inertia-Version"] == "abc123"
+    assert headers["Content-Type"] == "application/x-www-form-urlencoded"
+
+
+def test_flatten_payload_for_form_encoding() -> None:
+    publisher = _publisher()
+    payload = publisher._build_payload(_Draft())
+    flat = publisher._flatten_payload(payload)
+    assert ("descriptions[3][title]", "T1") in flat
+    assert ("descriptions[3][description]", "<div>x</div>") in flat
+    assert ("is_blog", "1") in flat
+    assert ("dynamic_fields", "[]") in flat
+
+
+def test_submit_payload_modes(monkeypatch: pytest.MonkeyPatch) -> None:
+    publisher = _publisher()
+    payload = publisher._build_payload(_Draft())
+    monkeypatch.setattr("app.services.istore_blog_publisher.settings.istore_create_submit_mode", "json")
+    assert publisher._build_submit_payload(payload, publisher._resolve_submit_mode()) == {"json": payload}
+
+    monkeypatch.setattr("app.services.istore_blog_publisher.settings.istore_create_submit_mode", "form")
+    form_payload = publisher._build_submit_payload(payload, publisher._resolve_submit_mode())
+    assert "data" in form_payload
+    assert ("descriptions[3][title]", "T1") in form_payload["data"]
+
+    monkeypatch.setattr("app.services.istore_blog_publisher.settings.istore_create_submit_mode", "multipart")
+    multipart_payload = publisher._build_submit_payload(payload, publisher._resolve_submit_mode())
+    assert "files" in multipart_payload
+    assert ("descriptions[3][title]", (None, "T1")) in multipart_payload["files"]
 
 
 def test_validate_create_payload_requires_contract_fields() -> None:
