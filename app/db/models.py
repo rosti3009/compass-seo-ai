@@ -1,4 +1,6 @@
+import html
 import json
+import re
 from datetime import UTC, date, datetime
 
 from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
@@ -17,6 +19,23 @@ def _json_load(value: str | None, default: object | None = None) -> object:
         return json.loads(value)
     except json.JSONDecodeError:
         return fallback
+
+
+def _build_image_html(image_url: str | None, image_alt_text: str | None) -> str:
+    url = (image_url or "").strip()
+    if not url:
+        return ""
+    alt = html.escape((image_alt_text or "").strip(), quote=True)
+    return f'<p><img src="{html.escape(url, quote=True)}" alt="{alt}"></p>'
+
+
+def _replace_image_markers_with_generated_images(body_html_with_markers: str, image_html: str) -> str:
+    if not image_html:
+        return re.sub(r"\n?\[IMAGE_\d+_HERE\]", "", body_html_with_markers or "").strip()
+    out = body_html_with_markers or ""
+    for marker in ("[IMAGE_1_HERE]", "[IMAGE_2_HERE]"):
+        out = out.replace(marker, image_html)
+    return out
 
 
 class CrawlRun(Base):
@@ -737,6 +756,12 @@ class ContentArticleDraft(Base):
             "focus_keyword": self.focus_keyword,
             "target_intent": self.target_intent,
             "article_body": self.article_body,
+            "body_html_with_image_markers": f"{self.article_body}\n[IMAGE_1_HERE]\n[IMAGE_2_HERE]",
+            "image_html": _build_image_html(self.generated_image_url or self.featured_image_url, self.image_alt_text),
+            "body_html_with_generated_images": _replace_image_markers_with_generated_images(
+                f"{self.article_body}\n[IMAGE_1_HERE]\n[IMAGE_2_HERE]",
+                _build_image_html(self.generated_image_url or self.featured_image_url, self.image_alt_text),
+            ),
             "suggested_related_products": _json_load(self.suggested_related_products_json, []),
             "internal_links": _json_load(self.internal_links_json, []),
             "faq_schema": _json_load(self.faq_schema_json, {}),

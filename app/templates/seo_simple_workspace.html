@@ -57,6 +57,9 @@
                 <p><strong>AI prompt:</strong> {{ article.featured_image_prompt }}</p>
                 <p><strong>ALT:</strong> {{ article.image_alt_text }}</p>
                 <p><strong>מידות מומלצות:</strong> 1200×630 פיקסלים (JPG/WebP)</p>
+                {% if article.generated_image_url or article.featured_image_url %}
+                <img src="{{ article.generated_image_url or article.featured_image_url }}" alt="{{ article.image_alt_text }}" style="max-width:220px;height:auto"/>
+                {% endif %}
                 <div class="actions">
                   <button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ article.featured_image_prompt }}">העתק prompt</button>
                   <button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ article.image_alt_text }}">העתק ALT</button>
@@ -95,19 +98,19 @@
               <article class="manual-upload-card">
                 <h5>תוכן ראשי / HTML נקי</h5>
                 <p><strong>עם סמני תמונה:</strong></p>
-                <textarea class="manual-html" rows="8" readonly>{{ article.article_body }}
-[IMAGE_1_HERE]
-[IMAGE_2_HERE]</textarea>
+                <textarea class="manual-html" rows="8" readonly>{{ article.body_html_with_image_markers }}</textarea>
                 <p><strong>HTML נקי (ללא סמנים):</strong></p>
-                <textarea class="manual-html" rows="8" readonly>{{ article.article_body }}</textarea>
+                <textarea class="manual-html" rows="8" readonly>{{ article.body_html_with_generated_images }}</textarea>
+                <p><strong>HTML תמונה ראשית (להדבקה מהירה):</strong></p>
+                <textarea class="manual-html" rows="3" readonly>{{ article.image_html }}</textarea>
                 <div class="actions">
                   <button type="button" class="secondary-button" data-action="copy-from-target" data-copy-target="article-html-markers-{{ article.id }}">העתק HTML עם סמנים</button>
-                  <button type="button" class="secondary-button" data-action="copy-from-target" data-copy-target="article-html-clean-{{ article.id }}">העתק HTML נקי</button>
+                  <button type="button" class="secondary-button" data-action="copy-from-target" data-copy-target="article-html-clean-{{ article.id }}">העתק HTML עם תמונות</button>
+                  <button type="button" class="secondary-button" data-action="copy-from-target" data-copy-target="article-image-html-{{ article.id }}">העתק HTML תמונה</button>
                 </div>
-                <textarea id="article-html-markers-{{ article.id }}" class="copy-source-hidden" readonly>{{ article.article_body }}
-[IMAGE_1_HERE]
-[IMAGE_2_HERE]</textarea>
-                <textarea id="article-html-clean-{{ article.id }}" class="copy-source-hidden" readonly>{{ article.article_body }}</textarea>
+                <textarea id="article-html-markers-{{ article.id }}" class="copy-source-hidden" readonly>{{ article.body_html_with_image_markers }}</textarea>
+                <textarea id="article-html-clean-{{ article.id }}" class="copy-source-hidden" readonly>{{ article.body_html_with_generated_images }}</textarea>
+                <textarea id="article-image-html-{{ article.id }}" class="copy-source-hidden" readonly>{{ article.image_html }}</textarea>
               </article>
 
               <article class="manual-upload-card checklist-card">

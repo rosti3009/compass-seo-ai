@@ -253,8 +253,11 @@ function renderArticlePreview(card, draft) {
   if (!container) return;
   const imageUrl = draft.generated_image_url || draft.featured_image_url || "";
   const imageAlt = draft.image_alt_text || "";
-  const markers = `${draft.article_body || ""}\n[IMAGE_1_HERE]\n[IMAGE_2_HERE]`;
-  const previewHtml = `<article>${imageUrl ? `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(imageAlt)}" style="max-width:320px;height:auto"/>` : ""}<div>${draft.article_body || ""}</div><pre>${escapeHtml(markers)}</pre></article>`;
+  const markers = draft.body_html_with_image_markers || `${draft.article_body || ""}
+[IMAGE_1_HERE]
+[IMAGE_2_HERE]`;
+  const withImages = draft.body_html_with_generated_images || (draft.article_body || "");
+  const previewHtml = `<article><div>${withImages}</div><pre>${escapeHtml(markers)}</pre></article>`;
   container.innerHTML = previewHtml;
   const previewImageBlock = card.querySelector("[data-preview-image-block]");
   if (previewImageBlock) {
@@ -266,8 +269,8 @@ function renderArticlePreview(card, draft) {
       previewImageBlock.innerHTML = "";
     }
   }
-  card.dataset.fullHtml = `${imageUrl ? `<img src="${imageUrl}" alt="${draft.image_alt_text || ""}">` : ""}${draft.article_body || ""}`;
-  card.dataset.cleanHtml = draft.article_body || "";
+  card.dataset.fullHtml = withImages;
+  card.dataset.cleanHtml = withImages;
   card.dataset.previewHtml = markers;
 }
 

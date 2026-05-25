@@ -498,3 +498,31 @@ def test_generate_image_response_includes_required_diagnostics(client: TestClien
     diagnostics = payload['diagnostics']
     for key in ['provider_name','provider_response_received','raw_provider_url_present','generated_image_url','featured_image_url','image_url_present','image_storage_success','image_generation_metadata']:
         assert key in diagnostics
+
+
+def test_generated_images_body_html_replaces_markers_and_keeps_alt_in_img(client: TestClient, db_session: Session) -> None:
+    draft = client.post('/content/articles/generate-daily-draft').json()['draft']
+    image_url = 'https://cdn.example.com/generated.jpg'
+    image_alt = 'ALT Generated Example'
+    payload = {
+        'title': draft['title'],
+        'slug': draft['slug'],
+        'meta_title': draft['meta_title'],
+        'meta_description': draft['meta_description'],
+        'article_body': draft['article_body'],
+    }
+    client.post(f"/content/articles/{draft['id']}/edit", json=payload)
+
+    from app.db.models import ContentArticleDraft
+    record = db_session.get(ContentArticleDraft, draft['id'])
+    assert record is not None
+    record.generated_image_url = image_url
+    record.image_alt_text = image_alt
+    db_session.add(record)
+    db_session.commit()
+
+    refreshed = client.get(f"/content/articles/{draft['id']}").json()['draft']
+    assert image_url in refreshed['body_html_with_generated_images']
+    assert '[IMAGE_1_HERE]' not in refreshed['body_html_with_generated_images']
+    assert f'alt="{image_alt}"' in refreshed['body_html_with_generated_images']
+    assert 'ALT:' not in refreshed['body_html_with_generated_images']
