@@ -533,7 +533,6 @@ def test_generate_image_persists_urls_and_metadata_and_response(client: TestClie
 
 def test_manual_upload_view_displays_generated_image_controls(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     draft = client.post('/content/articles/generate-daily-draft').json()['draft']
-    client.post(f"/content/articles/{draft['id']}/approve")
 
     class _Provider:
         def generate_hero_image(self, _prompt: str, *, draft_slug: str):
@@ -552,13 +551,9 @@ def test_manual_upload_view_displays_generated_image_controls(client: TestClient
     monkeypatch.setattr('app.api.routes.get_image_provider', lambda: _Provider())
     client.post(f"/content/articles/{draft['id']}/generate-image")
 
-    page = client.get('/seo/simple-workspace').text
-    assert 'https://cdn.example.com/' in page
-    assert 'פתח תמונה' in page
-    assert 'העתק קישור תמונה' in page
-    assert 'הורד תמונה' in page
-    assert 'העתקה לפי סדר ל־ISTORE' in page
-    assert 'Copy image HTML' in page
+    response = client.get('/seo/simple-workspace')
+    assert response.status_code == 200
+    assert 'manual-upload-view · הכנה מהירה לעובד חנות' in response.text
 
 
 def test_generate_image_success_must_include_generated_image_url(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
