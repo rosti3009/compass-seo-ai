@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     istore_browser_storage_state_path: str = "/var/data/istore_storage_state.json"
     istore_browser_slowmo_ms: int = Field(default=0, ge=0, le=10000)
     istore_browser_timeout_ms: int = Field(default=30000, ge=1000, le=120000)
+    istore_browser_wait_ms: int = Field(default=1000, ge=0, le=30000)
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
     content_daily_articles_enabled: bool = False
