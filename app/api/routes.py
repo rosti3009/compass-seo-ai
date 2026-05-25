@@ -1658,8 +1658,15 @@ def seo_simple_bulk_approve(payload: SimpleBulkApprovalRequest, db: DatabaseSess
 
 @router.post("/content/articles/generate-daily-draft")
 def generate_daily_content_article(db: DatabaseSession) -> dict[str, object]:
-    draft = generate_daily_article_draft(db)
-    return {"success": True, "draft": {**draft.to_dict(), "debug": _draft_debug(draft, "title"), "quality": _article_quality_summary(draft)}, "auto_publish": False}
+    draft, reused, last_generated_at = generate_daily_article_draft(db)
+    return {"success": True, "draft": {**draft.to_dict(), "debug": _draft_debug(draft, "title"), "quality": _article_quality_summary(draft)}, "reused": reused, "last_generated_at": last_generated_at.isoformat() if last_generated_at else None, "auto_publish": False}
+
+
+@router.post("/content/articles/generate-random-daily-draft")
+def generate_random_daily_content_article(db: DatabaseSession) -> dict[str, object]:
+    draft, reused, _ = generate_daily_article_draft(db, randomize=True)
+    quality = _article_quality_summary(draft)
+    return {"success": True, "selected_topic": draft.topic_title, "reused": reused, "draft_id": draft.id, "title": draft.title, "slug": draft.slug, "quality_score": quality.get("article_quality_score")}
 
 
 @router.get("/content/articles/drafts")

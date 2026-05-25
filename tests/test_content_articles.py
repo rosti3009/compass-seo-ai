@@ -573,3 +573,22 @@ def test_generated_images_output_contains_img_and_removes_marker(client: TestCli
     assert f'alt="{draft["image_alt_text"]}"' in generated_output
     assert 'ALT:' not in generated_output
     assert '<img' in generated_output
+
+def test_generate_random_daily_endpoint_response(client: TestClient) -> None:
+    response = client.post('/content/articles/generate-random-daily-draft')
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['success'] is True
+    assert payload['selected_topic']
+    assert isinstance(payload['reused'], bool)
+    assert payload['draft_id'] > 0
+    assert payload['slug']
+    assert payload['quality_score'] is not None
+
+
+def test_topic_reuse_after_pool_exhaustion(client: TestClient) -> None:
+    reused_flags = []
+    for _ in range(14):
+        reused_flags.append(client.post('/content/articles/generate-random-daily-draft').json()['reused'])
+    assert any(flag is False for flag in reused_flags)
+    assert reused_flags[-1] is True

@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.models import SEOAutomationRun, SEOScheduleConfig
-from app.services.content_articles import generate_daily_article_draft
+from app.services.content_articles import generate_daily_article_draft, was_daily_draft_generated_today
 from app.services.seo_automation import run_seo_automation
 
 DEFAULT_SCHEDULE_CONFIG = {
@@ -160,8 +160,8 @@ def run_due_schedules(db: Session, now: datetime | None = None) -> dict[str, obj
     runs: list[SEOAutomationRun] = []
     for config in due:
         article_draft_id = None
-        if settings.content_daily_articles_enabled:
-            article = generate_daily_article_draft(db)
+        if settings.daily_article_generation_enabled and not was_daily_draft_generated_today(db, settings.daily_article_generation_timezone):
+            article, _, _ = generate_daily_article_draft(db)
             article_draft_id = article.id
         run = run_seo_automation(
             db,

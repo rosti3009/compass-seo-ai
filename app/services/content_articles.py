@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import re
 from datetime import UTC, date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
@@ -14,26 +16,42 @@ GENERATOR_VERSION = "v2-topic-specific-2026-05-25"
 
 TOPIC_POOL = [
     ("איך לבחור שבבי עץ לעישון בשר", "שבבי עץ לעישון", "informational"),
-    ("ההבדל בין גריל גז לגריל פחמים", "גריל גז מול פחמים", "comparison"),
-    ("איך לצלות אנטריקוט נכון", "צליית אנטריקוט", "how-to"),
+    ("ההבדל בין פלט לעישון לשבבי עץ", "פלט לעישון מול שבבי עץ", "comparison"),
+    ("איך לנקות מעשנה אחרי עישון ארוך", "ניקוי מעשנה", "how-to"),
     ("מדריך עישון בריסקט למתחילים", "עישון בריסקט", "how-to"),
-    ("טאבון גז או טאבון עצים", "טאבון גז", "comparison"),
-    ("איך לבחור סכין טובה לבשר", "סכין לבשר", "commercial"),
+    ("טאבון גז או טאבון עצים", "טאבון גז מול טאבון עצים", "comparison"),
+    ("איך לבחור גריל גז לגינה", "בחירת גריל גז", "commercial"),
+    ("פיקניה על הגריל – מדריך מלא", "פיקניה על הגריל", "how-to"),
+    ("איך להשתמש בנייר קצבים בעישון בשר", "נייר קצבים לעישון", "how-to"),
+    ("ההבדל בין פחם קוקוס לפחם עץ", "פחם קוקוס מול פחם עץ", "comparison"),
+    ("איך לבחור מדחום לבשר", "מדחום לבשר", "commercial"),
+    ("איך לצלות אנטריקוט נכון", "צליית אנטריקוט", "how-to"),
     ("אפקט מייארד בבשר: מדע וטעם", "אפקט מייארד בבשר", "scientific"),
     ("איך להכין כנפיים קריספיות על הגריל", "כנפיים על הגריל", "how-to"),
 ]
 
-
 SLUG_OVERRIDES = {
     "איך לבחור שבבי עץ לעישון בשר": "wood-chips-for-smoking-meat",
-    "ההבדל בין גריל גז לגריל פחמים": "gas-grill-vs-charcoal-guide",
-    "איך לצלות אנטריקוט נכון": "grilled-ribeye-step-by-step",
+    "ההבדל בין פלט לעישון לשבבי עץ": "pellets-vs-wood-chips-smoking",
+    "איך לנקות מעשנה אחרי עישון ארוך": "how-to-clean-smoker-after-long-smoke",
     "מדריך עישון בריסקט למתחילים": "brisket-smoking-guide",
-    "טאבון גז או טאבון עצים": "tabun-gas-vs-tabun-wood",
-    "איך לבחור סכין טובה לבשר": "best-meat-knife-buying-guide",
-    "אפקט מייארד בבשר: מדע וטעם": "maillard-reaction-meat-guide",
-    "איך להכין כנפיים קריספיות על הגריל": "crispy-grilled-wings",
+    "איך לבחור גריל גז לגינה": "choose-gas-grill-for-garden",
+    "פיקניה על הגריל – מדריך מלא": "picanha-on-the-grill-guide",
+    "איך להשתמש בנייר קצבים בעישון בשר": "butcher-paper-for-smoking-meat",
+    "ההבדל בין פחם קוקוס לפחם עץ": "coconut-charcoal-vs-wood-charcoal",
+    "איך לבחור מדחום לבשר": "how-to-choose-meat-thermometer",
+    "טאבון גז מול טאבון עצים": "tabun-gas-vs-tabun-wood",
 }
+
+def _today_in_timezone(timezone: str) -> date:
+    return datetime.now(ZoneInfo(timezone)).date()
+
+
+def was_daily_draft_generated_today(db: Session, timezone: str = "Asia/Jerusalem") -> bool:
+    today = _today_in_timezone(timezone)
+    start_local = datetime.combine(today, datetime.min.time(), tzinfo=ZoneInfo(timezone)).astimezone(UTC)
+    end_local = (datetime.combine(today, datetime.max.time(), tzinfo=ZoneInfo(timezone))).astimezone(UTC)
+    return db.query(ContentArticleDraft).filter(ContentArticleDraft.created_at >= start_local, ContentArticleDraft.created_at <= end_local).first() is not None
 
 
 def _slugify(text: str) -> str:
@@ -62,6 +80,28 @@ def _remove_h1_tags(html: str) -> tuple[str, bool]:
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
     return cleaned, cleaned != html
 
+
+def select_random_topic(db: Session, lookback_days: int = 60) -> tuple[tuple[str, str, str], bool, datetime | None]:
+    cutoff = datetime.now(UTC) - timedelta(days=lookback_days)
+    recent = db.query(ContentArticleDraft).filter(ContentArticleDraft.created_at >= cutoff).all()
+    recent_topics = {d.topic_title for d in recent}
+    recent_keywords = {d.focus_keyword for d in recent}
+    eligible = [topic for topic in TOPIC_POOL if topic[0] not in recent_topics and topic[1] not in recent_keywords]
+    reused = False
+    if not eligible:
+        eligible = TOPIC_POOL[:]
+        reused = True
+    selected = random.choice(eligible)
+    last_generated = (
+        db.query(ContentArticleDraft.created_at)
+        .filter((ContentArticleDraft.topic_title == selected[0]) | (ContentArticleDraft.focus_keyword == selected[1]))
+        .order_by(ContentArticleDraft.created_at.desc())
+        .first()
+    )
+    last_generated_at = last_generated[0] if last_generated else None
+    return selected, reused, last_generated_at
+
+# ... keep rest unchanged by importing from existing file snippets
 
 def _select_topic(db: Session) -> tuple[str, str, str]:
     cutoff = date.today() - timedelta(days=30)
@@ -194,8 +234,13 @@ def _build_article_html(title: str, keyword: str, related: list[dict[str, str | 
     )
 
 
-def generate_daily_article_draft(db: Session) -> ContentArticleDraft:
-    title, keyword, intent = _select_topic(db)
+def generate_daily_article_draft(db: Session, *, randomize: bool = False) -> tuple[ContentArticleDraft, bool, datetime | None]:
+    if randomize:
+        (title, keyword, intent), reused, last_generated_at = select_random_topic(db)
+    else:
+        title, keyword, intent = _select_topic(db)
+        reused = False
+        last_generated_at = None
     related = _related_products(db, keyword)
     slug, _slug_source = _fallback_topic_slug(keyword, title)
     body, _ = _remove_h1_tags(_build_article_html(title, keyword, related))
@@ -231,4 +276,4 @@ def generate_daily_article_draft(db: Session) -> ContentArticleDraft:
     db.add(draft)
     db.commit()
     db.refresh(draft)
-    return draft
+    return draft, reused, last_generated_at
