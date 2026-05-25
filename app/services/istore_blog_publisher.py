@@ -4,7 +4,7 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import parse_qs, urljoin, urlparse
 
 import requests
 
@@ -33,6 +33,8 @@ class PublishVerificationResult:
 class IStoreCreateResult:
     external_content_id: str
     location: str
+    status_code: int
+    response_url: str
 
 
 class IStoreAdminShopInformationPublisher:
@@ -125,22 +127,89 @@ class IStoreAdminShopInformationPublisher:
             "X-Requested-With": "XMLHttpRequest",
         }
         response = self.session.post(url, headers=headers, json=payload, timeout=self.timeout_seconds, allow_redirects=False)
+        self._log_create_response(response)
         if response.status_code != 302:
             raise IStoreBlogPublishError(
                 f"ISTORE admin create failed: expected 302 redirect, got HTTP {response.status_code}"
             )
 
         location = response.headers.get("Location", "")
-        external_content_id = self._extract_shop_information_id(location)
+        external_content_id = self._extract_shop_information_id(location, response)
         if not external_content_id:
-            raise IStoreBlogPublishError("ISTORE admin create succeeded but no shop_information id found in redirect")
-        return IStoreCreateResult(external_content_id=external_content_id, location=location)
+            status_code = response.status_code
+            raise IStoreBlogPublishError(
+                "ISTORE admin create succeeded but no shop_information id found in redirect "
+                f"(status_code={status_code}, location={self._sanitize(location)}, response_url={self._sanitize(getattr(response, "url", ""))})"
+            )
+        return IStoreCreateResult(
+            external_content_id=external_content_id,
+            location=location,
+            status_code=response.status_code,
+            response_url=getattr(response, "url", ""),
+        )
 
-    def _extract_shop_information_id(self, location: str) -> str | None:
-        match = re.search(r"/client/shop_information/edit/(\d+)", location or "")
-        if not match:
-            return None
-        return match.group(1)
+    def _extract_shop_information_id(self, location: str, response: requests.Response | None = None) -> str | None:
+        candidates = [location or ""]
+        if response is not None:
+            candidates.append(getattr(response, "url", "") or "")
+
+        patterns = [
+            r"/client/shop_information/edit/(\d+)",
+            r"/client/shop_information/(\d+)/edit",
+        ]
+        for candidate in candidates:
+            for pattern in patterns:
+                match = re.search(pattern, candidate)
+                if match:
+                    return match.group(1)
+
+            parsed = urlparse(candidate)
+            query = parse_qs(parsed.query)
+            query_id = (query.get("id") or [None])[0]
+            if query_id and str(query_id).isdigit():
+                return str(query_id)
+
+        if response is not None:
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = None
+            extracted = self._extract_id_from_payload(payload)
+            if extracted:
+                return extracted
+        return None
+
+    def _extract_id_from_payload(self, payload: Any) -> str | None:
+        if isinstance(payload, dict):
+            for key, value in payload.items():
+                if key == "id" and str(value).isdigit():
+                    return str(value)
+                extracted = self._extract_id_from_payload(value)
+                if extracted:
+                    return extracted
+        elif isinstance(payload, list):
+            for item in payload:
+                extracted = self._extract_id_from_payload(item)
+                if extracted:
+                    return extracted
+        return None
+
+    def _log_create_response(self, response: requests.Response) -> None:
+        safe_text = self._sanitize((getattr(response, "text", "") or "")[:500])
+        logger.info(
+            "ISTORE create response: status_code=%s location=%s response_url=%s response_text=%s",
+            response.status_code,
+            self._sanitize(response.headers.get("Location", "")),
+            self._sanitize(getattr(response, "url", "")),
+            safe_text,
+        )
+
+    def _sanitize(self, value: str) -> str:
+        if not value:
+            return ""
+        sanitized = value
+        sanitized = re.sub(r"(?i)(token|xsrf|session|cookie)=([^&\s]+)", r"\1=[REDACTED]", sanitized)
+        return sanitized
 
     def _resolve_live_url(self, draft: ContentArticleDraft, external_content_id: str) -> str:
         candidates = [draft.target_url]

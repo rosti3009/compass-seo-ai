@@ -130,7 +130,11 @@ def test_publish_updates_status_only_after_live_verification(
 
     class _Publisher:
         def publish(self, _draft):
-            return {"verification": {"status_code": 200, "title_found": True, "meta_title_found": True}}
+            return {
+                "external_content_id": "123",
+                "live_url": "https://compassgrill.co.il/blog/slug1",
+                "verification": {"status_code": 200, "title_found": True, "meta_title_found": True},
+            }
 
     monkeypatch.setattr('app.api.routes.IStoreBlogPublisher.from_settings', lambda: _Publisher())
 
