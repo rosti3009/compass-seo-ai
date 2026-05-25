@@ -379,7 +379,12 @@ def test_generate_image_returns_clear_error_when_provider_has_no_url(client: Tes
     monkeypatch.setattr('app.api.routes.get_image_provider', lambda: _BadProvider())
     response = client.post(f"/content/articles/{draft['id']}/generate-image")
     assert response.status_code == 502
-    assert 'without image URL' in response.json()['detail']
+    payload = response.json()
+    assert payload['success'] is False
+    assert payload['error'] == 'Image provider returned no URL'
+    assert payload['diagnostics']['provider_name'] == 'broken-provider'
+    assert payload['diagnostics']['provider_response_received'] is True
+    assert payload['diagnostics']['raw_provider_url_present'] is False
 
 
 def test_generate_image_persists_urls_and_metadata_and_response(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -447,3 +452,49 @@ def test_manual_upload_view_displays_generated_image_controls(client: TestClient
     assert 'פתח תמונה' in page
     assert 'העתק קישור תמונה' in page
     assert 'הורד תמונה' in page
+
+
+def test_generate_image_success_must_include_generated_image_url(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    draft = client.post('/content/articles/generate-daily-draft').json()['draft']
+
+    class _Provider:
+        def generate_hero_image(self, _prompt: str, *, draft_slug: str):
+            from app.services.image_generation import ImageGenerationResult
+            return ImageGenerationResult(
+                enabled=True,
+                provider='openai',
+                status='generated',
+                image_url=f'https://cdn.example.com/{draft_slug}.jpg',
+                message_he='ok',
+            )
+
+    monkeypatch.setattr('app.api.routes.get_image_provider', lambda: _Provider())
+    response = client.post(f"/content/articles/{draft['id']}/generate-image")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['success'] is True
+    assert payload['generated_image_url'] is not None
+
+
+def test_generate_image_response_includes_required_diagnostics(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    draft = client.post('/content/articles/generate-daily-draft').json()['draft']
+
+    class _Provider:
+        def generate_hero_image(self, _prompt: str, *, draft_slug: str):
+            from app.services.image_generation import ImageGenerationResult
+            return ImageGenerationResult(
+                enabled=True,
+                provider='openai',
+                status='generated',
+                image_url=f'https://cdn.example.com/{draft_slug}.jpg',
+                width=1280,
+                height=720,
+                generated_at='2026-05-25T00:00:00+00:00',
+                message_he='ok',
+            )
+
+    monkeypatch.setattr('app.api.routes.get_image_provider', lambda: _Provider())
+    payload = client.post(f"/content/articles/{draft['id']}/generate-image").json()
+    diagnostics = payload['diagnostics']
+    for key in ['provider_name','provider_response_received','raw_provider_url_present','generated_image_url','featured_image_url','image_url_present','image_storage_success','image_generation_metadata']:
+        assert key in diagnostics

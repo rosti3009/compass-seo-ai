@@ -283,7 +283,14 @@ async function runManualImageAction(button, action) {
   try {
     const response = await fetch(endpoint, { method: "POST", headers: { Accept: "application/json" } });
     const payload = await response.json();
-    if (!response.ok) throw new Error(payload.detail || "הפעולה נכשלה");
+    if (!response.ok) {
+      if (action === "image" && payload && payload.error === "Image provider returned no URL") {
+        const diagnosticsText = JSON.stringify(payload.diagnostics || {}, null, 2);
+        throw new Error(`Image provider returned no URL
+${diagnosticsText}`);
+      }
+      throw new Error(payload.detail || payload.error || "הפעולה נכשלה");
+    }
     const draft = payload.draft || {};
     const generatedImageUrl = draft.generated_image_url
       || payload.generated_image_url
@@ -303,8 +310,10 @@ async function runManualImageAction(button, action) {
     if (action === "plan" && feedback) feedback.textContent = "תכנון התמונה עודכן בהצלחה";
     if (action === "image" && feedback) {
       if (!generatedImageUrl) {
-        console.warn("Image was generated but response has no URL", payload);
-        feedback.textContent = "התמונה נוצרה אך לא התקבל קישור לתמונה";
+        console.warn("Image URL missing from success payload", payload);
+        const diagnosticsText = JSON.stringify(payload.diagnostics || {}, null, 2);
+        feedback.textContent = `שגיאה: Image provider returned no URL
+${diagnosticsText}`;
       } else {
         const openUrl = payload.open_image_url || generatedImageUrl;
         const downloadUrl = payload.download_image_url || generatedImageUrl;
