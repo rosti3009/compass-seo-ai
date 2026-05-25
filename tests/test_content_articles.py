@@ -43,9 +43,16 @@ def test_workspace_has_article_controls(client: TestClient) -> None:
     response = client.get('/seo/simple-workspace')
     assert response.status_code == 200
     assert 'צור מאמר חדש' in response.text
+    assert 'צור מאמר יומי רנדומלי' in response.text
     assert 'מאמרים לאישור' in response.text
     assert 'כור מאמר לפי נושא' in response.text
     assert 'תמיכה בנושא יחיד בלבד' in response.text
+    assert 'data-action="fetch"' in response.text
+    assert 'data-endpoint="/content/articles/generate-random-daily-draft"' in response.text
+    script = client.get('/static/seo_operations.js')
+    assert script.status_code == 200
+    assert 'randomDailyRequestInFlight' in script.text or 'bindOperations' in script.text
+    assert 'יוצר מאמר יומי רנדומלי...' in script.text or 'צור מאמר יומי רנדומלי' in response.text
 
 
 def test_generate_topic_draft_returns_single_draft_and_manual_fields(client: TestClient) -> None:
@@ -650,8 +657,12 @@ def test_generate_random_daily_endpoint_response(client: TestClient) -> None:
     assert payload['selected_topic']
     assert isinstance(payload['reused'], bool)
     assert payload['draft_id'] > 0
+    assert payload['title']
     assert payload['slug']
     assert payload['quality_score'] is not None
+    draft = client.get(f"/content/articles/{payload['draft_id']}").json()['draft']
+    assert draft['quality']['article_quality_score'] is not None
+    assert draft['quality']['publish_readiness'] in {'NEEDS_IMPROVEMENT', 'READY_FOR_REVIEW', 'APPROVED'}
 
 
 def test_topic_reuse_after_pool_exhaustion(client: TestClient) -> None:
