@@ -720,6 +720,7 @@ class ContentArticleDraft(Base):
     verification_status: Mapped[str] = mapped_column(String(64), default="NOT_VERIFIED", nullable=False)
     published_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_active_manual_article: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
@@ -763,6 +764,7 @@ class ContentArticleDraft(Base):
             "verification_status": self.verification_status,
             "published_url": self.published_url,
             "published_at": self.published_at.isoformat() if self.published_at else None,
+            "is_active_manual_article": self.is_active_manual_article,
             "review_notes": self.review_notes,
             "approved_by": self.approved_by,
             "created_at": self.created_at.isoformat() if self.created_at else None,

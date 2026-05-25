@@ -43,10 +43,47 @@ def test_workspace_has_article_controls(client: TestClient) -> None:
     response = client.get('/seo/simple-workspace')
     assert response.status_code == 200
     assert 'צור מאמר חדש' in response.text
-    assert 'מאמרים לאישור' in response.text
+    assert 'המאמר הפעיל לעבודה' in response.text
     assert 'כור מאמר לפי נושא' in response.text
     assert 'תמיכה בנושא יחיד בלבד' in response.text
 
+
+
+def test_workspace_shows_single_active_article_and_compact_archive(client: TestClient) -> None:
+    first = client.post('/content/articles/generate-daily-draft').json()['draft']
+    second = client.post('/content/articles/generate-daily-draft').json()['draft']
+    page = client.get('/seo/simple-workspace').text
+    assert page.count('manual-upload-view · הכנה מהירה לעובד חנות') == 1
+    assert 'מאמרים קודמים' in page
+    assert second['title'] in page
+    assert first['title'] in page
+
+
+def test_newest_draft_becomes_active_after_generation(client: TestClient) -> None:
+    first = client.post('/content/articles/generate-daily-draft').json()['draft']
+    second = client.post('/content/articles/generate-random-daily-draft').json()
+    drafts = client.get('/content/articles/drafts').json()['drafts']
+    active = next(d for d in drafts if d['is_active_manual_article'])
+    assert active['id'] == second['draft_id']
+    assert active['id'] != first['id']
+
+
+def test_set_active_and_archive_endpoints(client: TestClient) -> None:
+    first = client.post('/content/articles/generate-daily-draft').json()['draft']
+    second = client.post('/content/articles/generate-daily-draft').json()['draft']
+    resp = client.post(f"/content/articles/{first['id']}/set-active")
+    assert resp.status_code == 200
+    drafts = client.get('/content/articles/drafts').json()['drafts']
+    active = next(d for d in drafts if d['is_active_manual_article'])
+    assert active['id'] == first['id']
+
+    archive = client.post(f"/content/articles/{first['id']}/archive-manual-work")
+    assert archive.status_code == 200
+    after = client.get('/content/articles/drafts').json()['drafts']
+    now_active = next(d for d in after if d['is_active_manual_article'])
+    archived = next(d for d in after if d['id'] == first['id'])
+    assert now_active['id'] == second['id']
+    assert archived['is_active_manual_article'] is False
 
 def test_generate_topic_draft_returns_single_draft_and_manual_fields(client: TestClient) -> None:
     response = client.post(

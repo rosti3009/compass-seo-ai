@@ -1381,7 +1381,14 @@ def _simple_workspace_context(db: Session) -> dict[str, object]:
         primary_href = "/seo/operations-view"
     invalidated_count = db.query(IStoreSEOApproval).filter(IStoreSEOApproval.status == "INVALIDATED").count()
     regenerated_count = db.query(IStoreSEOApproval).filter(IStoreSEOApproval.regenerated_from_id.is_not(None)).count()
-    article_drafts = db.query(ContentArticleDraft).order_by(ContentArticleDraft.created_at.desc()).limit(20).all()
+    all_article_drafts = db.query(ContentArticleDraft).order_by(ContentArticleDraft.created_at.desc()).limit(20).all()
+    eligible_manual = [d for d in all_article_drafts if d.status in {"CONTENT_DRAFT", "READY_FOR_REVIEW"}]
+    active_article = next((d for d in eligible_manual if d.is_active_manual_article), None)
+    if active_article is None and eligible_manual:
+        active_article = eligible_manual[0]
+        _set_active_manual_article(db, active_article)
+        db.commit()
+    active_id = active_article.id if active_article else None
     return {
         "cards": cards,
         "safe_cards": safe,
@@ -1401,13 +1408,29 @@ def _simple_workspace_context(db: Session) -> dict[str, object]:
         },
         "primary_label": primary_label,
         "primary_href": primary_href,
-        "article_drafts": [
+        "active_article": ({**active_article.to_dict(), **_article_quality_summary(active_article)} if active_article else None),
+        "archived_articles": [
             {**d.to_dict(), **_article_quality_summary(d)}
-            for d in article_drafts
-            if d.status in {"CONTENT_DRAFT", "APPROVED", "REJECTED"}
+            for d in all_article_drafts
+            if d.id != active_id
         ],
     }
 
+
+
+def _set_active_manual_article(db: Session, active_draft: ContentArticleDraft) -> None:
+    db.query(ContentArticleDraft).update({ContentArticleDraft.is_active_manual_article: False}, synchronize_session=False)
+    active_draft.is_active_manual_article = True
+    db.add(active_draft)
+
+
+def _latest_active_candidate(db: Session) -> ContentArticleDraft | None:
+    return (
+        db.query(ContentArticleDraft)
+        .filter(ContentArticleDraft.status.in_(["CONTENT_DRAFT", "READY_FOR_REVIEW"]))
+        .order_by(ContentArticleDraft.created_at.desc(), ContentArticleDraft.id.desc())
+        .first()
+    )
 def _strip_h1_tags(html: str) -> tuple[str, bool]:
     cleaned = re.sub(r"<h1[^>]*>.*?</h1>", "", html or "", flags=re.IGNORECASE | re.DOTALL)
     return cleaned, cleaned != (html or "")
@@ -1668,12 +1691,16 @@ def seo_simple_bulk_approve(payload: SimpleBulkApprovalRequest, db: DatabaseSess
 @router.post("/content/articles/generate-daily-draft")
 def generate_daily_content_article(db: DatabaseSession) -> dict[str, object]:
     draft, reused, last_generated_at = generate_daily_article_draft(db)
+    _set_active_manual_article(db, draft)
+    db.commit()
     return {"success": True, "draft": {**draft.to_dict(), "debug": _draft_debug(draft, "title"), "quality": _article_quality_summary(draft)}, "reused": reused, "last_generated_at": last_generated_at.isoformat() if last_generated_at else None, "auto_publish": False}
 
 
 @router.post("/content/articles/generate-random-daily-draft")
 def generate_random_daily_content_article(db: DatabaseSession) -> dict[str, object]:
     draft, reused, _ = generate_daily_article_draft(db, randomize=True)
+    _set_active_manual_article(db, draft)
+    db.commit()
     quality = _article_quality_summary(draft)
     return {"success": True, "selected_topic": draft.topic_title, "reused": reused, "draft_id": draft.id, "title": draft.title, "slug": draft.slug, "quality_score": quality.get("article_quality_score")}
 
@@ -1688,6 +1715,8 @@ def generate_topic_content_article(payload: ManualTopicArticleRequest, db: Datab
         target_intent=payload.target_intent,
         preferred_slug=payload.preferred_slug,
     )
+    _set_active_manual_article(db, draft)
+    db.commit()
     quality = _article_quality_summary(draft)
     manual_upload_url = f"/seo/simple-workspace#article-{draft.id}"
     logger.info(
@@ -1711,6 +1740,29 @@ def generate_topic_content_article(payload: ManualTopicArticleRequest, db: Datab
             "debug": _draft_debug(draft, "title"),
         },
     }
+
+
+@router.post("/content/articles/{draft_id}/set-active")
+def set_active_content_draft(draft_id: int, db: DatabaseSession) -> dict[str, object]:
+    draft = _get_content_draft_or_404(db, draft_id)
+    _set_active_manual_article(db, draft)
+    db.commit()
+    db.refresh(draft)
+    return {"success": True, "draft": draft.to_dict()}
+
+
+@router.post("/content/articles/{draft_id}/archive-manual-work")
+def archive_manual_content_draft(draft_id: int, db: DatabaseSession) -> dict[str, object]:
+    draft = _get_content_draft_or_404(db, draft_id)
+    draft.is_active_manual_article = False
+    if draft.status in {"CONTENT_DRAFT", "READY_FOR_REVIEW"}:
+        draft.status = "REJECTED"
+    db.add(draft)
+    candidate = _latest_active_candidate(db)
+    if candidate and candidate.id != draft.id:
+        _set_active_manual_article(db, candidate)
+    db.commit()
+    return {"success": True, "draft": draft.to_dict()}
 
 
 @router.get("/content/articles/drafts")

@@ -309,6 +309,7 @@ def test_sqlite_startup_migrates_content_article_draft_columns_and_preserves_row
         "verification_status",
         "published_url",
         "published_at",
+        "is_active_manual_article",
     }
     assert expected_new_columns.issubset(columns)
 

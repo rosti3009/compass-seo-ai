@@ -97,6 +97,7 @@ def ensure_sqlite_schema_compatibility(bind_engine=None) -> None:
             "published_url": "VARCHAR(1024)",
             "published_at": "DATETIME",
             "image_generation_metadata_json": "TEXT DEFAULT '{}'",
+            "is_active_manual_article": "BOOLEAN DEFAULT 0 NOT NULL",
         },
         "seo_strategy_recommendations": {
             "priority_score": "FLOAT DEFAULT 0.0",
