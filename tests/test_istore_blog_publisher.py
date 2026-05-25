@@ -207,7 +207,7 @@ def test_create_fails_with_diagnostic_details_when_redirect_has_no_id(monkeypatc
 
     monkeypatch.setattr(publisher.session, "post", lambda *a, **k: _CreateResponse())
 
-    with pytest.raises(IStoreBlogPublishError, match="status_code=302"):
+    with pytest.raises(IStoreBlogPublishError, match="diagnostics=.*status_code"):
         publisher._create_shop_information(publisher._build_payload(_Draft()))
 
 
@@ -228,7 +228,7 @@ def test_create_fails_with_clear_message_when_redirected_back_to_create_form(mon
 
     with pytest.raises(
         IStoreBlogPublishError,
-        match="ISTORE rejected create request. Compare manual request contract with /debug/istore/create-dry-run.",
+        match="ISTORE rejected create request.*diagnostics=",
     ):
         publisher._create_shop_information(publisher._build_payload(_Draft()))
 
@@ -308,3 +308,58 @@ def test_validate_create_payload_requires_contract_fields() -> None:
     payload["descriptions"]["3"]["title"] = ""
     with pytest.raises(IStoreBlogPublishError, match=r"descriptions\[3\]\.title"):
         publisher._validate_create_payload(payload)
+
+
+def test_create_diagnostics_include_required_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    publisher = _publisher()
+    monkeypatch.setattr("app.services.istore_blog_publisher.settings.istore_create_submit_mode", "json")
+    monkeypatch.setattr("app.services.istore_blog_publisher.settings.istore_create_minimal_payload", True)
+    monkeypatch.setattr("app.services.istore_blog_publisher.settings.istore_use_browser_headers", True)
+
+    class _CreateResponse:
+        status_code = 302
+        headers = {
+            "Location": "/client/shop_information/edit/123",
+            "Content-Type": "text/html",
+            "X-Inertia": "true",
+            "Vary": "Accept-Encoding",
+            "Set-Cookie": "laravel_session=abc; path=/, XSRF-TOKEN=def; path=/",
+            "CF-Ray": "abc",
+            "Server": "cloudflare",
+        }
+        url = "https://app.istores.co.il/client/shop_information/edit/123"
+        text = "<html><title>ok</title>body</html>"
+
+        @staticmethod
+        def json() -> dict[str, object]:
+            return {}
+
+    monkeypatch.setattr(publisher.session, "post", lambda *a, **k: _CreateResponse())
+    result = publisher._create_shop_information(publisher._build_payload(_Draft()))
+    d = result.diagnostics
+    assert d["status_code"] == 302
+    assert d["response_headers"]["content-type"] == "text/html"
+    assert "laravel_session" in d["response_headers"]["set-cookie-names"]
+    assert d["outgoing"]["submit_mode"] == "json"
+    assert d["outgoing"]["minimal_payload"] is True
+    assert d["outgoing"]["use_browser_headers"] is True
+    assert isinstance(d["outgoing"]["estimated_json_length"], int)
+
+
+def test_follow_redirect_diagnostics_include_title(monkeypatch: pytest.MonkeyPatch) -> None:
+    publisher = _publisher()
+    monkeypatch.setattr("app.services.istore_blog_publisher.settings.istore_create_follow_redirects", True)
+
+    class _CreateResponse:
+        status_code = 302
+        headers = {"Location": "", "Content-Type": "text/html"}
+        url = "https://app.istores.co.il/client/shop_information/create"
+        text = "<html><title>Create Form</title><body>validation failed</body></html>"
+
+        @staticmethod
+        def json() -> dict[str, object]:
+            return {}
+
+    monkeypatch.setattr(publisher.session, "post", lambda *a, **k: _CreateResponse())
+    with pytest.raises(IStoreBlogPublishError, match="follow_redirect_result"):
+        publisher._create_shop_information(publisher._build_payload(_Draft()))
