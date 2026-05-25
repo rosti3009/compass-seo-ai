@@ -2,6 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
+
+PLACEHOLDER_PNG_BYTES = bytes.fromhex(
+    "89504E470D0A1A0A0000000D4948445200000001000000010802000000907753DE"
+    "0000000C49444154789C63F8FFFF3F0005FE02FE0A0DAF0F0000000049454E44AE426082"
+)
 
 from app.core.config import settings
 
@@ -47,14 +53,20 @@ class StubEnabledProvider(BaseImageProvider):
         self.provider_name = provider_name
 
     def generate_hero_image(self, prompt: str, *, draft_slug: str) -> ImageGenerationResult:
-        # Safe placeholder architecture: endpoint enabled, provider wiring ready, no external call yet.
+        static_root = Path("app/static/generated-images")
+        static_root.mkdir(parents=True, exist_ok=True)
+        filename = f"{draft_slug}.png"
+        placeholder_path = static_root / filename
+        if not placeholder_path.exists():
+            placeholder_path.write_bytes(PLACEHOLDER_PNG_BYTES)
+
         return ImageGenerationResult(
             enabled=True,
             provider=self.provider_name,
             status="generated",
-            image_url=f"https://images.example.com/generated/{self.provider_name}/{draft_slug}.jpg",
-            width=1536,
-            height=1024,
+            image_url=f"/static/generated-images/{filename}",
+            width=1,
+            height=1,
             generated_at=datetime.now(UTC).isoformat(),
             message_he=f"הופעל ספק תמונות: {self.provider_name}. נשמר prompt בטוח וריאליסטי.",
         )
