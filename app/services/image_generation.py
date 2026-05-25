@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import base64
 from pathlib import Path
 
 PLACEHOLDER_PNG_BYTES = bytes.fromhex(
     "89504E470D0A1A0A0000000D4948445200000001000000010802000000907753DE"
     "0000000C49444154789C63F8FFFF3F0005FE02FE0A0DAF0F0000000049454E44AE426082"
 )
+
+from openai import OpenAI
 
 from app.core.config import settings
 
@@ -27,6 +30,7 @@ class ImageGenerationResult:
     height: int | None = None
     generated_at: str | None = None
     message_he: str = ""
+    error: str | None = None
 
 
 class BaseImageProvider:
@@ -48,34 +52,70 @@ class DisabledImageProvider(BaseImageProvider):
         )
 
 
-class StubEnabledProvider(BaseImageProvider):
-    def __init__(self, provider_name: str) -> None:
-        self.provider_name = provider_name
+def _png_dimensions(data: bytes) -> tuple[int | None, int | None]:
+    if len(data) < 24 or data[:8] != b"\x89PNG\r\n\x1a\n":
+        return (None, None)
+    width = int.from_bytes(data[16:20], "big")
+    height = int.from_bytes(data[20:24], "big")
+    return (width, height)
+
+
+class OpenAIImageProvider(BaseImageProvider):
+    provider_name = "openai"
+
+    def __init__(self) -> None:
+        self.client = OpenAI(api_key=settings.openai_api_key)
 
     def generate_hero_image(self, prompt: str, *, draft_slug: str) -> ImageGenerationResult:
-        static_root = Path("app/static/generated-images")
-        static_root.mkdir(parents=True, exist_ok=True)
-        filename = f"{draft_slug}.png"
-        placeholder_path = static_root / filename
-        if not placeholder_path.exists():
-            placeholder_path.write_bytes(PLACEHOLDER_PNG_BYTES)
-
-        return ImageGenerationResult(
-            enabled=True,
-            provider=self.provider_name,
-            status="generated",
-            image_url=f"/static/generated-images/{filename}",
-            width=1,
-            height=1,
-            generated_at=datetime.now(UTC).isoformat(),
-            message_he=f"הופעל ספק תמונות: {self.provider_name}. נשמר prompt בטוח וריאליסטי.",
-        )
+        try:
+            response = self.client.images.generate(
+                model="gpt-image-1",
+                prompt=prompt,
+                size="1536x1024",
+            )
+            item = response.data[0] if response.data else None
+            b64_json = getattr(item, "b64_json", None) if item else None
+            if not b64_json:
+                return ImageGenerationResult(
+                    enabled=True,
+                    provider=self.provider_name,
+                    status="failed",
+                    message_he="יצירת התמונה נכשלה — הספק לא החזיר תוכן תמונה.",
+                    error="OpenAI image provider returned no image bytes",
+                )
+            image_bytes = base64.b64decode(b64_json)
+            static_root = Path("app/static/generated-images")
+            static_root.mkdir(parents=True, exist_ok=True)
+            filename = f"{draft_slug}.png"
+            image_path = static_root / filename
+            image_path.write_bytes(image_bytes)
+            width, height = _png_dimensions(image_bytes)
+            return ImageGenerationResult(
+                enabled=True,
+                provider=self.provider_name,
+                status="generated",
+                image_url=f"/static/generated-images/{filename}",
+                width=width,
+                height=height,
+                generated_at=datetime.now(UTC).isoformat(),
+                message_he="תמונת hero נוצרה ונשמרה בהצלחה.",
+            )
+        except Exception as exc:
+            return ImageGenerationResult(
+                enabled=True,
+                provider=self.provider_name,
+                status="failed",
+                message_he="יצירת התמונה נכשלה בספק OpenAI.",
+                error=str(exc),
+            )
 
 
 def get_image_provider() -> BaseImageProvider:
     raw = (getattr(settings, "image_provider", None) or "").strip().lower()
-    if raw in {"openai", "stability"}:
-        return StubEnabledProvider(raw)
+    if raw == "openai":
+        if not settings.openai_api_key:
+            return DisabledImageProvider()
+        return OpenAIImageProvider()
     return DisabledImageProvider()
 
 

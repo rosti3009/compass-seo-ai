@@ -503,8 +503,23 @@ def test_generate_image_response_includes_required_diagnostics(client: TestClien
 def test_stub_provider_saves_local_image_and_returns_static_url(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     from app.core.config import settings
 
+    class _Resp:
+        class D:
+            b64_json = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4KDa8PAAAAAElFTkSuQmCC"
+        data = [D()]
+
+    class _Images:
+        @staticmethod
+        def generate(**_kwargs):
+            return _Resp()
+
+    class _Client:
+        images = _Images()
+
     draft = client.post('/content/articles/generate-daily-draft').json()['draft']
     monkeypatch.setattr(settings, 'image_provider', 'openai')
+    monkeypatch.setattr(settings, 'openai_api_key', 'test-key')
+    monkeypatch.setattr('app.services.image_generation.OpenAI', lambda api_key: _Client())
 
     response = client.post(f"/content/articles/{draft['id']}/generate-image")
     assert response.status_code == 200
@@ -517,6 +532,7 @@ def test_stub_provider_saves_local_image_and_returns_static_url(client: TestClie
     file_check = client.get(image_url)
     assert file_check.status_code == 200
     assert file_check.headers['content-type'].startswith('image/')
+    assert len(file_check.content) > 0
 
     assert payload['open_image_url'] == image_url
     assert payload['download_image_url'] == image_url
