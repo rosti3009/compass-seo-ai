@@ -47,6 +47,84 @@
           <p><strong>Meta Title:</strong> {{ article.meta_title }}</p>
           <p><strong>Meta Description:</strong> {{ article.meta_description }}</p>
           <details><summary>תצוגה מקדימה</summary><div>{{ article.article_body|safe }}</div></details>
+          <section class="manual-upload-layout" aria-label="הכנה להעלאה ידנית ל-ISTORE">
+            <h4>manual-upload-view · הכנה מהירה לעובד חנות</h4>
+            <div class="manual-upload-grid">
+              <article class="manual-upload-card">
+                <h5>1) תמונה ראשית (Featured)</h5>
+                <p><strong>תמונה מוצעת:</strong> {{ article.image_title or ('תמונת שער: ' ~ article.title) }}</p>
+                <p><strong>AI prompt:</strong> {{ article.featured_image_prompt }}</p>
+                <p><strong>ALT:</strong> {{ article.image_alt_text }}</p>
+                <p><strong>מידות מומלצות:</strong> 1200×630 פיקסלים (JPG/WebP)</p>
+                <div class="actions">
+                  <button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ article.featured_image_prompt }}">העתק prompt</button>
+                  <button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ article.image_alt_text }}">העתק ALT</button>
+                </div>
+              </article>
+
+              <article class="manual-upload-card">
+                <h5>2) תמונות בתוך המאמר (Inline)</h5>
+                {% set section_images = article.section_image_prompts or [] %}
+                {% for section in section_images %}
+                <div class="inline-image-row">
+                  <p><strong>כותרת סעיף:</strong> {{ section.section_title or ('תמונה ' ~ loop.index) }}</p>
+                  <p><strong>מיקום מומלץ:</strong> {{ section.placement_hint or ('[IMAGE_' ~ loop.index ~ '_HERE]') }}</p>
+                  <p><strong>Image prompt:</strong> {{ section.prompt or section.image_prompt or '' }}</p>
+                  <p><strong>ALT:</strong> {{ section.alt_text or article.image_alt_text }}</p>
+                  <p><strong>כיתוב (אופציונלי):</strong> {{ section.caption or article.image_caption }}</p>
+                </div>
+                {% else %}
+                <div class="inline-image-row">
+                  <p><strong>כותרת סעיף:</strong> פתיח / מבוא</p>
+                  <p><strong>מיקום מומלץ:</strong> [IMAGE_1_HERE]</p>
+                  <p><strong>Image prompt:</strong> {{ article.featured_image_prompt }}</p>
+                  <p><strong>ALT:</strong> {{ article.image_alt_text }}</p>
+                  <p><strong>כיתוב (אופציונלי):</strong> {{ article.image_caption }}</p>
+                </div>
+                <div class="inline-image-row">
+                  <p><strong>כותרת סעיף:</strong> סיכום / פעולה מומלצת</p>
+                  <p><strong>מיקום מומלץ:</strong> [IMAGE_2_HERE]</p>
+                  <p><strong>Image prompt:</strong> {{ article.featured_image_prompt }}</p>
+                  <p><strong>ALT:</strong> {{ article.image_alt_text }}</p>
+                  <p><strong>כיתוב (אופציונלי):</strong> {{ article.image_caption }}</p>
+                </div>
+                {% endfor %}
+              </article>
+
+              <article class="manual-upload-card">
+                <h5>3) HTML להדבקה ידנית</h5>
+                <p><strong>עם סמני תמונה:</strong></p>
+                <textarea class="manual-html" rows="8" readonly>{{ article.article_body }}
+[IMAGE_1_HERE]
+[IMAGE_2_HERE]</textarea>
+                <p><strong>HTML נקי (ללא סמנים):</strong></p>
+                <textarea class="manual-html" rows="8" readonly>{{ article.article_body }}</textarea>
+                <div class="actions">
+                  <button type="button" class="secondary-button" data-action="copy-from-target" data-copy-target="article-html-markers-{{ article.id }}">העתק HTML עם סמנים</button>
+                  <button type="button" class="secondary-button" data-action="copy-from-target" data-copy-target="article-html-clean-{{ article.id }}">העתק HTML נקי</button>
+                </div>
+                <textarea id="article-html-markers-{{ article.id }}" class="copy-source-hidden" readonly>{{ article.article_body }}
+[IMAGE_1_HERE]
+[IMAGE_2_HERE]</textarea>
+                <textarea id="article-html-clean-{{ article.id }}" class="copy-source-hidden" readonly>{{ article.article_body }}</textarea>
+              </article>
+
+              <article class="manual-upload-card checklist-card">
+                <h5>4) checklist לעובד העלאה</h5>
+                <ol>
+                  <li>העלה תמונה ראשית</li>
+                  <li>הדבק כותרת</li>
+                  <li>הדבק גוף מאמר</li>
+                  <li>הכנס תמונות inline לפי הסמנים</li>
+                  <li>הדבק meta title</li>
+                  <li>הדבק meta description</li>
+                  <li>הדבק slug</li>
+                  <li>הפעל blog visibility</li>
+                  <li>שמור עמוד</li>
+                </ol>
+              </article>
+            </div>
+          </section>
           <p><strong>קישורים פנימיים:</strong> {{ article.internal_links }}</p>
           <p><strong>סטטוס:</strong> {{ article.status }}</p>
           <p><strong>המאמר יעלה ל:</strong> <span dir="ltr">{{ article.target_url }}</span></p>
