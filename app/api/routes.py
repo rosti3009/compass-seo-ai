@@ -3160,17 +3160,24 @@ def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, obje
     provider = get_image_provider()
     draft.featured_image_prompt = build_realistic_hero_prompt(draft.featured_image_prompt)
     result = provider.generate_hero_image(draft.featured_image_prompt, draft_slug=draft.slug)
+    diagnostics = {
+        "provider_response_received": True,
+        "image_url_present": bool(result.image_url),
+        "image_storage_success": False,
+        "provider_name": result.provider,
+    }
     logger.info(
-        "Image provider response for draft_id=%s slug=%s provider=%s status=%s image_url=%s",
+        "Image provider response for draft_id=%s slug=%s provider=%s status=%s image_url=%s diagnostics=%s",
         draft.id,
         draft.slug,
         result.provider,
         result.status,
         result.image_url,
+        diagnostics,
     )
     if result.status == "generated" and not result.image_url:
-        logger.error(
-            "Image provider returned generated status without URL for draft_id=%s provider=%s",
+        logger.warning(
+            "Image provider returned empty URL for generated image draft_id=%s provider=%s",
             draft.id,
             result.provider,
         )
@@ -3182,6 +3189,13 @@ def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, obje
     draft.image_publish_status = "NOT_PUBLISHED"
     draft.generated_image_url = result.image_url
     draft.featured_image_url = result.image_url
+    draft.image_generation_metadata_json = json.dumps({
+        "width": result.width,
+        "height": result.height,
+        "provider": result.provider,
+        "generated_at": result.generated_at,
+    }, ensure_ascii=False)
+    diagnostics["image_storage_success"] = bool(result.image_url)
     db.add(draft)
     db.commit()
     db.refresh(draft)
@@ -3195,6 +3209,14 @@ def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, obje
         "featured_image_url": result.image_url,
         "open_image_url": result.image_url,
         "download_image_url": result.image_url,
+        "copy_image_url": result.image_url,
+        "image_metadata": {
+            "width": result.width,
+            "height": result.height,
+            "provider": result.provider,
+            "generated_at": result.generated_at,
+        },
+        "diagnostics": diagnostics,
         "message_he": result.message_he,
         "draft": draft.to_dict(),
     }

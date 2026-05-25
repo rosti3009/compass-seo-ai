@@ -96,6 +96,7 @@ def ensure_sqlite_schema_compatibility(bind_engine=None) -> None:
             "verification_status": "VARCHAR(64) DEFAULT 'NOT_VERIFIED' NOT NULL",
             "published_url": "VARCHAR(1024)",
             "published_at": "DATETIME",
+            "image_generation_metadata_json": "TEXT DEFAULT '{}'",
         },
         "seo_strategy_recommendations": {
             "priority_score": "FLOAT DEFAULT 0.0",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from app.core.config import settings
 
@@ -16,6 +17,9 @@ class ImageGenerationResult:
     provider: str
     status: str
     image_url: str | None = None
+    width: int | None = None
+    height: int | None = None
+    generated_at: str | None = None
     message_he: str = ""
 
 
@@ -48,7 +52,10 @@ class StubEnabledProvider(BaseImageProvider):
             enabled=True,
             provider=self.provider_name,
             status="generated",
-            image_url=f"generated://{self.provider_name}/{draft_slug}",
+            image_url=f"https://images.example.com/generated/{self.provider_name}/{draft_slug}.jpg",
+            width=1536,
+            height=1024,
+            generated_at=datetime.now(UTC).isoformat(),
             message_he=f"הופעל ספק תמונות: {self.provider_name}. נשמר prompt בטוח וריאליסטי.",
         )
 

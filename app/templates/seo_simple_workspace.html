@@ -157,6 +157,8 @@
             {% if existing_image_url %}
             <a href="{{ existing_image_url }}" target="_blank" rel="noopener">פתח תמונה</a>
             ·
+            <button type="button" class="secondary-button" data-action="copy-image-url" data-image-url="{{ existing_image_url }}">העתק קישור תמונה</button>
+            ·
             <a href="{{ existing_image_url }}" download>הורד תמונה</a>
             {% endif %}
           </p>

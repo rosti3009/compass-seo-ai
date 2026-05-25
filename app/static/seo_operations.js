@@ -308,7 +308,7 @@ async function runManualImageAction(button, action) {
       } else {
         const openUrl = payload.open_image_url || generatedImageUrl;
         const downloadUrl = payload.download_image_url || generatedImageUrl;
-        feedback.innerHTML = `התמונה נוצרה בהצלחה · <a href="${escapeHtml(openUrl)}" target="_blank" rel="noopener">פתח תמונה</a> · <a href="${escapeHtml(downloadUrl)}" download>הורד תמונה</a>`;
+        feedback.innerHTML = `התמונה נוצרה בהצלחה · <a href="${escapeHtml(openUrl)}" target="_blank" rel="noopener">פתח תמונה</a> · <button type="button" class="secondary-button" data-action="copy-image-url" data-image-url="${escapeHtml(generatedImageUrl)}">העתק קישור תמונה</button> · <a href="${escapeHtml(downloadUrl)}" download>הורד תמונה</a>`;
       }
     }
     if (linksNode) {
@@ -316,12 +316,13 @@ async function runManualImageAction(button, action) {
         const openUrl = payload.open_image_url || generatedImageUrl;
         const downloadUrl = payload.download_image_url || generatedImageUrl;
         linksNode.hidden = false;
-        linksNode.innerHTML = `<a href="${escapeHtml(openUrl)}" target="_blank" rel="noopener">פתח תמונה</a> · <a href="${escapeHtml(downloadUrl)}" download>הורד תמונה</a>`;
+        linksNode.innerHTML = `<a href="${escapeHtml(openUrl)}" target="_blank" rel="noopener">פתח תמונה</a> · <button type="button" class="secondary-button" data-action="copy-image-url" data-image-url="${escapeHtml(generatedImageUrl)}">העתק קישור תמונה</button> · <a href="${escapeHtml(downloadUrl)}" download>הורד תמונה</a>`;
       } else {
         linksNode.hidden = true;
         linksNode.innerHTML = "";
       }
     }
+    bindOperations(card);
   } catch (error) {
     if (feedback) feedback.textContent = `שגיאה: ${error.message}`;
   } finally {
@@ -355,6 +356,17 @@ function bindOperations(root = document) {
       setTimeout(() => { button.textContent = button.dataset.originalLabel || "העתק"; }, 1200);
     });
     button.dataset.originalLabel = button.textContent;
+  });
+  root.querySelectorAll("[data-action='copy-image-url']:not([data-bound='true'])").forEach((button) => {
+    button.dataset.bound = "true";
+    button.addEventListener("click", async () => {
+      const url = button.dataset.imageUrl || "";
+      if (!url) return;
+      await navigator.clipboard.writeText(url);
+      const original = button.textContent;
+      button.textContent = "הועתק ✓";
+      setTimeout(() => { button.textContent = original || "העתק קישור תמונה"; }, 1200);
+    });
   });
   root.querySelectorAll("[data-action='copy-from-target']:not([data-bound='true'])").forEach((button) => {
     button.dataset.bound = "true";

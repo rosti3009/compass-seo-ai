@@ -380,3 +380,70 @@ def test_generate_image_returns_clear_error_when_provider_has_no_url(client: Tes
     response = client.post(f"/content/articles/{draft['id']}/generate-image")
     assert response.status_code == 502
     assert 'without image URL' in response.json()['detail']
+
+
+def test_generate_image_persists_urls_and_metadata_and_response(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    draft = client.post('/content/articles/generate-daily-draft').json()['draft']
+
+    class _Provider:
+        def generate_hero_image(self, _prompt: str, *, draft_slug: str):
+            from app.services.image_generation import ImageGenerationResult
+            return ImageGenerationResult(
+                enabled=True,
+                provider='openai',
+                status='generated',
+                image_url=f'https://cdn.example.com/{draft_slug}.jpg',
+                width=1280,
+                height=720,
+                generated_at='2026-05-25T00:00:00+00:00',
+                message_he='ok',
+            )
+
+    monkeypatch.setattr('app.api.routes.get_image_provider', lambda: _Provider())
+    response = client.post(f"/content/articles/{draft['id']}/generate-image")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['generated_image_url'].startswith('https://')
+    assert payload['featured_image_url'] == payload['generated_image_url']
+    assert payload['open_image_url'] == payload['generated_image_url']
+    assert payload['download_image_url'] == payload['generated_image_url']
+    assert payload['copy_image_url'] == payload['generated_image_url']
+    assert payload['image_metadata']['width'] == 1280
+    assert payload['image_metadata']['height'] == 720
+    assert payload['diagnostics']['provider_response_received'] is True
+    assert payload['diagnostics']['image_url_present'] is True
+    assert payload['diagnostics']['image_storage_success'] is True
+    assert payload['diagnostics']['provider_name'] == 'openai'
+
+    check = client.get(f"/content/articles/{draft['id']}").json()['draft']
+    assert check['generated_image_url'] == payload['generated_image_url']
+    assert check['featured_image_url'] == payload['generated_image_url']
+    assert check['image_generation_metadata']['provider'] == 'openai'
+
+
+def test_manual_upload_view_displays_generated_image_controls(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    draft = client.post('/content/articles/generate-daily-draft').json()['draft']
+    client.post(f"/content/articles/{draft['id']}/approve")
+
+    class _Provider:
+        def generate_hero_image(self, _prompt: str, *, draft_slug: str):
+            from app.services.image_generation import ImageGenerationResult
+            return ImageGenerationResult(
+                enabled=True,
+                provider='openai',
+                status='generated',
+                image_url=f'https://cdn.example.com/{draft_slug}.jpg',
+                width=1280,
+                height=720,
+                generated_at='2026-05-25T00:00:00+00:00',
+                message_he='ok',
+            )
+
+    monkeypatch.setattr('app.api.routes.get_image_provider', lambda: _Provider())
+    client.post(f"/content/articles/{draft['id']}/generate-image")
+
+    page = client.get('/seo/simple-workspace').text
+    assert 'https://cdn.example.com/' in page
+    assert 'פתח תמונה' in page
+    assert 'העתק קישור תמונה' in page
+    assert 'הורד תמונה' in page
