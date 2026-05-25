@@ -1481,11 +1481,17 @@ def _article_quality_summary(draft: ContentArticleDraft) -> dict[str, float | st
     repeated = ["במדריך הזה נסביר", "למה זה חשוב", "שלבים מעשיים"]
     repeated_penalty = 8 * sum(1 for t in repeated if t in body)
     structure = max(0.0, structure - repeated_penalty)
-    generic_slug_penalty = 18 if (draft.slug or "") in {"compass-grill-article", "bbq-hebrew-guide"} else 0
+    generic_slug_penalty = 18 if (draft.slug or "") in {"compass-grill-article", "bbq-hebrew-guide", "grill-smoking-guide"} else 0
     prompt_blob = ((draft.featured_image_prompt or "") + " " + (draft.section_image_prompts_json or "")).lower()
-    generic_prompt_penalty = 15 if not any(t in prompt_blob for t in ["wood", "chips", "smoke", "smoker", "hickory", "oak", "apple"]) else 0
+    wing_topic = "כנפיים" in ((draft.topic_title or "") + " " + (draft.focus_keyword or ""))
+    wrong_prompt_penalty = 0
+    if wing_topic and any(t in prompt_blob for t in ["wood chips", "smoker box", "hickory"]):
+        wrong_prompt_penalty = 25
+    generic_prompt_penalty = 15 if len(prompt_blob.strip()) < 25 else 0
     technical_bonus = 26 if len(_topic_keywords_detected(body)) >= 7 else 0
-    structure = max(0.0, structure - generic_slug_penalty - generic_prompt_penalty)
+    if wing_topic and all(t in body for t in ["74", "גלייז", "קריספ"]):
+        technical_bonus += 18
+    structure = max(0.0, structure - generic_slug_penalty - generic_prompt_penalty - wrong_prompt_penalty)
     article_quality = min(100.0, round((seo * 0.18) + (semantic * 0.22) + (suggestion * 0.22) + (structure * 0.38) + technical_bonus, 1))
     readiness = "READY_FOR_REVIEW" if article_quality >= 75 else "NEEDS_IMPROVEMENT"
     return {

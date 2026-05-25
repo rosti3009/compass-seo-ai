@@ -70,8 +70,18 @@
           <p><strong>מילות מפתח לקידום במנועי חיפוש:</strong> {{ article.focus_keyword }}</p>
           <details><summary>תצוגה מקדימה</summary><div>{{ article.article_body|safe }}</div></details>
           <section class="manual-upload-layout" aria-label="הכנה להעלאה ידנית ל-ISTORE">
-            <h4>manual-upload-view · הכנה מהירה לעובד חנות</h4>
-            <p><strong>העתקה לפי סדר ל־ISTORE:</strong> 1) כותרת 2) שם ייחודי לקישור 3) תוכן ראשי 4) כותרת לקידום במנועי חיפוש 5) תיאור לקידום במנועי חיפוש 6) מילות מפתח לקידום במנועי חיפוש 7) תמונה ראשית 8) ALT לתמונה</p>
+            <h4>העתקה לאתר לפי החלונות ב־ISTORE</h4>
+            {% set existing_image_url = article.generated_image_url or article.featured_image_url %}
+            <div class="manual-upload-card">
+              <h5>1. כותרת</h5><textarea readonly>{{ article.title }}</textarea><button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ article.title }}">העתק</button><p>להדביק בשדה כותרת באתר</p>
+              <h5>2. שם ייחודי לקישור / Slug</h5><textarea readonly>{{ article.slug }}</textarea><button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ article.slug }}">העתק</button><p>להדביק בשדה slug באתר</p>
+              <h5>3. תוכן ראשי להדבקה</h5><textarea id="final-content-box-{{ article.id }}" readonly>{{ article.article_body }}</textarea><button type="button" class="secondary-button" data-action="copy-from-target" data-copy-target="final-content-box-{{ article.id }}">העתק</button><p>להדביק בשדה תוכן ראשי באתר</p>
+              <h5>4. כותרת לקידום במנועי חיפוש</h5><textarea readonly>{{ article.meta_title }}</textarea><button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ article.meta_title }}">העתק</button><p>להדביק בשדה Meta Title באתר</p>
+              <h5>5. תיאור לקידום במנועי חיפוש</h5><textarea readonly>{{ article.meta_description }}</textarea><button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ article.meta_description }}">העתק</button><p>להדביק בשדה Meta Description באתר</p>
+              <h5>6. מילות מפתח</h5><textarea readonly>{{ article.focus_keyword }}</textarea><button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ article.focus_keyword }}">העתק</button><p>להדביק בשדה Keywords באתר</p>
+              <h5>7. תמונה ראשית</h5><textarea readonly>{{ existing_image_url or article.featured_image_prompt }}</textarea><button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ existing_image_url or article.featured_image_prompt }}">העתק</button><p>להדביק בשדה תמונה ראשית באתר</p>
+              <h5>8. ALT לתמונה</h5><textarea readonly>{{ article.image_alt_text }}</textarea><button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ article.image_alt_text }}">העתק</button><p>להדביק בשדה ALT באתר</p>
+            </div>
             <div class="manual-upload-grid">
               <article class="manual-upload-card">
                 <h5>תמונה ראשית</h5>
@@ -157,7 +167,7 @@
               </article>
             </div>
           </section>
-          <section class="manual-upload-card" data-live-preview>
+          <details><summary>מתקדם</summary><section class="manual-upload-card" data-live-preview>
             <h5>תצוגה חיה (Live Preview)</h5>
             <div class="actions">
               <button type="button" class="secondary-button" data-action="copy-html" data-copy-type="full">העתק HTML מלא</button>
@@ -176,7 +186,7 @@
               
               {% endif %}
             </div>
-          </section>
+          </section></details>
           <p><strong>קישורים פנימיים:</strong> {{ article.internal_links }}</p>
           <p><strong>סטטוס:</strong> {{ article.status }}</p>
           <p><strong>המאמר יעלה ל:</strong> <span dir="ltr">{{ article.target_url }}</span></p>

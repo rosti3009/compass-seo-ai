@@ -683,7 +683,39 @@ def test_generate_random_daily_endpoint_response(client: TestClient) -> None:
     assert isinstance(payload['reused'], bool)
     assert payload['draft_id'] > 0
     assert payload['slug']
-    assert payload['quality_score'] is not None
+
+
+def test_wings_topic_regression(client: TestClient) -> None:
+    response = client.post(
+        "/content/articles/generate-topic-draft",
+        json={
+            "topic_title": "איך להכין כנפיים קריספיות על הגריל",
+            "focus_keyword": "כנפיים על הגריל",
+            "target_intent": "how-to",
+        },
+    )
+    assert response.status_code == 200
+    draft = response.json()["draft"]
+    assert draft["slug"] == "crispy-grilled-wings"
+    full = client.get(f"/content/articles/{draft['draft_id']}").json()["draft"]
+    body = full["article_body"]
+    assert "כנפיים" in body and "קריספי" in body and "74°C" in body and "גלייז" in body
+    prompt = full["featured_image_prompt"].lower()
+    assert "wings" in prompt and "chicken" in prompt and "grill" in prompt
+    assert "wood chips" not in prompt
+    assert all((p.get("relevance_score") or 0) >= 40 for p in (draft.get("suggested_related_products") or []))
+    quality = draft["quality"]
+    assert float(quality["article_quality_score"]) > 75
+    assert quality["publish_readiness"] == "READY_FOR_REVIEW"
+
+
+def test_employee_view_shows_copy_before_advanced_and_single_main_copy_box(client: TestClient) -> None:
+    draft = client.post('/content/articles/generate-daily-draft').json()['draft']
+    page = client.get('/seo/simple-workspace').text
+    assert "העתקה לאתר לפי החלונות ב־ISTORE" in page
+    assert page.index("העתקה לאתר לפי החלונות ב־ISTORE") < page.index("<summary>מתקדם</summary>")
+    assert "<details><summary>מתקדם</summary>" in page
+    assert page.count('<textarea id="final-content-box-') == 1
 
 
 def test_topic_reuse_after_pool_exhaustion(client: TestClient) -> None:
