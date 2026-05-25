@@ -91,6 +91,11 @@ def test_dry_run_shows_payload_without_tokens_or_cookies() -> None:
     assert "token123" not in text
     assert out["headers"]["X-XSRF-TOKEN"] == "[REDACTED]"
     assert out["headers"]["Cookie"] == "[REDACTED]"
+    contract = out["request_contract"]
+    assert contract["cookie_names"] == ["session"]
+    assert contract["xsrf_length"] == len("token123")
+    assert contract["xsrf_token_present"] is True
+    assert contract["inertia_version_present"] is False
 
 
 def test_from_settings_fails_without_admin_cookie(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -158,7 +163,10 @@ def test_create_fails_with_clear_message_when_redirected_back_to_create_form(mon
 
     monkeypatch.setattr(publisher.session, "post", lambda *a, **k: _CreateResponse())
 
-    with pytest.raises(IStoreBlogPublishError, match="ISTORE rejected create request and redirected back to create form"):
+    with pytest.raises(
+        IStoreBlogPublishError,
+        match="ISTORE rejected create request. Compare manual request contract with /debug/istore/create-dry-run.",
+    ):
         publisher._create_shop_information(publisher._build_payload(_Draft()))
 
 

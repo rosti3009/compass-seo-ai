@@ -1708,7 +1708,14 @@ def publish_content_draft(draft_id: int, db: DatabaseSession, dry_run: bool = Fa
         "destination_under_blog": bool(draft.target_url and draft.target_url.startswith("https://compassgrill.co.il/blog/")),
     }
     if dry_run:
-        return {"success": True, "dry_run": True, "result_he": "בדיקת פרסום יבשה בוצעה", **dry_payload}
+        contract = IStoreBlogPublisher.from_settings().publish(draft, dry_run=True).get("request_contract")
+        return {
+            "success": True,
+            "dry_run": True,
+            "result_he": "בדיקת פרסום יבשה בוצעה",
+            "request_contract": contract,
+            **dry_payload,
+        }
     if not allowed:
         raise HTTPException(status_code=400, detail=blocked_reason)
     if not adapter_ready:
@@ -1746,6 +1753,23 @@ def publish_content_draft(draft_id: int, db: DatabaseSession, dry_run: bool = Fa
         "publish_adapter": "IStoreBlogPublisher",
         "publish_result": result,
         "draft": draft.to_dict(),
+    }
+
+
+@router.get("/debug/istore/create-dry-run")
+def debug_istore_create_dry_run(draft_id: int, db: DatabaseSession) -> dict[str, object]:
+    draft = _get_content_draft_or_404(db, draft_id)
+    dry_run = IStoreBlogPublisher.from_settings().publish(draft, dry_run=True)
+    contract = dry_run.get("request_contract") if isinstance(dry_run, dict) else {}
+    if not isinstance(contract, dict):
+        contract = {}
+    return {
+        "endpoint": contract.get("endpoint"),
+        "method": contract.get("method"),
+        "headers": contract.get("headers", {}),
+        "payload": contract.get("payload", {}),
+        "cookie_names": contract.get("cookie_names", []),
+        "xsrf_length": contract.get("xsrf_length", 0),
     }
 
 
