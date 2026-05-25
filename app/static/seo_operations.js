@@ -265,6 +265,27 @@ function bindOperations(root = document) {
     button.dataset.bound = "true";
     button.addEventListener("click", () => runSimpleBulkApprove(button));
   });
+  root.querySelectorAll("[data-action='copy-text']:not([data-bound='true'])").forEach((button) => {
+    button.dataset.bound = "true";
+    button.addEventListener("click", async () => {
+      const text = button.dataset.copyText || "";
+      await navigator.clipboard.writeText(text);
+      button.textContent = "הועתק ✓";
+      setTimeout(() => { button.textContent = button.dataset.originalLabel || "העתק"; }, 1200);
+    });
+    button.dataset.originalLabel = button.textContent;
+  });
+  root.querySelectorAll("[data-action='copy-from-target']:not([data-bound='true'])").forEach((button) => {
+    button.dataset.bound = "true";
+    button.addEventListener("click", async () => {
+      const source = document.getElementById(button.dataset.copyTarget || "");
+      if (!source) return;
+      await navigator.clipboard.writeText(source.value || source.textContent || "");
+      const original = button.textContent;
+      button.textContent = "הועתק ✓";
+      setTimeout(() => { button.textContent = original; }, 1200);
+    });
+  });
   applyDiffHighlights(root);
   bindReviewFilters(root);
 }
