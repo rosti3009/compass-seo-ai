@@ -452,6 +452,8 @@ def test_manual_upload_view_displays_generated_image_controls(client: TestClient
     assert 'פתח תמונה' in page
     assert 'העתק קישור תמונה' in page
     assert 'הורד תמונה' in page
+    assert 'העתקה לפי סדר ל־ISTORE' in page
+    assert 'Copy image HTML' in page
 
 
 def test_generate_image_success_must_include_generated_image_url(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -567,5 +569,7 @@ def test_generated_images_output_contains_img_and_removes_marker(client: TestCli
 
     assert generated_image_url in generated_output
     assert '[IMAGE_1_HERE]' not in generated_output
+    assert '[IMAGE_2_HERE]' not in generated_output
     assert f'alt="{draft["image_alt_text"]}"' in generated_output
     assert 'ALT:' not in generated_output
+    assert '<img' in generated_output

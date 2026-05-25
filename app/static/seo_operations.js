@@ -253,22 +253,32 @@ function renderArticlePreview(card, draft) {
   if (!container) return;
   const imageUrl = draft.generated_image_url || draft.featured_image_url || "";
   const imageAlt = draft.image_alt_text || "";
+  const imgHtml = imageUrl ? `<p><img src="${imageUrl}" alt="${imageAlt}"></p>` : "";
+  let htmlWithInline = draft.article_body || "";
+  if (imageUrl) {
+    htmlWithInline = htmlWithInline.replace("[IMAGE_1_HERE]", imgHtml);
+  }
+  htmlWithInline = htmlWithInline.replace("[IMAGE_2_HERE]", "");
+  const htmlNoMarkers = htmlWithInline.replace(/\[IMAGE_[0-9]+_HERE\]/g, "").trim();
   const markers = `${draft.article_body || ""}\n[IMAGE_1_HERE]\n[IMAGE_2_HERE]`;
-  const previewHtml = `<article>${imageUrl ? `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(imageAlt)}" style="max-width:320px;height:auto"/>` : ""}<div>${draft.article_body || ""}</div><pre>${escapeHtml(markers)}</pre></article>`;
+  const previewHtml = `<article><div>${htmlNoMarkers}</div></article>`;
   container.innerHTML = previewHtml;
+  const markerNode = card.querySelector("[data-preview-markers]");
+  if (markerNode) markerNode.textContent = markers;
   const previewImageBlock = card.querySelector("[data-preview-image-block]");
   if (previewImageBlock) {
     if (imageUrl) {
       previewImageBlock.hidden = false;
-      previewImageBlock.innerHTML = `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(imageAlt)}" style="max-width:320px;height:auto"/><p><strong>ALT:</strong> ${escapeHtml(imageAlt)}</p>`;
+      previewImageBlock.innerHTML = `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(imageAlt)}" style="max-width:320px;height:auto"/>`;
     } else {
       previewImageBlock.hidden = true;
       previewImageBlock.innerHTML = "";
     }
   }
-  card.dataset.fullHtml = `${imageUrl ? `<img src="${imageUrl}" alt="${draft.image_alt_text || ""}">` : ""}${draft.article_body || ""}`;
-  card.dataset.cleanHtml = draft.article_body || "";
+  card.dataset.fullHtml = htmlNoMarkers;
+  card.dataset.cleanHtml = (draft.article_body || "").replace(/\[IMAGE_[0-9]+_HERE\]/g, "").trim();
   card.dataset.previewHtml = markers;
+  card.dataset.markersHtml = markers;
 }
 
 async function runManualImageAction(button, action) {
@@ -401,7 +411,7 @@ function bindOperations(root = document) {
     button.addEventListener("click", async () => {
       const card = button.closest("[data-article-id]");
       if (!card) return;
-      const key = button.dataset.copyType === "full" ? "fullHtml" : button.dataset.copyType === "clean" ? "cleanHtml" : "previewHtml";
+      const key = button.dataset.copyType === "full" ? "fullHtml" : button.dataset.copyType === "clean" ? "cleanHtml" : "markersHtml";
       await navigator.clipboard.writeText(card.dataset[key] || "");
     });
   });
