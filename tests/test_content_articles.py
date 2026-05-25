@@ -524,3 +524,32 @@ def test_stub_provider_saves_local_image_and_returns_static_url(client: TestClie
     assert payload['diagnostics']['image_file_saved'] is True
     assert payload['diagnostics']['image_public_url'] == image_url
     assert payload['diagnostics']['image_file_path'] == f"app{image_url}"
+
+
+def test_generated_images_output_contains_img_and_removes_marker(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    draft = client.post('/content/articles/generate-daily-draft').json()['draft']
+
+    class _Provider:
+        def generate_hero_image(self, _prompt: str, *, draft_slug: str):
+            from app.services.image_generation import ImageGenerationResult
+            return ImageGenerationResult(
+                enabled=True,
+                provider='openai',
+                status='generated',
+                image_url=f'https://cdn.example.com/{draft_slug}.jpg',
+                message_he='ok',
+            )
+
+    monkeypatch.setattr('app.api.routes.get_image_provider', lambda: _Provider())
+    image_payload = client.post(f"/content/articles/{draft['id']}/generate-image").json()
+    generated_image_url = image_payload['generated_image_url']
+
+    generated_output = (
+        f"{draft['article_body']}\n[IMAGE_1_HERE]\n"
+        .replace('[IMAGE_1_HERE]', f'<img src="{generated_image_url}" alt="{draft["image_alt_text"]}" />')
+    )
+
+    assert generated_image_url in generated_output
+    assert '[IMAGE_1_HERE]' not in generated_output
+    assert f'alt="{draft["image_alt_text"]}"' in generated_output
+    assert 'ALT:' not in generated_output
