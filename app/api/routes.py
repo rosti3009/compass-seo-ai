@@ -1407,7 +1407,10 @@ def _strip_h1_tags(html: str) -> tuple[str, bool]:
 
 
 def _topic_keywords_detected(body: str) -> list[str]:
-    checks = ["hickory", "oak", "apple", "mesquite", "smoke", "smoker", "blue smoke", "טמפרט"]
+    checks = [
+        "hickory", "oak", "apple", "mesquite", "cherry",
+        "thin blue smoke", "bitter smoke", "soak", "smoker", "wood chips", "טמפרט"
+    ]
     lowered = (body or "").lower()
     return [k for k in checks if k in lowered]
 
@@ -1449,7 +1452,7 @@ def _article_quality_summary(draft: ContentArticleDraft) -> dict[str, float | st
     generic_slug_penalty = 18 if (draft.slug or "") in {"compass-grill-article", "bbq-hebrew-guide"} else 0
     prompt_blob = ((draft.featured_image_prompt or "") + " " + (draft.section_image_prompts_json or "")).lower()
     generic_prompt_penalty = 15 if not any(t in prompt_blob for t in ["wood", "chips", "smoke", "smoker", "hickory", "oak", "apple"]) else 0
-    technical_bonus = 22 if len(_topic_keywords_detected(body)) >= 5 else 0
+    technical_bonus = 26 if len(_topic_keywords_detected(body)) >= 7 else 0
     structure = max(0.0, structure - generic_slug_penalty - generic_prompt_penalty)
     article_quality = min(100.0, round((seo * 0.18) + (semantic * 0.22) + (suggestion * 0.22) + (structure * 0.38) + technical_bonus, 1))
     readiness = "READY_FOR_REVIEW" if article_quality >= 75 else "NEEDS_IMPROVEMENT"
@@ -3157,6 +3160,24 @@ def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, obje
     provider = get_image_provider()
     draft.featured_image_prompt = build_realistic_hero_prompt(draft.featured_image_prompt)
     result = provider.generate_hero_image(draft.featured_image_prompt, draft_slug=draft.slug)
+    logger.info(
+        "Image provider response for draft_id=%s slug=%s provider=%s status=%s image_url=%s",
+        draft.id,
+        draft.slug,
+        result.provider,
+        result.status,
+        result.image_url,
+    )
+    if result.status == "generated" and not result.image_url:
+        logger.error(
+            "Image provider returned generated status without URL for draft_id=%s provider=%s",
+            draft.id,
+            result.provider,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Image provider reported success without image URL.",
+        )
     draft.featured_image_status = result.status
     draft.image_publish_status = "NOT_PUBLISHED"
     draft.generated_image_url = result.image_url
