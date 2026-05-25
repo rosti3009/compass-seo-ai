@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from app.services.content_articles import _semantic_topic_match_score
 from app.services.image_generation import build_realistic_hero_prompt, get_image_provider
 from app.services.seo_quality_decision import evaluate_seo_text
@@ -38,10 +40,30 @@ def test_image_provider_safely_disabled_and_prompt_realistic(monkeypatch) -> Non
     assert "no unrealistic meat" in prompt
 
 
-def test_stub_provider_returns_https_url_when_enabled(monkeypatch) -> None:
+def test_openai_provider_writes_non_empty_local_png(monkeypatch) -> None:
+    class _Resp:
+        class D:
+            b64_json = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4KDa8PAAAAAElFTkSuQmCC"
+
+        data = [D()]
+
+    class _Images:
+        @staticmethod
+        def generate(**_kwargs):
+            return _Resp()
+
+    class _Client:
+        images = _Images()
+
     monkeypatch.setattr("app.services.image_generation.settings.image_provider", "openai")
+    monkeypatch.setattr("app.services.image_generation.settings.openai_api_key", "test-key")
+    monkeypatch.setattr("app.services.image_generation.OpenAI", lambda api_key: _Client())
     provider = get_image_provider()
-    result = provider.generate_hero_image("bbq", draft_slug="test")
+    result = provider.generate_hero_image("bbq", draft_slug="test-openai-local")
     assert result.enabled is True
+    assert result.provider == "openai"
     assert result.image_url is not None
-    assert result.image_url.startswith("https://")
+    assert result.image_url.startswith("/static/generated-images/")
+    image_path = Path(f"app{result.image_url}")
+    assert image_path.exists()
+    assert image_path.stat().st_size > 0

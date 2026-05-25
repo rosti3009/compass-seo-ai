@@ -3205,6 +3205,22 @@ def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, obje
                 "diagnostics": diagnostics,
             },
         )
+    if result.status == "failed":
+        logger.warning(
+            "Image provider failed for draft_id=%s provider=%s error=%s diagnostics=%s",
+            draft.id,
+            result.provider,
+            result.error,
+            diagnostics,
+        )
+        return JSONResponse(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            content={
+                "success": False,
+                "error": result.error or "Image generation failed",
+                "diagnostics": diagnostics,
+            },
+        )
     draft.featured_image_status = result.status
     draft.image_publish_status = "NOT_PUBLISHED"
     draft.generated_image_url = result.image_url
