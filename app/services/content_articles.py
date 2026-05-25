@@ -41,6 +41,27 @@ SLUG_OVERRIDES = {
     "ההבדל בין פחם קוקוס לפחם עץ": "coconut-charcoal-vs-wood-charcoal",
     "איך לבחור מדחום לבשר": "how-to-choose-meat-thermometer",
     "טאבון גז מול טאבון עצים": "tabun-gas-vs-tabun-wood",
+    "איך להכין כנפיים קריספיות על הגריל": "crispy-grilled-wings",
+    "כנפיים על הגריל": "crispy-grilled-wings",
+    "כנפיים קריספיות": "crispy-grilled-wings",
+    "אבני בזלת לגריל": "basalt-stones-for-gas-grill",
+    "שבבי עץ לעישון": "wood-chips-for-smoking-meat",
+    "עישון בריסקט": "brisket-smoking-guide",
+    "פיקניה על הגריל": "picanha-on-grill",
+    "נייר קצבים לעישון": "butcher-paper-for-smoking-meat",
+}
+
+TOPIC_ROUTING = {
+    "wings": ["כנפיים", "קריספ"],
+    "basalt": ["אבני בזלת", "בזלת", "לבה"],
+    "wood_chips": ["שבבי עץ", "עישון", "smoker"],
+    "brisket": ["בריסקט"],
+    "picanha": ["פיקניה"],
+    "gas_grill": ["גריל גז"],
+    "tabun": ["טאבון"],
+    "butcher_paper": ["נייר קצבים"],
+    "thermometer": ["מדחום לבשר", "מדחום"],
+    "charcoal": ["פחם קוקוס", "פחם עץ", "פחם"],
 }
 
 def _today_in_timezone(timezone: str) -> date:
@@ -72,7 +93,15 @@ def _fallback_topic_slug(keyword: str, title: str) -> tuple[str, str]:
     mapped = SLUG_OVERRIDES.get(title)
     if mapped:
         return mapped, "topic_mapping"
-    return "grill-smoking-guide", "hard_fallback"
+    return "topic-specific-grill-guide", "hard_fallback"
+
+
+def _topic_kind(title: str, keyword: str) -> str:
+    blob = f"{title} {keyword}".lower()
+    for kind, needles in TOPIC_ROUTING.items():
+        if any(n.lower() in blob for n in needles):
+            return kind
+    return "generic"
 
 
 def _remove_h1_tags(html: str) -> tuple[str, bool]:
@@ -176,6 +205,7 @@ def _discover_related_links(db: Session, topic: str, limit: int = 6) -> tuple[li
     out: list[dict[str, str | float]] = []
     terms = _match_terms_for_topic(topic)
     normalized_terms = [_normalize_hebrew(t) for t in terms]
+    excluded_low: list[dict[str, str | float]] = []
     for p in products:
         title = _safe_product_title(p)
         url = _safe_product_url(p)
@@ -190,7 +220,9 @@ def _discover_related_links(db: Session, topic: str, limit: int = 6) -> tuple[li
             score = min(100.0, score + 30)
         if topic == "שבבי עץ לעישון":
             score = min(100.0, score + _wood_link_priority_score(p))
-        if score < 20:
+        if score < 40:
+            if score > 0:
+                excluded_low.append({"title": title, "url": url, "relevance_score": score})
             continue
         out.append({"title": title, "url": url, "semantic_topic_match_score": score, "relatedness_score": score, "relevance_score": score})
     out.sort(key=lambda item: float(item.get("semantic_topic_match_score", 0)), reverse=True)
@@ -204,6 +236,7 @@ def _discover_related_links(db: Session, topic: str, limit: int = 6) -> tuple[li
         "best_match_title": best.get("title"),
         "best_match_url": best.get("url"),
         "best_match_score": best.get("semantic_topic_match_score", 0),
+        "excluded_low_relevance_links": excluded_low[:10],
     }
     return trimmed, debug
 
@@ -228,6 +261,19 @@ def _safe_product_url(product: object) -> str:
 
 
 def _build_article_html(title: str, keyword: str, related: list[dict[str, str | float]]) -> str:
+    if _topic_kind(title, keyword) == "wings":
+        return (
+            "<p>כנפיים על הגריל יוצאות קריספיות רק כששולטים ביובש, חום ותזמון גלייז. הנה שיטה מדויקת שעובדת.</p>\n"
+            "<h2>ייבוש לפני הצלייה הוא המפתח לעור קריספי</h2><p>יבשו את הכנפיים היטב עם נייר סופג והשאירו 30–120 דקות חשופות במקרר לייבוש פני שטח.</p>\n"
+            "<h2>שיטת בייקינג פאודר / קורנפלור (אופציונלי)</h2><p>ערבבו מעט בייקינג פאודר ללא אלומיניום או קורנפלור בתיבול היבש לשיפור קריספיות העור.</p>\n"
+            "<h2>חום ישיר מול עקיף</h2><p>התחילו באזור עקיף כדי לבשל אחיד, ואז העבירו לחום ישיר קצר לצריבה וקריספינג.</p>\n"
+            "<h2>טמפרטורת יעד פנימית בטוחה</h2><p>הכנפיים חייבות להגיע לפחות ל-74°C בחלק העבה ליד העצם.</p>\n"
+            "<h2>שלב הקריספינג בסוף</h2><p>בסיום, 1–2 דקות לכל צד מעל אש ישירה לקבלת עור זהוב-חום וקריספי.</p>\n"
+            "<h2>רוטב/גלייז רק בסוף</h2><p>סוכרים נשרפים מהר. מוסיפים גלייז רק בדקות האחרונות כדי להימנע מטעם מר ושרוף.</p>\n"
+            "<h3>איך להימנע מסוכר שרוף?</h3><p>מדללים גלייז מתוק, מברישים שכבה דקה, ומרחיקים מהלהבה הגבוהה.</p>\n"
+            "<h3>כמה מנוחה צריך?</h3><p>מנוחה קצרה בלבד: 2–3 דקות. כנפיים לא צריכות מנוחה ארוכה כמו סטייק.</p>\n"
+            "<h3>FAQ לכנפיים</h3><p>האם אפשר בלי בייקינג פאודר? כן. פשוט להאריך ייבוש וקריספינג ישיר.</p>\n"
+        )
     if keyword == "שבבי עץ לעישון":
         links_html = "".join([f"<li><a href='{p['url']}'>{p['title']}</a></li>" for p in related[:4]])
         return (
@@ -302,10 +348,15 @@ def generate_daily_article_draft(db: Session, *, randomize: bool = False) -> tup
             {"@type": "Question", "name": "מתי מוסיפים רוטב או גלייז?", "acceptedAnswer": {"@type": "Answer", "text": "בשלב הסופי כדי למנוע שריפה."}},
         ],
     }
+    kind = _topic_kind(title, keyword)
     section_prompts = [
-        {"section": "פתיח", "placement_hint": "[IMAGE_1_HERE]", "prompt": "Close-up of different wood chip types by texture and color (Hickory, Oak, Apple, Mesquite, Cherry), physically separated piles, no text in image, realistic studio lighting"},
-        {"section": "שלב-אחר-שלב", "placement_hint": "[IMAGE_2_HERE]", "prompt": "Smoker box filled with wood chips producing thin blue smoke inside a grill smoker chamber, realistic BBQ photo, no text"},
+        {"section": "פתיח", "placement_hint": "[IMAGE_1_HERE]", "prompt": f"realistic outdoor grill photo about {keyword}, no text, no logos"},
     ]
+    featured_prompt = {
+        "wings": "crispy chicken wings on grill grates, golden brown skin, BBQ glaze on side, smoke, realistic outdoor grill photography, no text, no logos",
+        "basalt": "realistic close-up of black basalt lava stones inside a gas grill, glowing heat, steak grilling above, outdoor BBQ, natural light, ultra realistic, no text, no logos",
+        "wood_chips": "wood chips in smoker box with thin blue smoke inside grill smoker, meat in background, realistic BBQ photography, no text, no logos",
+    }.get(kind, f"realistic outdoor grill photography focused on {keyword}, no text, no logos")
     draft = ContentArticleDraft(
         status="CONTENT_DRAFT", topic_title=title, title=title, slug=slug,
         meta_title=f"{title} | Compass Grill",
@@ -315,7 +366,7 @@ def generate_daily_article_draft(db: Session, *, randomize: bool = False) -> tup
         internal_links_json=json.dumps(related, ensure_ascii=False),
         faq_schema_json=json.dumps(faq_schema, ensure_ascii=False),
         section_image_prompts_json=json.dumps(section_prompts, ensure_ascii=False),
-        featured_image_prompt="wood chips in smoker box with thin blue smoke inside grill smoker, meat in background, realistic BBQ photography",
+        featured_image_prompt=featured_prompt,
         image_alt_text=f"{title} - הדגמה על גריל", image_title=f"תמונת שער: {title}", image_caption="הדגמה מעשית של השיטה במאמר.",
         image_filename_slug=f"compass-grill-{slug}", image_style_rules="realistic outdoor BBQ photography",
         generated_image_url=None, uploaded_media_id=None, image_publish_status="NOT_PUBLISHED",
@@ -343,10 +394,13 @@ def generate_topic_article_draft(
         {"section": "פתיח", "placement_hint": "[IMAGE_1_HERE]", "prompt": "Close-up of different wood chip types by texture and color (Hickory, Oak, Apple, Mesquite, Cherry), physically separated piles, no text in image, realistic studio lighting"},
         {"section": "שלב-אחר-שלב", "placement_hint": "[IMAGE_2_HERE]", "prompt": "Smoker box filled with wood chips producing thin blue smoke inside a grill smoker chamber, realistic BBQ photo, no text"},
     ]
-    featured_prompt = "wood chips in smoker box with thin blue smoke inside grill smoker, meat in background, realistic BBQ photography"
-    basalt_topic = "אבני בזלת לגריל"
-    if basalt_topic in topic_title or basalt_topic in focus_keyword:
-        featured_prompt = "realistic close-up of black basalt lava stones inside a gas grill, glowing heat, steak grilling above, outdoor BBQ, natural light, ultra realistic, no text, no logos"
+    kind = _topic_kind(topic_title, focus_keyword)
+    prompt_map = {
+        "wings": "crispy chicken wings on grill grates, golden brown skin, BBQ glaze on side, smoke, realistic outdoor grill photography, no text, no logos",
+        "basalt": "realistic close-up of black basalt lava stones inside a gas grill, glowing heat, steak grilling above, outdoor BBQ, natural light, ultra realistic, no text, no logos",
+        "wood_chips": "wood chips in smoker box with thin blue smoke inside grill smoker, meat in background, realistic BBQ photography, no text, no logos",
+    }
+    featured_prompt = prompt_map.get(kind, "realistic outdoor grill photography focused on the specific topic ingredient/tool, no text, no logos")
     draft = ContentArticleDraft(
         status="CONTENT_DRAFT", topic_title=topic_title, title=topic_title, slug=slug,
         meta_title=f"{topic_title} | Compass Grill",
