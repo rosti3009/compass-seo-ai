@@ -248,6 +248,44 @@ async function runSimpleBulkApprove(button) {
   await runDashboardAction(button);
 }
 
+function renderArticlePreview(card, draft) {
+  const container = card.querySelector("[data-preview-container]");
+  if (!container) return;
+  const imageUrl = draft.generated_image_url || draft.featured_image_url || "";
+  const markers = `${draft.article_body || ""}\n[IMAGE_1_HERE]\n[IMAGE_2_HERE]`;
+  const previewHtml = `<article><h1>${escapeHtml(draft.title || "")}</h1>${imageUrl ? `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(draft.image_alt_text || "")}" style="max-width:320px;height:auto"/>` : ""}<div>${draft.article_body || ""}</div><pre>${escapeHtml(markers)}</pre></article>`;
+  container.innerHTML = previewHtml;
+  card.dataset.fullHtml = `<h1>${draft.title || ""}</h1>${imageUrl ? `<img src="${imageUrl}" alt="${draft.image_alt_text || ""}">` : ""}${draft.article_body || ""}`;
+  card.dataset.cleanHtml = draft.article_body || "";
+  card.dataset.previewHtml = markers;
+}
+
+async function runManualImageAction(button, action) {
+  const card = button.closest("[data-article-id]");
+  if (!card) return;
+  const feedback = card.querySelector("[data-image-feedback]");
+  const draftId = button.dataset.draftId;
+  const loadingText = action === "plan" ? "מכין תכנון תמונה..." : "יוצר תמונה...";
+  const endpoint = action === "plan" ? `/content/articles/${draftId}/generate-image-plan` : `/content/articles/${draftId}/generate-image`;
+  button.disabled = true;
+  if (feedback) feedback.textContent = loadingText;
+  try {
+    const response = await fetch(endpoint, { method: "POST", headers: { Accept: "application/json" } });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || "הפעולה נכשלה");
+    const draft = payload.draft || {};
+    renderArticlePreview(card, draft);
+    if (feedback) feedback.textContent = action === "plan" ? "תכנון התמונה עודכן בהצלחה" : "התמונה נוצרה בהצלחה";
+    if (action === "image" && draft.generated_image_url && feedback) {
+      feedback.innerHTML = `התמונה נוצרה בהצלחה · <a href="${escapeHtml(draft.generated_image_url)}" target="_blank" rel="noopener">פתיחה/הורדה</a>`;
+    }
+  } catch (error) {
+    if (feedback) feedback.textContent = `שגיאה: ${error.message}`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function bindOperations(root = document) {
   root.querySelectorAll("[data-action='fetch']:not([data-bound='true']), [data-action='confirm-fetch']:not([data-bound='true'])").forEach((button) => {
     button.dataset.bound = "true";
@@ -285,6 +323,30 @@ function bindOperations(root = document) {
       button.textContent = "הועתק ✓";
       setTimeout(() => { button.textContent = original; }, 1200);
     });
+  });
+  root.querySelectorAll("[data-action='generate-image-plan']:not([data-bound='true'])").forEach((button) => {
+    button.dataset.bound = "true";
+    button.addEventListener("click", () => runManualImageAction(button, "plan"));
+  });
+  root.querySelectorAll("[data-action='generate-image']:not([data-bound='true'])").forEach((button) => {
+    button.dataset.bound = "true";
+    button.addEventListener("click", () => runManualImageAction(button, "image"));
+  });
+  root.querySelectorAll("[data-action='copy-html']:not([data-bound='true'])").forEach((button) => {
+    button.dataset.bound = "true";
+    button.addEventListener("click", async () => {
+      const card = button.closest("[data-article-id]");
+      if (!card) return;
+      const key = button.dataset.copyType === "full" ? "fullHtml" : button.dataset.copyType === "clean" ? "cleanHtml" : "previewHtml";
+      await navigator.clipboard.writeText(card.dataset[key] || "");
+    });
+  });
+  root.querySelectorAll("[data-article-id]").forEach((card) => {
+    if (card.dataset.previewInit === "true") return;
+    card.dataset.previewInit = "true";
+    const title = card.querySelector("h3")?.textContent || "";
+    const body = card.querySelector("details div")?.innerHTML || "";
+    renderArticlePreview(card, { title, article_body: body });
   });
   applyDiffHighlights(root);
   bindReviewFilters(root);

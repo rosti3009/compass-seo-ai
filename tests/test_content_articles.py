@@ -56,7 +56,16 @@ def test_generate_article_defaults_and_image_plan(client: TestClient) -> None:
     assert draft['image_publish_status'] == 'NOT_PUBLISHED'
     image_plan = client.post(f"/content/articles/{draft['id']}/generate-image-plan")
     assert image_plan.status_code == 200
-    assert image_plan.json()['image_generation_enabled'] is False
+    assert image_plan.json()['message_he'] == 'תכנון התמונה עודכן בהצלחה'
+
+
+def test_generate_article_image_uses_provider(client: TestClient) -> None:
+    draft = client.post('/content/articles/generate-daily-draft').json()['draft']
+    response = client.post(f"/content/articles/{draft['id']}/generate-image")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['image_generation_enabled'] is False
+    assert payload['draft']['featured_image_status'] == 'planned'
 
 
 def test_publish_blocks_and_dry_run(client: TestClient) -> None:
