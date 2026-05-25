@@ -37,6 +37,7 @@ class IStoreBrowserCreateResult:
     screenshot_path: str | None
     selector_availability: dict[str, object] | None = None
     planned_fields: dict[str, object] | None = None
+    dom_diagnostics: dict[str, object] | None = None
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -56,6 +57,78 @@ def _safe_title(page: object) -> str:
     except Exception:  # noqa: BLE001
         return ""
 
+
+
+
+def _safe_wait_ms() -> int:
+    value = getattr(settings, "istore_browser_wait_ms", 1000)
+    try:
+        wait_ms = int(value)
+    except (TypeError, ValueError):
+        wait_ms = 1000
+    return max(wait_ms, 0)
+
+
+def _collect_dom_diagnostics(page: object) -> dict[str, object]:
+    script = """
+() => {
+  const preview = (value) => {
+    const text = (value ?? '').toString();
+    if (!text) return '';
+    return `[REDACTED len=${text.length}]`;
+  };
+
+  const attrs = (el) => ({
+    tag: (el.tagName || '').toLowerCase(),
+    type: el.getAttribute('type') || '',
+    name: el.getAttribute('name') || '',
+    id: el.id || '',
+    placeholder: el.getAttribute('placeholder') || '',
+    'aria-label': el.getAttribute('aria-label') || '',
+    class: el.className || '',
+    value_preview: preview(el.value),
+  });
+
+  const buttonAttrs = (el) => ({
+    text: (el.innerText || '').trim().slice(0, 200),
+    name: el.getAttribute('name') || '',
+    type: el.getAttribute('type') || '',
+    class: el.className || '',
+  });
+
+  const simpleAttrs = (el) => ({
+    tag: (el.tagName || '').toLowerCase(),
+    name: el.getAttribute('name') || '',
+    id: el.id || '',
+    placeholder: el.getAttribute('placeholder') || '',
+    'aria-label': el.getAttribute('aria-label') || '',
+    class: el.className || '',
+  });
+
+  const inputs = Array.from(document.querySelectorAll('input'));
+  const textareas = Array.from(document.querySelectorAll('textarea'));
+  const buttons = Array.from(document.querySelectorAll('button'));
+  const selects = Array.from(document.querySelectorAll('select'));
+  const contentEditable = Array.from(document.querySelectorAll('[contenteditable=""], [contenteditable="true"]'));
+
+  return {
+    page_title: document.title || '',
+    current_url: window.location.href || '',
+    total_inputs: inputs.length,
+    total_textareas: textareas.length,
+    total_buttons: buttons.length,
+    total_selects: selects.length,
+    total_contenteditable: contentEditable.length,
+    inputs: inputs.slice(0, 50).map(attrs),
+    textareas: textareas.slice(0, 30).map(simpleAttrs),
+    buttons: buttons.slice(0, 30).map(buttonAttrs),
+    selects: selects.slice(0, 20).map(simpleAttrs),
+    contenteditable: contentEditable.slice(0, 20).map(simpleAttrs),
+    visible_text_sample: (document.body?.innerText || '').slice(0, 3000),
+  };
+}
+"""
+    return page.evaluate(script)
 
 def _infer_state(current_url: str, title: str, content: str) -> tuple[bool, bool, bool]:
     lowered_url = current_url.lower()
@@ -111,6 +184,7 @@ def check_istore_browser_status() -> IStoreBrowserStatus:
             page = context.new_page()
             page.set_default_timeout(settings.istore_browser_timeout_ms)
             page.goto(CREATE_PAGE_URL, wait_until="domcontentloaded")
+            page.wait_for_timeout(_safe_wait_ms())
 
             current_url = page.url or ""
             title = _safe_title(page)
@@ -220,6 +294,7 @@ def create_shop_information_page(payload: dict[str, object], dry_run: bool = Tru
             page = context.new_page()
             page.set_default_timeout(settings.istore_browser_timeout_ms)
             page.goto(CREATE_PAGE_URL, wait_until="domcontentloaded")
+            page.wait_for_timeout(_safe_wait_ms())
             current_url = page.url or ""
             title = _safe_title(page)
             content = page.content()
@@ -234,6 +309,8 @@ def create_shop_information_page(payload: dict[str, object], dry_run: bool = Tru
                     None,
                 )
 
+            dom_diagnostics = _collect_dom_diagnostics(page)
+
             selector_availability: dict[str, object] = {}
             for key, selectors in selector_matrix.items():
                 available = None
@@ -244,7 +321,17 @@ def create_shop_information_page(payload: dict[str, object], dry_run: bool = Tru
                 selector_availability[key] = {"found": bool(available), "selector": available, "candidates": selectors}
 
             if dry_run:
-                return IStoreBrowserCreateResult(True, page.url or "", None, False, None, None, selector_availability, planned_fields)
+                return IStoreBrowserCreateResult(
+                    True,
+                    page.url or "",
+                    None,
+                    False,
+                    None,
+                    None,
+                    selector_availability,
+                    planned_fields,
+                    dom_diagnostics,
+                )
 
             def fill_with_value(field_key: str, value: str) -> None:
                 selected = selector_availability.get(field_key, {})
@@ -299,6 +386,7 @@ def create_shop_information_page(payload: dict[str, object], dry_run: bool = Tru
                 screenshot_path=str(screenshot_path) if screenshot_path.exists() else None,
                 selector_availability=selector_availability,
                 planned_fields=planned_fields,
+                dom_diagnostics=dom_diagnostics,
             )
     except PlaywrightError as exc:
         return IStoreBrowserCreateResult(False, "", None, False, f"Playwright runtime error: {exc}", None)
