@@ -1769,6 +1769,10 @@ def debug_istore_create_dry_run(draft_id: int, db: DatabaseSession) -> dict[str,
         "headers": contract.get("headers", {}),
         "payload": contract.get("payload", {}),
         "cookie_names": contract.get("cookie_names", []),
+        "duplicate_cookie_names": contract.get("duplicate_cookie_names", []),
+        "cookie_source": contract.get("cookie_source", "parsed"),
+        "xsrf_source": contract.get("xsrf_source", "parsed"),
+        "cookie_count": contract.get("cookie_count", 0),
         "xsrf_length": contract.get("xsrf_length", 0),
     }
 

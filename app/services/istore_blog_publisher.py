@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qs, urljoin, urlparse
@@ -58,6 +59,8 @@ class IStoreAdminShopInformationPublisher:
         self.blog_is_blog = blog_is_blog
         self.timeout_seconds = timeout_seconds
         self.session = session or requests.Session()
+        self.raw_cookie_header = (settings.istore_raw_cookie_header or "").strip()
+        self.xsrf_token_override = (settings.istore_xsrf_token_override or "").strip()
 
     @classmethod
     def from_settings(cls) -> IStoreAdminShopInformationPublisher:
@@ -132,13 +135,17 @@ class IStoreAdminShopInformationPublisher:
         headers = self._build_create_headers(sanitize=False)
         sanitized_contract = self._sanitized_request_contract(payload)
         logger.info(
-            "[ISTORE BLOG PUBLISH] sanitized request contract: endpoint=%s payload_keys=%s language_id=%s is_blog=%s has_cookie=%s cookie_names=%s has_xsrf=%s has_inertia_version=%s",
+            "[ISTORE BLOG PUBLISH] sanitized request contract: endpoint=%s payload_keys=%s language_id=%s is_blog=%s has_cookie=%s cookie_names=%s duplicate_cookie_names=%s cookie_source=%s cookie_count=%s xsrf_source=%s has_xsrf=%s has_inertia_version=%s",
             sanitized_contract["endpoint"],
             sorted((sanitized_contract.get("payload") or {}).keys()),
             self.language_id,
             (sanitized_contract.get("payload") or {}).get("is_blog"),
             bool(sanitized_contract.get("cookie_names")),
             sanitized_contract.get("cookie_names"),
+            sanitized_contract.get("duplicate_cookie_names"),
+            sanitized_contract.get("cookie_source"),
+            sanitized_contract.get("cookie_count"),
+            sanitized_contract.get("xsrf_source"),
             sanitized_contract.get("xsrf_token_present"),
             sanitized_contract.get("inertia_version_present"),
         )
@@ -170,12 +177,14 @@ class IStoreAdminShopInformationPublisher:
         )
 
     def _build_create_headers(self, sanitize: bool) -> dict[str, str]:
+        cookie_header = self.raw_cookie_header or self.admin_cookie
+        xsrf_token = self.xsrf_token_override or self.xsrf_token
         headers = {
             "Accept": "text/html, application/xhtml+xml",
             "Content-Type": "application/json",
             "X-Inertia": "true",
             "X-Requested-With": "XMLHttpRequest",
-            "X-XSRF-TOKEN": self.xsrf_token,
+            "X-XSRF-TOKEN": xsrf_token,
             "Referer": urljoin(self.base_url, CREATE_REDIRECT_PATH.lstrip("/")),
             "Origin": self.base_url.rstrip("/"),
             "User-Agent": (
@@ -183,7 +192,7 @@ class IStoreAdminShopInformationPublisher:
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/125.0.0.0 Safari/537.36"
             ),
-            "Cookie": self.admin_cookie,
+            "Cookie": cookie_header,
         }
         if settings.istore_inertia_version:
             headers["X-Inertia-Version"] = settings.istore_inertia_version
@@ -197,12 +206,25 @@ class IStoreAdminShopInformationPublisher:
     def _sanitized_request_contract(self, payload: dict[str, Any]) -> dict[str, Any]:
         headers = self._build_create_headers(sanitize=False)
         cookie_names = self._cookie_names(headers.get("Cookie", ""))
+        duplicate_cookie_names = self._duplicate_cookie_names(cookie_names)
+        cookie_source = "raw_header" if self.raw_cookie_header else "parsed"
+        xsrf_source = "override" if self.xsrf_token_override else "parsed"
+        if duplicate_cookie_names:
+            logger.warning(
+                "[ISTORE BLOG PUBLISH] duplicate cookie names detected: %s (source=%s)",
+                duplicate_cookie_names,
+                cookie_source,
+            )
         return {
             "endpoint": CREATE_REDIRECT_PATH,
             "method": "POST",
             "headers": self._sanitize_headers_for_debug(headers),
             "payload": payload,
             "cookie_names": cookie_names,
+            "duplicate_cookie_names": duplicate_cookie_names,
+            "cookie_source": cookie_source,
+            "xsrf_source": xsrf_source,
+            "cookie_count": len(cookie_names),
             "xsrf_token_present": bool(headers.get("X-XSRF-TOKEN")),
             "xsrf_length": len(headers.get("X-XSRF-TOKEN", "")),
             "inertia_version_present": bool(headers.get("X-Inertia-Version")),
@@ -225,6 +247,10 @@ class IStoreAdminShopInformationPublisher:
             if name:
                 names.append(name)
         return names
+
+    def _duplicate_cookie_names(self, cookie_names: list[str]) -> list[str]:
+        counts = Counter(cookie_names)
+        return sorted([name for name, count in counts.items() if count > 1])
 
     def _validate_create_payload(self, payload: dict[str, Any]) -> None:
         language_id = str(self.language_id)

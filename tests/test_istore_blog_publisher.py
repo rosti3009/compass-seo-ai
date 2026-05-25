@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.core.config import settings
 from app.services.istore_blog_publisher import (
     IStoreAdminShopInformationPublisher,
     IStoreBlogPublishError,
@@ -93,9 +94,31 @@ def test_dry_run_shows_payload_without_tokens_or_cookies() -> None:
     assert out["headers"]["Cookie"] == "[REDACTED]"
     contract = out["request_contract"]
     assert contract["cookie_names"] == ["session"]
+    assert contract["duplicate_cookie_names"] == []
+    assert contract["cookie_source"] == "parsed"
+    assert contract["xsrf_source"] == "parsed"
+    assert contract["cookie_count"] == 1
     assert contract["xsrf_length"] == len("token123")
     assert contract["xsrf_token_present"] is True
     assert contract["inertia_version_present"] is False
+
+
+def test_dry_run_supports_raw_cookie_header_and_xsrf_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    publisher = _publisher()
+    monkeypatch.setattr(
+        "app.services.istore_blog_publisher.settings.istore_raw_cookie_header",
+        "istores_session=aaa; XSRF-TOKEN=111; istores_session=bbb; XSRF-TOKEN=222",
+    )
+    monkeypatch.setattr("app.services.istore_blog_publisher.settings.istore_xsrf_token_override", "OVERRIDE")
+    publisher.raw_cookie_header = settings.istore_raw_cookie_header or ""
+    publisher.xsrf_token_override = settings.istore_xsrf_token_override or ""
+
+    contract = publisher.publish(_Draft(), dry_run=True)["request_contract"]
+    assert contract["cookie_names"] == ["istores_session", "XSRF-TOKEN", "istores_session", "XSRF-TOKEN"]
+    assert contract["duplicate_cookie_names"] == ["XSRF-TOKEN", "istores_session"]
+    assert contract["cookie_source"] == "raw_header"
+    assert contract["xsrf_source"] == "override"
+    assert contract["cookie_count"] == 4
 
 
 def test_from_settings_fails_without_admin_cookie(monkeypatch: pytest.MonkeyPatch) -> None:
