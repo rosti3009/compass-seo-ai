@@ -36,6 +36,7 @@ class IStoreCreateResult:
     location: str
     status_code: int
     response_url: str
+    diagnostics: dict[str, Any]
 
 
 CREATE_REDIRECT_PATH = "/client/shop_information/create"
@@ -196,17 +197,33 @@ class IStoreAdminShopInformationPublisher:
             submit_mode,
             headers.get("Content-Type", "[auto]"),
         )
-        response = self.session.post(url, headers=headers, timeout=self.timeout_seconds, allow_redirects=False, **request_kwargs)
-        self._log_create_response(response, submit_mode)
+        follow_redirects = bool(settings.istore_create_follow_redirects)
+        response = self.session.post(
+            url,
+            headers=headers,
+            timeout=self.timeout_seconds,
+            allow_redirects=follow_redirects,
+            **request_kwargs,
+        )
+        diagnostics = self._build_create_diagnostics(
+            response=response,
+            submit_mode=submit_mode,
+            payload=payload,
+            headers=headers,
+            follow_redirects=follow_redirects,
+        )
+        self._log_create_response(diagnostics)
         if response.status_code != 302:
             raise IStoreBlogPublishError(
-                f"ISTORE admin create failed: expected 302 redirect, got HTTP {response.status_code}"
+                "ISTORE admin create failed: expected 302 redirect, got HTTP "
+                f"{response.status_code}; diagnostics={diagnostics}"
             )
 
         location = response.headers.get("Location", "")
-        if self._is_create_form_redirect(location):
+        if self._is_create_form_redirect(location) or self._is_create_form_redirect(getattr(response, "url", "")):
             raise IStoreBlogPublishError(
-                "ISTORE rejected create request. Compare manual request contract with /debug/istore/create-dry-run."
+                "ISTORE rejected create request. Compare manual request contract with /debug/istore/create-dry-run. "
+                f"diagnostics={diagnostics}"
             )
 
         external_content_id = self._extract_shop_information_id(location, response)
@@ -221,6 +238,7 @@ class IStoreAdminShopInformationPublisher:
             location=location,
             status_code=response.status_code,
             response_url=getattr(response, "url", ""),
+            diagnostics=diagnostics,
         )
 
     def _build_create_headers(self, sanitize: bool) -> dict[str, str]:
@@ -422,23 +440,52 @@ class IStoreAdminShopInformationPublisher:
                     return extracted
         return None
 
-    def _log_create_response(self, response: requests.Response, submit_mode: str) -> None:
-        safe_text = self._sanitize((getattr(response, "text", "") or "")[:500])
-        diagnostic_headers = {
+    def _build_create_diagnostics(
+        self,
+        response: requests.Response,
+        submit_mode: str,
+        payload: dict[str, Any],
+        headers: dict[str, str],
+        follow_redirects: bool,
+    ) -> dict[str, Any]:
+        set_cookie_names = [cookie.split("=", 1)[0].strip() for cookie in response.headers.get("Set-Cookie", "").split(",") if cookie.strip()]
+        diagnostics: dict[str, Any] = {
+            "status_code": response.status_code,
             "location": self._sanitize(response.headers.get("Location", "")),
-            "content-type": self._sanitize(response.headers.get("Content-Type", "")),
-            "x-inertia": self._sanitize(response.headers.get("X-Inertia", "")),
-            "set-cookie": self._sanitize(response.headers.get("Set-Cookie", "")),
+            "response_url": self._sanitize(getattr(response, "url", "")),
+            "response_headers": {
+                "content-type": self._sanitize(response.headers.get("Content-Type", "")),
+                "x-inertia": self._sanitize(response.headers.get("X-Inertia", "")),
+                "vary": self._sanitize(response.headers.get("Vary", "")),
+                "set-cookie-names": sorted({name for name in set_cookie_names if name}),
+                "cf-ray": self._sanitize(response.headers.get("CF-Ray", "")),
+                "server": self._sanitize(response.headers.get("Server", "")),
+            },
+            "response_text": self._sanitize((getattr(response, "text", "") or "")[:3000]),
+            "outgoing": {
+                "final_url": self._sanitize(getattr(response, "url", "")),
+                "submit_mode": submit_mode,
+                "minimal_payload": bool(settings.istore_create_minimal_payload),
+                "use_browser_headers": bool(settings.istore_use_browser_headers),
+                "estimated_json_length": len(json_dumps(payload, ensure_ascii=False)),
+                "header_names": sorted([k for k, v in headers.items() if v]),
+                "cookie_source": "raw_header" if (settings.istore_raw_cookie_header or "").strip() else "parsed",
+                "xsrf_source": "override" if (settings.istore_xsrf_token_override or "").strip() else "parsed",
+                "follow_redirects": follow_redirects,
+            },
         }
-        logger.info(
-            "ISTORE create response: submit_mode=%s status_code=%s location=%s response_url=%s response_headers=%s response_text=%s",
-            submit_mode,
-            response.status_code,
-            diagnostic_headers["location"],
-            self._sanitize(getattr(response, "url", "")),
-            diagnostic_headers,
-            safe_text,
-        )
+        if follow_redirects:
+            title_match = re.search(r"<title[^>]*>(.*?)</title>", getattr(response, "text", "") or "", re.IGNORECASE | re.DOTALL)
+            diagnostics["follow_redirect_result"] = {
+                "status_code": response.status_code,
+                "final_url": self._sanitize(getattr(response, "url", "")),
+                "title": self._sanitize((title_match.group(1).strip() if title_match else "")),
+                "response_text": self._sanitize((getattr(response, "text", "") or "")[:3000]),
+            }
+        return diagnostics
+
+    def _log_create_response(self, diagnostics: dict[str, Any]) -> None:
+        logger.info("ISTORE create response diagnostics: %s", diagnostics)
 
     def _sanitize(self, value: str) -> str:
         if not value:

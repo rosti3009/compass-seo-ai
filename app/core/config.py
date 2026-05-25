@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     istore_create_submit_mode: str = "form"
     istore_create_minimal_payload: bool = False
     istore_use_browser_headers: bool = False
+    istore_create_follow_redirects: bool = False
     istore_language_id: int = 3
     istore_blog_is_blog: int = 0
     openai_api_key: str | None = None
