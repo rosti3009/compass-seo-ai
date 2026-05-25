@@ -179,7 +179,25 @@
           <p><strong>קישורים פנימיים:</strong> {{ article.internal_links }}</p>
           <p><strong>סטטוס:</strong> {{ article.status }}</p>
           <p><strong>המאמר יעלה ל:</strong> <span dir="ltr">{{ article.target_url }}</span></p>
-          <p><strong>מוצרים מוצעים:</strong> {{ article.suggested_related_products }}</p>
+          <div class="manual-upload-card">
+            <h5>מוצרים/קישורים רלוונטיים</h5>
+            {% set products = article.suggested_related_products or [] %}
+            {% if products %}
+              <ul>
+              {% for product in products %}
+                <li>
+                  <strong>{{ product.title }}</strong>
+                  · <a href="{{ product.url }}" target="_blank" rel="noopener" dir="ltr">{{ product.url }}</a>
+                  · ציון רלוונטיות: {{ product.relevance_score or product.semantic_topic_match_score or 0 }}
+                  <button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ product.url }}">Copy product URL</button>
+                  <button type="button" class="secondary-button" data-action="copy-text" data-copy-text='<a href="{{ product.url }}">{{ product.title }}</a>'>Copy link HTML</button>
+                </li>
+              {% endfor %}
+              </ul>
+            {% else %}
+              <p class="empty">לא נמצאו מוצרים רלוונטיים.</p>
+            {% endif %}
+          </div>
           <p><strong>prompt לתמונה ראשית:</strong> {{ article.featured_image_prompt }}</p>
           <p><strong>טקסט ALT:</strong> {{ article.image_alt_text }}</p>
           <p><strong>כותרת תמונה:</strong> {{ article.image_title }}</p>

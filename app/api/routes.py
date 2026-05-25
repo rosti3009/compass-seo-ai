@@ -1425,6 +1425,7 @@ def _topic_keywords_detected(body: str) -> list[str]:
 def _draft_debug(draft: ContentArticleDraft, slug_source: str = "title") -> dict[str, object]:
     body = draft.article_body or ""
     _, removed = _strip_h1_tags(body)
+    link_debug = getattr(draft, "link_match_debug", {})
     return {
         "generator_version": "v2-topic-specific-2026-05-25",
         "slug_source": slug_source,
@@ -1432,6 +1433,7 @@ def _draft_debug(draft: ContentArticleDraft, slug_source: str = "title") -> dict
         "topic_keywords_detected": _topic_keywords_detected(body),
         "article_template_used": "wood_chips_specialized" if "hickory" in body.lower() else "topic_specific_default",
         "h1_cleanup_was_needed": removed,
+        **(link_debug if isinstance(link_debug, dict) else {}),
     }
 
 
@@ -1706,6 +1708,7 @@ def generate_topic_content_article(payload: ManualTopicArticleRequest, db: Datab
             "meta_description": draft.meta_description,
             "quality": quality,
             "manual_upload_url": manual_upload_url,
+            "debug": _draft_debug(draft, "title"),
         },
     }
 
@@ -1865,6 +1868,14 @@ def publish_content_draft(draft_id: int, db: DatabaseSession, dry_run: bool = Fa
 
 
 
+
+
+@router.get("/debug/internal-link-match")
+def debug_internal_link_match(query: str, db: DatabaseSession) -> dict[str, object]:
+    from app.services.content_articles import _discover_related_links
+
+    matches, debug = _discover_related_links(db, query, limit=10)
+    return {"query": query, "debug": debug, "matches": matches}
 @router.get("/debug/istore/browser-status")
 def debug_istore_browser_status() -> dict[str, object]:
     """Run ISTORE admin browser session check without submitting forms."""

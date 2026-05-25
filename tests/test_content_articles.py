@@ -660,3 +660,72 @@ def test_topic_reuse_after_pool_exhaustion(client: TestClient) -> None:
         reused_flags.append(client.post('/content/articles/generate-random-daily-draft').json()['reused'])
     assert any(flag is False for flag in reused_flags)
     assert reused_flags[-1] is True
+
+def test_basalt_topic_matches_products_and_includes_links(client: TestClient, db_session: Session) -> None:
+    db_session.add(
+        IStoreProduct(
+            istore_product_id="sku-basalt",
+            product_name="אבני בזלת לגריל גז",
+            slug="basalt-lava-stones",
+            product_url="https://compassgrill.co.il/product/basalt-lava-stones",
+        )
+    )
+    db_session.commit()
+
+    response = client.post(
+        "/content/articles/generate-topic-draft",
+        json={
+            "topic_title": "אבני בזלת לגריל – איך הן משפרות צלייה בגריל גז",
+            "focus_keyword": "אבני בזלת לגריל",
+            "target_intent": "commercial_informational",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()["draft"]
+    assert payload["debug"]["matched_product_count"] >= 1
+    assert payload["debug"]["best_match_url"]
+    draft = client.get(f"/content/articles/{payload['draft_id']}").json()["draft"]
+    assert draft["internal_links"]
+    assert draft["suggested_related_products"]
+    assert "<h2>מוצרים רלוונטיים באתר</h2>" in draft["article_body"]
+
+
+def test_basalt_synonyms_match_lava_terms(client: TestClient, db_session: Session) -> None:
+    db_session.add(
+        IStoreProduct(
+            istore_product_id="sku-lava",
+            product_name="Lava Rocks for Grill",
+            slug="lava-rocks-grill",
+            product_url="https://compassgrill.co.il/product/lava-rocks-grill",
+        )
+    )
+    db_session.commit()
+
+    response = client.get("/debug/internal-link-match", params={"query": "אבן לבה לגריל"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert any("lava" in item["url"] for item in payload["matches"])
+    assert "lava rocks" in [t.lower() for t in payload["debug"]["searched_terms"]]
+
+
+def test_manual_upload_view_hides_empty_link_message_when_match_exists(client: TestClient, db_session: Session) -> None:
+    db_session.add(
+        IStoreProduct(
+            istore_product_id="sku-basalt-2",
+            product_name="אבני לבה לגריל",
+            product_url="https://compassgrill.co.il/product/lava-stone",
+        )
+    )
+    db_session.commit()
+
+    client.post(
+        "/content/articles/generate-topic-draft",
+        json={
+            "topic_title": "אבני בזלת לגריל",
+            "focus_keyword": "אבני בזלת לגריל",
+            "target_intent": "commercial",
+        },
+    )
+    html = client.get('/seo/simple-workspace').text
+    assert 'כרגע אין קישורים פנימיים רלוונטיים להצגה' not in html
+    assert 'Copy product URL' in html

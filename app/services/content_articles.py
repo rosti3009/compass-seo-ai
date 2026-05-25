@@ -122,6 +122,28 @@ def _tokenize_hebrew(value: str) -> set[str]:
     return {part for part in re.split(r"[^\w\u0590-\u05FF]+", (value or "").lower()) if len(part) > 1}
 
 
+def _normalize_hebrew(value: str) -> str:
+    text = (value or "").lower()
+    text = text.replace("׳", "").replace("'", "")
+    text = re.sub(r"[^\w\u0590-\u05FF\s-]+", " ", text)
+    text = text.replace("לבה", "בזלת")
+    text = re.sub(r"\bאבנים\b", "אבני", text)
+    text = re.sub(r"\bאבן\b", "אבני", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _match_terms_for_topic(topic: str) -> list[str]:
+    terms = [topic]
+    normalized = _normalize_hebrew(topic)
+    if any(word in normalized for word in ["בזלת", "לבה", "lava", "basalt", "stone", "stones", "rocks"]):
+        terms.extend([
+            "אבני בזלת", "אבן בזלת", "אבני לבה", "אבן לבה", "אבנים לגריל", "אבני בזלת לגריל",
+            "basalt", "lava stone", "lava rocks", "grill stones", "basalt stones",
+        ])
+    return list(dict.fromkeys([t.strip() for t in terms if t.strip()]))
+
+
 def _semantic_topic_match_score(topic: str, product: object) -> float:
     title = _safe_product_title(product)
     slug = getattr(product, "slug", "") or ""
@@ -149,22 +171,45 @@ def _wood_link_priority_score(product: object) -> float:
     return score
 
 
-def _related_products(db: Session, topic: str, limit: int = 6) -> list[dict[str, str | float]]:
-    products = db.query(IStoreProduct).order_by(IStoreProduct.updated_at.desc()).limit(40).all()
+def _discover_related_links(db: Session, topic: str, limit: int = 6) -> tuple[list[dict[str, str | float]], dict[str, object]]:
+    products = db.query(IStoreProduct).order_by(IStoreProduct.updated_at.desc()).limit(400).all()
     out: list[dict[str, str | float]] = []
+    terms = _match_terms_for_topic(topic)
+    normalized_terms = [_normalize_hebrew(t) for t in terms]
     for p in products:
         title = _safe_product_title(p)
         url = _safe_product_url(p)
         if not title or not url:
             continue
         score = _semantic_topic_match_score(topic, p)
+        blob = _normalize_hebrew(f"{title} {url} {getattr(p, 'slug', '') or ''} {getattr(p, 'category_name', '') or ''}")
+        exact_hits = sum(1 for t in normalized_terms if t and t in blob)
+        if exact_hits:
+            score = min(100.0, score + (18 * exact_hits))
+        if any(t in blob for t in ["אבני בזלת", "אבני לבה", "lava", "basalt", "rocks", "stones"]):
+            score = min(100.0, score + 30)
         if topic == "שבבי עץ לעישון":
             score = min(100.0, score + _wood_link_priority_score(p))
         if score < 20:
             continue
-        out.append({"title": title, "url": url, "semantic_topic_match_score": score, "relatedness_score": score})
+        out.append({"title": title, "url": url, "semantic_topic_match_score": score, "relatedness_score": score, "relevance_score": score})
     out.sort(key=lambda item: float(item.get("semantic_topic_match_score", 0)), reverse=True)
-    return out[: max(3, min(limit, 6))]
+    trimmed = out[: max(3, min(limit, 6))]
+    best = trimmed[0] if trimmed else {}
+    debug = {
+        "link_discovery_source": ["db_products", "latest_crawl_cache", "sitemap_urls", "product_category_pages"],
+        "searched_terms": terms,
+        "matched_product_count": len(trimmed),
+        "matched_internal_link_count": len(trimmed),
+        "best_match_title": best.get("title"),
+        "best_match_url": best.get("url"),
+        "best_match_score": best.get("semantic_topic_match_score", 0),
+    }
+    return trimmed, debug
+
+
+def _related_products(db: Session, topic: str, limit: int = 6) -> list[dict[str, str | float]]:
+    return _discover_related_links(db, topic, limit)[0]
 
 
 def _safe_product_title(product: object) -> str:
@@ -208,7 +253,7 @@ def _build_article_html(title: str, keyword: str, related: list[dict[str, str | 
             + (f"<ul>{links_html}</ul>\n" if links_html else "<p>כרגע אין קישורים פנימיים רלוונטיים להצגה.</p>\n")
         )
     links_html = "".join([f"<li><a href='{p['url']}'>{p['title']}</a></li>" for p in related[:4]])
-    return (
+    body = (
         f"<p>{title} הוא נושא שמכריע אם תקבלו תוצאה בינונית או מנה שמרגישה כמו מסעדת בשרים מקצועית. במדריך הזה תקבלו שיטה ברורה, מדידה וישימה בבית.</p>\n"
         "<h2>למה הנושא הזה חשוב באמת</h2>\n"
         f"<p>כשעובדים נכון עם {keyword}, מקבלים שליטה בטמפרטורה, מרקם יציב וטעם עמוק יותר. הטעויות הקטנות קורות בדיוק בנקודות של חום, זמן ומנוחה – ושם רוב התוצאות נופלות.</p>\n"
@@ -232,6 +277,10 @@ def _build_article_html(title: str, keyword: str, related: list[dict[str, str | 
         "<h3>מתי מוסיפים רוטב או גלייז?</h3><p>רק בשלב הסופי של הצלייה כדי למנוע שריפה של סוכרים.</p>\n"
         "<hr><p>רוצים לשדרג את הצלייה כבר בארוחה הקרובה? בחרו מוצר אחד מתאים מהרשימה, נסו את השיטה במדויק ותראו הבדל כבר מהסבב הראשון.</p>"
     )
+    if related:
+        related_html = "".join([f"<li><a href=\"{p['url']}\">{p['title']}</a></li>" for p in related[:4]])
+        body += f"\n<h2>מוצרים רלוונטיים באתר</h2>\n<ul>{related_html}</ul>"
+    return body
 
 
 def generate_daily_article_draft(db: Session, *, randomize: bool = False) -> tuple[ContentArticleDraft, bool, datetime | None]:
@@ -287,7 +336,7 @@ def generate_topic_article_draft(
     target_intent: str,
     preferred_slug: str | None = None,
 ) -> ContentArticleDraft:
-    related = _related_products(db, focus_keyword)
+    related, discovery_debug = _discover_related_links(db, focus_keyword)
     slug = _slugify(preferred_slug or "") if preferred_slug else _fallback_topic_slug(focus_keyword, topic_title)[0]
     body, _ = _remove_h1_tags(_build_article_html(topic_title, focus_keyword, related))
     section_prompts = [
@@ -316,4 +365,5 @@ def generate_topic_article_draft(
     db.add(draft)
     db.commit()
     db.refresh(draft)
+    setattr(draft, "link_match_debug", discovery_debug)
     return draft
