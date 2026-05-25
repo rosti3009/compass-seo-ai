@@ -1,7 +1,8 @@
 FROM python:3.12-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 WORKDIR /app
 
@@ -13,6 +14,13 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 # Required for ISTORE browser automation: install Playwright Chromium at build time.
 RUN python -m playwright install --with-deps chromium
+RUN python - <<'PY'
+from pathlib import Path
+p = Path('/ms-playwright')
+assert p.exists(), 'Playwright browser path missing'
+print('Playwright browsers:', list(p.glob('*'))[:5])
+PY
+RUN chown -R appuser:appuser /ms-playwright
 
 COPY . .
 RUN chown -R appuser:appuser /app
