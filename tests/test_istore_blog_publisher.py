@@ -94,9 +94,37 @@ def test_dry_run_shows_payload_without_tokens_or_cookies() -> None:
     assert out["headers"]["Cookie"] == "[REDACTED]"
     contract = out["request_contract"]
     assert contract["cookie_names"] == ["session"]
+    assert contract["cookie_count"] == 1
+    assert contract["cookie_source"] == "parsed"
+    assert contract["duplicate_cookie_names"] == []
     assert contract["xsrf_length"] == len("token123")
     assert contract["xsrf_token_present"] is True
+    assert contract["xsrf_source"] == "parsed"
     assert contract["inertia_version_present"] is False
+
+
+def test_raw_cookie_and_xsrf_override_are_used_with_sanitized_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:
+    publisher = _publisher()
+    monkeypatch.setattr(
+        "app.services.istore_blog_publisher.settings.istore_raw_cookie_header",
+        "a=1; b=2; a=3",
+    )
+    monkeypatch.setattr("app.services.istore_blog_publisher.settings.istore_xsrf_token_override", "override-token")
+    out = publisher.publish(_Draft(), dry_run=True)
+    contract = out["request_contract"]
+    headers = out["headers"]
+
+    assert contract["cookie_source"] == "raw_header"
+    assert contract["cookie_names"] == ["a", "b", "a"]
+    assert contract["duplicate_cookie_names"] == ["a"]
+    assert contract["cookie_count"] == 3
+    assert contract["xsrf_source"] == "override"
+    assert contract["xsrf_token_present"] is True
+    assert contract["xsrf_length"] == len("override-token")
+    assert headers["Cookie"] == "[REDACTED]"
+    assert headers["X-XSRF-TOKEN"] == "[REDACTED]"
+    assert "override-token" not in str(out)
+    assert "a=1" not in str(out)
 
 
 def test_from_settings_fails_without_admin_cookie(monkeypatch: pytest.MonkeyPatch) -> None:
