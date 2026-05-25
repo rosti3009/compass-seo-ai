@@ -60,6 +60,7 @@ from app.services.istore_approval import (
     reject_fix as reject_istore_approval_fix,
 )
 from app.services.istore_blog_publisher import IStoreBlogPublisher, IStoreBlogPublishError
+from app.services.istore_browser_automation import check_istore_browser_status
 from app.services.istore_mapping import (
     PUBLISHABLE_CONFIDENCE_THRESHOLD,
     assign_product_mapping,
@@ -1772,6 +1773,13 @@ def publish_content_draft(draft_id: int, db: DatabaseSession, dry_run: bool = Fa
         "draft": draft.to_dict(),
     }
 
+
+
+
+@router.get("/debug/istore/browser-status")
+def debug_istore_browser_status() -> dict[str, object]:
+    """Run ISTORE admin browser session check without submitting forms."""
+    return check_istore_browser_status().to_dict()
 
 @router.get("/debug/istore/create-dry-run")
 def debug_istore_create_dry_run(draft_id: int, db: DatabaseSession) -> dict[str, object]:

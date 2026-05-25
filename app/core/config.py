@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     istore_create_follow_redirects: bool = False
     istore_language_id: int = 3
     istore_blog_is_blog: int = 0
+    istore_browser_headless: bool = True
+    istore_browser_storage_state_path: str = "/var/data/istore_storage_state.json"
+    istore_browser_slowmo_ms: int = Field(default=0, ge=0, le=10000)
+    istore_browser_timeout_ms: int = Field(default=30000, ge=1000, le=120000)
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
     content_daily_articles_enabled: bool = False
