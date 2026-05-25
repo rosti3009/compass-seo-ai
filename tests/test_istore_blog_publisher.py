@@ -244,6 +244,35 @@ def test_create_headers_include_browser_and_inertia_fields(monkeypatch: pytest.M
     assert headers["Content-Type"] == "application/x-www-form-urlencoded"
 
 
+
+
+def test_create_headers_include_mobile_browser_headers_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    publisher = _publisher()
+    monkeypatch.setattr("app.services.istore_blog_publisher.settings.istore_use_browser_headers", True)
+    headers = publisher._build_create_headers(sanitize=False)
+    assert headers["User-Agent"] == (
+        "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/148.0.0.0 Mobile Safari/537.36"
+    )
+    assert headers["Accept-Language"] == "he,en;q=0.9,en-US;q=0.8,ru;q=0.7"
+    assert headers["sec-ch-ua"] == '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"'
+    assert headers["sec-ch-ua-mobile"] == "?1"
+    assert headers["sec-ch-ua-platform"] == '"Android"'
+    assert headers["sec-fetch-dest"] == "empty"
+    assert headers["sec-fetch-mode"] == "cors"
+    assert headers["sec-fetch-site"] == "same-origin"
+    assert headers["priority"] == "u=1, i"
+
+
+def test_dry_run_contract_reports_browser_header_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    publisher = _publisher()
+    monkeypatch.setattr("app.services.istore_blog_publisher.settings.istore_use_browser_headers", True)
+    out = publisher.publish(_Draft(), dry_run=True)
+    contract = out["request_contract"]
+    assert contract["use_browser_headers"] is True
+    assert contract["browser_headers"]["Accept-Language"] == "he,en;q=0.9,en-US;q=0.8,ru;q=0.7"
+    assert contract["browser_headers"]["priority"] == "u=1, i"
+
 def test_flatten_payload_for_form_encoding() -> None:
     publisher = _publisher()
     payload = publisher._build_payload(_Draft())
