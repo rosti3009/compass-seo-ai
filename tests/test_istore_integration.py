@@ -204,3 +204,50 @@ def test_istore_product_seo_analysis_view_renders_template(client: TestClient, m
     assert "Product SEO analysis" in response.text
     assert "מעשנת פחם" in response.text
     assert "View JSON" in response.text
+
+from app.services.istore_browser_automation import IStoreBrowserCreateResult
+
+
+def test_browser_create_test_dry_run_returns_dom_diagnostics(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class _Draft:
+        title = "Title"
+        article_body = "Body"
+        meta_title = "Meta"
+        meta_description = "Meta desc"
+        slug = "title"
+
+    monkeypatch.setattr("app.api.routes._get_content_draft_or_404", lambda db, draft_id: _Draft())
+
+    monkeypatch.setattr(
+        "app.api.routes.create_shop_information_page",
+        lambda payload, dry_run: IStoreBrowserCreateResult(
+            success=True,
+            current_url="https://app.istores.co.il/client/shop_information/create",
+            external_content_id=None,
+            otp_required=False,
+            error=None,
+            screenshot_path=None,
+            selector_availability={"title": False, "description": False},
+            planned_fields={"title": "Title"},
+            dom_diagnostics={
+                "total_inputs": 2,
+                "inputs": [],
+                "buttons": [],
+                "visible_text_sample": "sample",
+            },
+        ),
+    )
+
+    response = client.post("/debug/istore/browser-create-test?draft_id=4&dry_run=true")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["dry_run"] is True
+    assert body["selector_availability"] == {"title": False, "description": False}
+    assert "dom_diagnostics" in body
+    assert body["dom_diagnostics"]["total_inputs"] == 2
+    assert body["dom_diagnostics"]["inputs"] == []
+    assert body["dom_diagnostics"]["buttons"] == []
+    assert body["dom_diagnostics"]["visible_text_sample"] == "sample"
