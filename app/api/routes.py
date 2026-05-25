@@ -1718,9 +1718,19 @@ def publish_content_draft(draft_id: int, db: DatabaseSession, dry_run: bool = Fa
     except IStoreBlogPublishError as exc:
         raise HTTPException(status_code=400, detail=f"פרסום נכשל: {exc}") from exc
 
+    external_content_id = str(result.get("external_content_id") or "").strip()
+    live_url = str(result.get("live_url") or "").strip()
+    verification = result.get("verification") if isinstance(result.get("verification"), dict) else {}
+    verified_ok = bool(verification.get("title_found")) and int(verification.get("status_code", 0)) == 200
+    if not external_content_id or not live_url or not verified_ok:
+        raise HTTPException(
+            status_code=400,
+            detail="פרסום נכשל: חסר external_content_id או אימות URL ציבורי נכשל",
+        )
+
     draft.status = "PUBLISHED"
     draft.published_at = datetime.now(UTC)
-    draft.published_url = draft.target_url
+    draft.published_url = live_url
     draft.verification_status = "VERIFIED"
     db.add(draft)
     db.commit()

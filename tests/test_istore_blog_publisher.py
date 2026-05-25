@@ -55,6 +55,33 @@ def test_extract_id_from_302_location_header() -> None:
     assert publisher._extract_shop_information_id("/client/shop_information/edit/98765") == "98765"
 
 
+@pytest.mark.parametrize(
+    ("location", "expected"),
+    [
+        ("/client/shop_information/edit/123", "123"),
+        ("https://app.istores.co.il/client/shop_information/edit/456", "456"),
+        ("/client/shop_information/789/edit", "789"),
+        ("/client/shop_information/edit?id=321", "321"),
+    ],
+)
+def test_extract_id_from_redirect_formats(location: str, expected: str) -> None:
+    publisher = _publisher()
+    assert publisher._extract_shop_information_id(location) == expected
+
+
+def test_extract_id_from_inertia_json_props() -> None:
+    publisher = _publisher()
+
+    class _Response:
+        url = "https://app.istores.co.il/client/shop_information/create"
+
+        @staticmethod
+        def json() -> dict[str, object]:
+            return {"props": {"shop_information": {"id": 777}}}
+
+    assert publisher._extract_shop_information_id("", _Response()) == "777"
+
+
 def test_dry_run_shows_payload_without_tokens_or_cookies() -> None:
     publisher = _publisher()
     out = publisher.publish(_Draft(), dry_run=True)
@@ -93,3 +120,22 @@ def test_publish_fails_when_live_url_cannot_be_verified(monkeypatch: pytest.Monk
 
     with pytest.raises(IStoreBlogPublishError, match="נוצר עמוד מידע ב-ISTORE אבל לא נמצא URL ציבורי מאומת"):
         publisher.publish(_Draft())
+
+
+def test_create_fails_with_diagnostic_details_when_redirect_has_no_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    publisher = _publisher()
+
+    class _CreateResponse:
+        status_code = 302
+        headers = {"Location": "/client/shop_information/edit"}
+        url = "https://app.istores.co.il/client/shop_information/create"
+        text = "ok"
+
+        @staticmethod
+        def json() -> dict[str, object]:
+            return {}
+
+    monkeypatch.setattr(publisher.session, "post", lambda *a, **k: _CreateResponse())
+
+    with pytest.raises(IStoreBlogPublishError, match="status_code=302"):
+        publisher._create_shop_information({"x": 1})
