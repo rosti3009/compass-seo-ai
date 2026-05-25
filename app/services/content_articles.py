@@ -23,13 +23,24 @@ TOPIC_POOL = [
 ]
 
 
+SLUG_OVERRIDES = {
+    "איך לבחור שבבי עץ לעישון בשר": "wood-chips-for-smoking-meat",
+    "ההבדל בין גריל גז לגריל פחמים": "gas-grill-vs-charcoal-guide",
+    "איך לצלות אנטריקוט נכון": "grilled-ribeye-step-by-step",
+    "מדריך עישון בריסקט למתחילים": "brisket-smoking-guide",
+    "טאבון גז או טאבון עצים": "tabun-gas-vs-tabun-wood",
+    "איך לבחור סכין טובה לבשר": "best-meat-knife-buying-guide",
+    "אפקט מייארד בבשר: מדע וטעם": "maillard-reaction-meat-guide",
+    "איך להכין כנפיים קריספיות על הגריל": "crispy-grilled-wings",
+}
+
+
 def _slugify(text: str) -> str:
-    custom = {"טאבון": "tabun", "גז": "gas", "עצים": "wood", "או": "vs"}
-    normalized = text
-    if re.search(r"[\u0590-\u05FF]", text):
-        normalized = " ".join(custom.get(token, token) for token in re.split(r"\s+", text.strip()))
-    slug = re.sub(r"[^a-z0-9]+", "-", normalized.lower()).strip("-")
-    return slug or "compass-grill-article"
+    slug = SLUG_OVERRIDES.get(text)
+    if slug:
+        return slug
+    normalized = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    return normalized or "bbq-hebrew-guide"
 
 
 def _select_topic(db: Session) -> tuple[str, str, str]:
@@ -59,15 +70,8 @@ def _semantic_topic_match_score(topic: str, product: object) -> float:
     target_tokens = _tokenize_hebrew(f"{title} {slug} {category}")
     overlap = len(topic_tokens & target_tokens)
     score = overlap * 20
-    taxonomy = {"עישון", "שבבי", "מעשנה", "גריל", "pellets", "smoker", "wood", "chips", "chunks"}
-    if taxonomy & target_tokens:
+    if any(k in target_tokens for k in {"גריל", "bbq", "smoker", "מעשנה", "שבבי", "עישון"}):
         score += 30
-    if any(k in target_tokens for k in {"גריל", "bbq", "smoker"}):
-        score += 20
-    if "שבבי" in topic and any(k in target_tokens for k in {"שבבי", "chips", "chunks"}):
-        score += 30
-    if "עישון" in topic and any(k in target_tokens for k in {"עישון", "smoker", "pellets"}):
-        score += 20
     return float(min(score, 100))
 
 
@@ -78,24 +82,13 @@ def _related_products(db: Session, topic: str, limit: int = 6) -> list[dict[str,
         title = _safe_product_title(p)
         url = _safe_product_url(p)
         if not title or not url:
-            logger.warning("[CONTENT ARTICLES] skipped invalid related product")
             continue
         score = _semantic_topic_match_score(topic, p)
         if score < 20:
             continue
         out.append({"title": title, "url": url, "semantic_topic_match_score": score, "relatedness_score": score})
     out.sort(key=lambda item: float(item.get("semantic_topic_match_score", 0)), reverse=True)
-    out = out[: max(3, min(limit, 6))]
-    if not out:
-        out = [
-            {"title": "שבבי עץ לעישון תפוח", "url": "/category/apple-wood-chips",
-             "semantic_topic_match_score": 95.0, "relatedness_score": 95.0},
-            {"title": "מעשנות", "url": "/category/smokers",
-             "semantic_topic_match_score": 88.0, "relatedness_score": 88.0},
-            {"title": "פלט לעישון", "url": "/category/smoking-pellets",
-             "semantic_topic_match_score": 82.0, "relatedness_score": 82.0},
-        ]
-    return out
+    return out[: max(3, min(limit, 6))]
 
 
 def _safe_product_title(product: object) -> str:
@@ -113,89 +106,67 @@ def _safe_product_url(product: object) -> str:
     return ""
 
 
+def _build_article_html(title: str, keyword: str, related: list[dict[str, str | float]]) -> str:
+    links_html = "".join([f"<li><a href='{p['url']}'>{p['title']}</a></li>" for p in related[:4]])
+    return (
+        f"<p>{title} הוא נושא שמכריע אם תקבלו תוצאה בינונית או מנה שמרגישה כמו מסעדת בשרים מקצועית. במדריך הזה תקבלו שיטה ברורה, מדידה וישימה בבית.</p>\n"
+        "<h2>למה הנושא הזה חשוב באמת</h2>\n"
+        f"<p>כשעובדים נכון עם {keyword}, מקבלים שליטה בטמפרטורה, מרקם יציב וטעם עמוק יותר. הטעויות הקטנות קורות בדיוק בנקודות של חום, זמן ומנוחה – ושם רוב התוצאות נופלות.</p>\n"
+        "<h2>ציוד ומוצרים שכדאי להכין מראש</h2>\n"
+        "<ul><li><strong>מדחום דיגיטלי</strong> למדידת טמפ' פנימית מדויקת.</li><li><strong>גריל עם אזור ישיר ועקיף</strong> לניהול חום נכון.</li><li><strong>רשת נקייה ומשומנת</strong> כדי למנוע הדבקות וקריעה.</li><li><strong>מלקחיים ארוכים</strong> להפיכה בטוחה בלי איבוד נוזלים.</li></ul>\n"
+        "<h2>שיטת עבודה שלב-אחר-שלב</h2>\n"
+        "<p><strong>שלב 1:</strong> חימום מוקדם 15–20 דקות עד אזור חם של 230–260°C ואזור עקיף של 160–190°C.</p>\n"
+        "<p><strong>שלב 2:</strong> ייבוש עדין של חומר הגלם ותיבול מאוזן 20–40 דקות לפני הצלייה.</p>\n"
+        "<p><strong>שלב 3:</strong> סגירה מהירה 2–4 דקות לכל צד לקבלת צבע וקריספיות.</p>\n"
+        "<p><strong>שלב 4:</strong> העברה לאזור עקיף עד טמפ' יעד פנימית (למשל 74°C לעוף, 54–57°C למדיום-רייר בקר).</p>\n"
+        "<p><strong>שלב 5:</strong> מנוחה 5–10 דקות לפני הגשה כדי לשמור על עסיסיות.</p>\n"
+        "<h2>טעויות נפוצות ואיך להימנע מהן</h2>\n"
+        "<ul><li>הפיכה מוקדמת מדי – יוצרת קריעה במקום צריבה.</li><li>עבודה בלי מדחום – גורמת לבישול יתר.</li><li>חוסר מנוחה – מוציא נוזלים לצלחת במקום לביס.</li><li>מתיקות גבוהה מוקדם מדי – גלייז נשרף.</li></ul>\n"
+        "<h2>טיפים מקצועיים לשדרוג</h2>\n"
+        "<p>עבדו בשיטת שתי שכבות תיבול: שכבה יבשה לפני חום ושכבת סיום עדינה אחרי מנוחה. הוסיפו עשן רק בתחילת הבישול (8–15 דקות) כדי למנוע מרירות. שמרו על מכסה סגור ככל האפשר ליציבות תרמית.</p>\n"
+        "<h2>קישורים פנימיים ומוצרים משלימים</h2>\n"
+        + (f"<ul>{links_html}</ul>\n" if links_html else "<p>כרגע אין קישורים פנימיים רלוונטיים להצגה.</p>\n")
+        + "<h2>שאלות נפוצות</h2>\n"
+        "<h3>איזו טמפרטורה הכי חשובה למדוד?</h3><p>הטמפרטורה הפנימית של הנתח. זו המדידה היחידה שמבטיחה תוצאה עקבית.</p>\n"
+        "<h3>כמה זמן מנוחה באמת צריך?</h3><p>בדרך כלל 5–10 דקות לנתחים רגילים ו-15 דקות לנתחים גדולים יותר.</p>\n"
+        "<h3>מתי מוסיפים רוטב או גלייז?</h3><p>רק בשלב הסופי של הצלייה כדי למנוע שריפה של סוכרים.</p>\n"
+        "<hr><p>רוצים לשדרג את הצלייה כבר בארוחה הקרובה? בחרו מוצר אחד מתאים מהרשימה, נסו את השיטה במדויק ותראו הבדל כבר מהסבב הראשון.</p>"
+    )
+
+
 def generate_daily_article_draft(db: Session) -> ContentArticleDraft:
     title, keyword, intent = _select_topic(db)
     related = _related_products(db, keyword)
-    english_hint = {
-        "שבבי": "wood chips smoking meat",
-        "גז": "gas grill vs charcoal",
-        "אנטריקוט": "how to grill ribeye",
-        "בריסקט": "brisket smoking guide",
-        "טאבון": "gas vs wood pizza oven",
-        "סכין": "best knife for meat",
-        "מייארד": "maillard reaction steak",
-        "כנפיים": "crispy grilled wings",
-    }
-    prompt_hint = next((v for k, v in english_hint.items() if k in title), "outdoor premium bbq")
-    body = (
-        f"<h1>{title}</h1>\n"
-        "<p>במדריך הזה נסביר בצורה ברורה ומעשית איך לבחור נכון, מה עובד בשטח, ואיך להוציא יותר טעם מכל צלייה.</p>\n"
-        "<h2>למה זה חשוב לצלייה איכותית?</h2>\n"
-        "<p>בחירה נכונה של ציוד וטכניקה תשפיע על טעם, עסיסיות, ושליטה בחום לאורך זמן.</p>\n"
-        "<h2>שלבים מעשיים</h2>\n"
-        "<h3>שלב 1: הכנה מוקדמת</h3><p>בחרו בשר איכותי, תבלו בעדינות, ותנו לבשר להגיע לטמפרטורת חדר.</p>\n"
-        "<h3>שלב 2: שליטה בחום</h3><p>עבדו עם אזור חום ישיר ועקיף כדי לשלוט במידת העשייה.</p>\n"
-        "<h2>קישורים פנימיים מומלצים</h2>\n"
-        + "".join([f"<p><a href='{p['url']}'>{p['title']}</a></p>" for p in related])
-        + "\n<h2>שאלות נפוצות</h2>\n"
-        "<h3>כמה זמן לצלות?</h3><p>תלוי בעובי הנתח ובטמפרטורה, לכן מומלץ לעבוד עם מדחום.</p>\n"
-        "<h3>איך שומרים על עסיסיות?</h3><p>נותנים לבשר מנוחה של 5–10 דקות לפני חיתוך.</p>"
-    )
+    slug = _slugify(title)
+    body = _build_article_html(title, keyword, related)
     faq_schema = {
         "@context": "https://schema.org",
         "@type": "FAQPage",
         "mainEntity": [
-            {
-                "@type": "Question",
-                "name": "כמה זמן לצלות?",
-                "acceptedAnswer": {"@type": "Answer", "text": "תלוי בעובי הנתח ובטמפרטורה."},
-            },
-            {
-                "@type": "Question",
-                "name": "איך שומרים על עסיסיות?",
-                "acceptedAnswer": {"@type": "Answer", "text": "נותנים לבשר מנוחה לפני חיתוך."},
-            },
+            {"@type": "Question", "name": "איזו טמפרטורה הכי חשובה למדוד?", "acceptedAnswer": {"@type": "Answer", "text": "הטמפרטורה הפנימית של הנתח."}},
+            {"@type": "Question", "name": "כמה זמן מנוחה באמת צריך?", "acceptedAnswer": {"@type": "Answer", "text": "בדרך כלל 5–10 דקות."}},
+            {"@type": "Question", "name": "מתי מוסיפים רוטב או גלייז?", "acceptedAnswer": {"@type": "Answer", "text": "בשלב הסופי כדי למנוע שריפה."}},
         ],
     }
+    section_prompts = [
+        {"section": "פתיח", "placement_hint": "[IMAGE_1_HERE]", "prompt": f"Hebrew BBQ blog hero showing {slug.replace('-', ' ')}, realistic grill setup and food texture"},
+        {"section": "שלב-אחר-שלב", "placement_hint": "[IMAGE_2_HERE]", "prompt": f"Step-by-step cooking process for {slug.replace('-', ' ')}, close-up on grill grates, thermometers, fire zones"},
+    ]
     draft = ContentArticleDraft(
-        status="CONTENT_DRAFT",
-        topic_title=title,
-        title=title,
-        slug=_slugify(title),
+        status="CONTENT_DRAFT", topic_title=title, title=title, slug=slug,
         meta_title=f"{title} | Compass Grill",
-        meta_description=f"{title} – מדריך מעשי בעברית עם טיפים לצלייה, עישון ובחירת ציוד נכון.",
-        focus_keyword=keyword,
-        target_intent=intent,
-        article_body=body,
+        meta_description=f"{title} - מדריך מעשי בעברית עם שלבים, טמפרטורות, טעויות נפוצות וטיפים מקצועיים.",
+        focus_keyword=keyword, target_intent=intent, article_body=body,
         suggested_related_products_json=json.dumps(related, ensure_ascii=False),
         internal_links_json=json.dumps(related, ensure_ascii=False),
         faq_schema_json=json.dumps(faq_schema, ensure_ascii=False),
-        section_image_prompts_json=json.dumps([
-            {"section": "הכנה מוקדמת", "prompt": "Close-up of premium kosher beef being seasoned near a modern grill"},
-            {"section": "שליטה בחום", "prompt": "Two-zone grilling setup outdoors, realistic food and safe cooking"},
-        ], ensure_ascii=False),
-        featured_image_prompt=f"Realistic premium BBQ scene, {prompt_hint}, outdoor cooking, natural light, no logos",
-        image_alt_text=f"{title} על גריל איכותי בחצר",
-        image_title=f"תמונת שער: {title}",
-        image_caption="הכנה נכונה וצלייה מדויקת משדרגות כל נתח.",
-        image_filename_slug=f"compass-grill-{_slugify(title)}",
-        image_style_rules=(
-            "ultra realistic BBQ / grill / meat / outdoor cooking photography; "
-            "premium but natural Israeli BBQ style; realistic meat texture; realistic grill smoke and fire; "
-            "clean composition suitable for blog hero image; horizontal website article header format; "
-            "no fake logos; no text inside the image; no distorted Hebrew text; no unrealistic food; "
-            "no unsafe cooking behavior; no people unless explicitly needed"
-        ),
-        generated_image_url=None,
-        uploaded_media_id=None,
-        image_publish_status="NOT_PUBLISHED",
-        target_site_section="blog",
-        target_publish_type="article",
-        target_blog_base_url="https://compassgrill.co.il/blog/",
-        target_path=f"/blog/{_slugify(title)}",
-        target_url=f"https://compassgrill.co.il/blog/{_slugify(title)}",
-        publish_destination_status="ready",
-        featured_image_status="planned",
+        section_image_prompts_json=json.dumps(section_prompts, ensure_ascii=False),
+        featured_image_prompt=f"Realistic {slug.replace('-', ' ')} scene, grill, smoke, natural light, no logos",
+        image_alt_text=f"{title} - הדגמה על גריל", image_title=f"תמונת שער: {title}", image_caption="הדגמה מעשית של השיטה במאמר.",
+        image_filename_slug=f"compass-grill-{slug}", image_style_rules="realistic outdoor BBQ photography",
+        generated_image_url=None, uploaded_media_id=None, image_publish_status="NOT_PUBLISHED",
+        target_site_section="blog", target_publish_type="article", target_blog_base_url="https://compassgrill.co.il/blog/",
+        target_path=f"/blog/{slug}", target_url=f"https://compassgrill.co.il/blog/{slug}", publish_destination_status="ready", featured_image_status="planned",
     )
     db.add(draft)
     db.commit()

@@ -54,9 +54,16 @@ def test_generate_article_defaults_and_image_plan(client: TestClient) -> None:
     assert _is_hebrew(draft['image_alt_text'])
     assert draft['image_filename_slug'].replace('-', '').isalnum()
     assert draft['image_publish_status'] == 'NOT_PUBLISHED'
+    assert '<h1' not in draft['article_body'].lower()
+    assert draft['article_body'].lower().count('<h2') >= 5
+    assert draft['article_body'].lower().count('<h3') >= 3
+    assert draft['slug'] != 'compass-grill-article'
+    assert '[' not in draft['article_body']
     image_plan = client.post(f"/content/articles/{draft['id']}/generate-image-plan")
     assert image_plan.status_code == 200
     assert image_plan.json()['message_he'] == 'תכנון התמונה עודכן בהצלחה'
+    prompt_blob = (draft['featured_image_prompt'] + ' ' + ' '.join(i.get('prompt', '') for i in draft.get('section_image_prompts', []))).lower()
+    assert any(word in prompt_blob for word in draft['slug'].split('-')[:2])
 
 
 def test_generate_article_image_uses_provider(client: TestClient) -> None:

@@ -46,12 +46,13 @@
           <p><strong>Slug:</strong> {{ article.slug }}</p>
           <p><strong>Meta Title:</strong> {{ article.meta_title }}</p>
           <p><strong>Meta Description:</strong> {{ article.meta_description }}</p>
+          <p><strong>מילות מפתח לקידום במנועי חיפוש:</strong> {{ article.focus_keyword }}</p>
           <details><summary>תצוגה מקדימה</summary><div>{{ article.article_body|safe }}</div></details>
           <section class="manual-upload-layout" aria-label="הכנה להעלאה ידנית ל-ISTORE">
             <h4>manual-upload-view · הכנה מהירה לעובד חנות</h4>
             <div class="manual-upload-grid">
               <article class="manual-upload-card">
-                <h5>1) תמונה ראשית (Featured)</h5>
+                <h5>תמונה ראשית</h5>
                 <p><strong>תמונה מוצעת:</strong> {{ article.image_title or ('תמונת שער: ' ~ article.title) }}</p>
                 <p><strong>AI prompt:</strong> {{ article.featured_image_prompt }}</p>
                 <p><strong>ALT:</strong> {{ article.image_alt_text }}</p>
@@ -63,7 +64,7 @@
               </article>
 
               <article class="manual-upload-card">
-                <h5>2) תמונות בתוך המאמר (Inline)</h5>
+                <h5>תמונות פנימיות</h5>
                 {% set section_images = article.section_image_prompts or [] %}
                 {% for section in section_images %}
                 <div class="inline-image-row">
@@ -92,7 +93,7 @@
               </article>
 
               <article class="manual-upload-card">
-                <h5>3) HTML להדבקה ידנית</h5>
+                <h5>תוכן ראשי / HTML נקי</h5>
                 <p><strong>עם סמני תמונה:</strong></p>
                 <textarea class="manual-html" rows="8" readonly>{{ article.article_body }}
 [IMAGE_1_HERE]
@@ -110,7 +111,7 @@
               </article>
 
               <article class="manual-upload-card checklist-card">
-                <h5>4) checklist לעובד העלאה</h5>
+                <h5>Checklist</h5>
                 <ol>
                   <li>העלה תמונה ראשית</li>
                   <li>הדבק כותרת</li>
