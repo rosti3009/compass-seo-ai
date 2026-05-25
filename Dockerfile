@@ -11,6 +11,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
+# Required for ISTORE browser automation: install Playwright Chromium at build time.
+RUN python -m playwright install --with-deps chromium
+
 COPY . .
 RUN chown -R appuser:appuser /app
 USER appuser
