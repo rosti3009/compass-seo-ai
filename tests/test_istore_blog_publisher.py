@@ -89,6 +89,8 @@ def test_dry_run_shows_payload_without_tokens_or_cookies() -> None:
     assert out["dry_run"] is True
     assert "session=abc" not in text
     assert "token123" not in text
+    assert out["headers"]["X-XSRF-TOKEN"] == "[REDACTED]"
+    assert out["headers"]["Cookie"] == "[REDACTED]"
 
 
 def test_from_settings_fails_without_admin_cookie(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -138,4 +140,43 @@ def test_create_fails_with_diagnostic_details_when_redirect_has_no_id(monkeypatc
     monkeypatch.setattr(publisher.session, "post", lambda *a, **k: _CreateResponse())
 
     with pytest.raises(IStoreBlogPublishError, match="status_code=302"):
-        publisher._create_shop_information({"x": 1})
+        publisher._create_shop_information(publisher._build_payload(_Draft()))
+
+
+def test_create_fails_with_clear_message_when_redirected_back_to_create_form(monkeypatch: pytest.MonkeyPatch) -> None:
+    publisher = _publisher()
+
+    class _CreateResponse:
+        status_code = 302
+        headers = {"Location": "https://app.istores.co.il/client/shop_information/create"}
+        url = "https://app.istores.co.il/client/shop_information/create"
+        text = "validation failed"
+
+        @staticmethod
+        def json() -> dict[str, object]:
+            return {}
+
+    monkeypatch.setattr(publisher.session, "post", lambda *a, **k: _CreateResponse())
+
+    with pytest.raises(IStoreBlogPublishError, match="ISTORE rejected create request and redirected back to create form"):
+        publisher._create_shop_information(publisher._build_payload(_Draft()))
+
+
+def test_create_headers_include_browser_and_inertia_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    publisher = _publisher()
+    monkeypatch.setattr("app.services.istore_blog_publisher.settings.istore_inertia_version", "abc123")
+    headers = publisher._build_create_headers(sanitize=False)
+    assert headers["Accept"] == "text/html, application/xhtml+xml"
+    assert headers["X-Inertia"] == "true"
+    assert headers["X-Requested-With"] == "XMLHttpRequest"
+    assert headers["X-Inertia-Version"] == "abc123"
+
+
+def test_validate_create_payload_requires_contract_fields() -> None:
+    publisher = _publisher()
+    payload = publisher._build_payload(_Draft())
+    publisher._validate_create_payload(payload)
+
+    payload["descriptions"]["3"]["title"] = ""
+    with pytest.raises(IStoreBlogPublishError, match=r"descriptions\[3\]\.title"):
+        publisher._validate_create_payload(payload)
