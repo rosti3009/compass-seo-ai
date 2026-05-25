@@ -183,11 +183,13 @@ class IStoreAdminShopInformationPublisher:
 
     def _build_create_headers(self, sanitize: bool) -> dict[str, str]:
         submit_mode = self._resolve_submit_mode()
+        cookie_header = (settings.istore_raw_cookie_header or self.admin_cookie or "").strip()
+        xsrf_token = (settings.istore_xsrf_token_override or self.xsrf_token or "").strip()
         headers = {
             "Accept": "text/html, application/xhtml+xml",
             "X-Inertia": "true",
             "X-Requested-With": "XMLHttpRequest",
-            "X-XSRF-TOKEN": self.xsrf_token,
+            "X-XSRF-TOKEN": xsrf_token,
             "Referer": urljoin(self.base_url, CREATE_REDIRECT_PATH.lstrip("/")),
             "Origin": self.base_url.rstrip("/"),
             "User-Agent": (
@@ -195,7 +197,7 @@ class IStoreAdminShopInformationPublisher:
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/125.0.0.0 Safari/537.36"
             ),
-            "Cookie": self.admin_cookie,
+            "Cookie": cookie_header,
         }
         if submit_mode == "json":
             headers["Content-Type"] = "application/json"
@@ -259,14 +261,21 @@ class IStoreAdminShopInformationPublisher:
     def _sanitized_request_contract(self, payload: dict[str, Any]) -> dict[str, Any]:
         headers = self._build_create_headers(sanitize=False)
         cookie_names = self._cookie_names(headers.get("Cookie", ""))
+        duplicate_cookie_names = sorted({name for name in cookie_names if cookie_names.count(name) > 1})
+        cookie_source = "raw_header" if (settings.istore_raw_cookie_header or "").strip() else "parsed"
+        xsrf_source = "override" if (settings.istore_xsrf_token_override or "").strip() else "parsed"
         return {
             "endpoint": CREATE_REDIRECT_PATH,
             "method": "POST",
             "headers": self._sanitize_headers_for_debug(headers),
             "payload": payload,
             "cookie_names": cookie_names,
+            "cookie_source": cookie_source,
+            "duplicate_cookie_names": duplicate_cookie_names,
+            "cookie_count": len(cookie_names),
             "xsrf_token_present": bool(headers.get("X-XSRF-TOKEN")),
             "xsrf_length": len(headers.get("X-XSRF-TOKEN", "")),
+            "xsrf_source": xsrf_source,
             "inertia_version_present": bool(headers.get("X-Inertia-Version")),
         }
 
