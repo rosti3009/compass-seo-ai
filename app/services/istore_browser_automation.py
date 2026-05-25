@@ -69,6 +69,67 @@ def _safe_wait_ms() -> int:
     return max(wait_ms, 0)
 
 
+def _new_stealth_context(playwright: object, storage_state_path: Path) -> tuple[object, object]:
+    browser = playwright.chromium.launch(
+        headless=_bool_like(settings.istore_browser_headless, default=True),
+        slow_mo=settings.istore_browser_slowmo_ms,
+        args=[
+            "--disable-blink-features=AutomationControlled",
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+        ],
+    )
+    context_kwargs: dict[str, object] = {}
+    if storage_state_path.exists():
+        context_kwargs["storage_state"] = str(storage_state_path)
+    context = browser.new_context(**context_kwargs)
+    context.add_init_script(
+        """
+Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+Object.defineProperty(navigator, 'plugins', { get: () => [{name:'Chrome PDF Plugin'}, {name:'Chrome PDF Viewer'}, {name:'Native Client'}] });
+Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+"""
+    )
+    return browser, context
+
+
+def _wait_for_access(page: object, screenshot_path: Path, max_retries: int = 3) -> dict[str, object]:
+    retry_count = 0
+    cf_detected = False
+    access_denied_detected = False
+    while True:
+        try:
+            page.wait_for_load_state("networkidle", timeout=settings.istore_browser_timeout_ms)
+        except Exception:
+            pass
+        page.wait_for_timeout(_safe_wait_ms())
+        content = page.content().lower()
+        title = _safe_title(page)
+        cf_now = "cloudflare" in content or "cf-challenge" in content or "just a moment" in title.lower()
+        denied_now = "403 - access denied" in content or "access denied" in title.lower()
+        cf_detected = cf_detected or cf_now
+        access_denied_detected = access_denied_detected or denied_now
+        if denied_now:
+            try:
+                screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+                page.screenshot(path=str(screenshot_path), full_page=True)
+            except Exception:
+                pass
+        if not denied_now and not cf_now:
+            break
+        if retry_count >= max_retries:
+            break
+        retry_count += 1
+        page.reload(wait_until="domcontentloaded")
+    return {
+        "cf_detected": cf_detected,
+        "access_denied_detected": access_denied_detected,
+        "retry_count": retry_count,
+        "final_html_title": _safe_title(page),
+    }
+
+
 def _collect_dom_diagnostics(page: object) -> dict[str, object]:
     script = """
 () => {
@@ -171,20 +232,11 @@ def check_istore_browser_status() -> IStoreBrowserStatus:
 
     try:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(
-                headless=_bool_like(settings.istore_browser_headless, default=True),
-                slow_mo=settings.istore_browser_slowmo_ms,
-            )
-
-            context_kwargs: dict[str, object] = {}
-            if storage_state_path.exists():
-                context_kwargs["storage_state"] = str(storage_state_path)
-
-            context = browser.new_context(**context_kwargs)
+            browser, context = _new_stealth_context(playwright, storage_state_path)
             page = context.new_page()
             page.set_default_timeout(settings.istore_browser_timeout_ms)
             page.goto(CREATE_PAGE_URL, wait_until="domcontentloaded")
-            page.wait_for_timeout(_safe_wait_ms())
+            diagnostics = _wait_for_access(page, screenshot_path)
 
             current_url = page.url or ""
             title = _safe_title(page)
@@ -223,7 +275,7 @@ def check_istore_browser_status() -> IStoreBrowserStatus:
                 title=title,
                 screenshot_saved=screenshot_saved,
                 screenshot_path=saved_screenshot_path,
-                error=None,
+                error=None if can_access_create_page or otp_required else f"{diagnostics}",
                 message=message,
             )
     except PlaywrightError as exc:
@@ -283,18 +335,11 @@ def create_shop_information_page(payload: dict[str, object], dry_run: bool = Tru
 
     try:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(
-                headless=_bool_like(settings.istore_browser_headless, default=True),
-                slow_mo=settings.istore_browser_slowmo_ms,
-            )
-            context_kwargs: dict[str, object] = {}
-            if storage_state_path.exists():
-                context_kwargs["storage_state"] = str(storage_state_path)
-            context = browser.new_context(**context_kwargs)
+            browser, context = _new_stealth_context(playwright, storage_state_path)
             page = context.new_page()
             page.set_default_timeout(settings.istore_browser_timeout_ms)
             page.goto(CREATE_PAGE_URL, wait_until="domcontentloaded")
-            page.wait_for_timeout(_safe_wait_ms())
+            cf_diagnostics = _wait_for_access(page, screenshot_path)
             current_url = page.url or ""
             title = _safe_title(page)
             content = page.content()
@@ -307,9 +352,11 @@ def create_shop_information_page(payload: dict[str, object], dry_run: bool = Tru
                     otp_required,
                     OTP_MESSAGE if otp_required else "Browser not logged in or create page inaccessible.",
                     None,
+                    dom_diagnostics=cf_diagnostics,
                 )
 
             dom_diagnostics = _collect_dom_diagnostics(page)
+            dom_diagnostics.update(cf_diagnostics)
 
             selector_availability: dict[str, object] = {}
             for key, selectors in selector_matrix.items():
