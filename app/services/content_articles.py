@@ -95,6 +95,20 @@ def _semantic_topic_match_score(topic: str, product: object) -> float:
     return float(min(score, 100))
 
 
+def _wood_link_priority_score(product: object) -> float:
+    text = f"{_safe_product_title(product)} {getattr(product, 'slug', '') or ''} {getattr(product, 'category_name', '') or ''}".lower()
+    score = 0.0
+    if any(term in text for term in ("שבבי עץ", "wood chips", "chips", "wood-chip")):
+        score += 45
+    if any(term in text for term in ("פלט", "pellet", "pellets")):
+        score += 35
+    if any(term in text for term in ("מעשנה", "smoker", "smokers")):
+        score += 30
+    if any(term in text for term in ("נייר קצבים", "butcher paper")):
+        score += 25
+    return score
+
+
 def _related_products(db: Session, topic: str, limit: int = 6) -> list[dict[str, str | float]]:
     products = db.query(IStoreProduct).order_by(IStoreProduct.updated_at.desc()).limit(40).all()
     out: list[dict[str, str | float]] = []
@@ -104,6 +118,8 @@ def _related_products(db: Session, topic: str, limit: int = 6) -> list[dict[str,
         if not title or not url:
             continue
         score = _semantic_topic_match_score(topic, p)
+        if topic == "שבבי עץ לעישון":
+            score = min(100.0, score + _wood_link_priority_score(p))
         if score < 20:
             continue
         out.append({"title": title, "url": url, "semantic_topic_match_score": score, "relatedness_score": score})
@@ -133,17 +149,21 @@ def _build_article_html(title: str, keyword: str, related: list[dict[str, str | 
             "<p>שבבי עץ לעישון משנים לחלוטין את תוצאת הברביקיו: סוג העץ, כמות העשן והטמפרטורה קובעים עומק טעם, צבע ואיזון מרירות.</p>\n"
             "<h2>Hickory, Oak, Apple, Mesquite – מה ההבדל בטעם?</h2>\n"
             "<p><strong>Hickory</strong> נותן עשן חזק, אגוזי ובייקוני; <strong>Oak</strong> מאוזן ומתאים לבישול ארוך; <strong>Apple wood</strong> מתקתק ועדין; <strong>Mesquite</strong> עוצמתי, אדמתי ומהיר.</p>\n"
+            "<h2>סוגי שבבי עץ לעישון והטעמים שלהם</h2>\n"
+            "<ul><li><strong>Hickory</strong> – חזק, עמוק ובייקוני; מתאים לבקר ולכתף.</li><li><strong>Oak</strong> – בינוני ומאוזן; עובד מצוין לבקר, טלה וירקות.</li><li><strong>Apple</strong> – עדין-מתקתק; מושלם לעוף, דגים וירקות.</li><li><strong>Mesquite</strong> – עוצמתי מאוד ואדמתי; מתאים לסטייקים קצרים בלבד.</li><li><strong>Cherry</strong> – פירותי ועדין, מוסיף צבע אדמדם יפה לעוף וחזיר.</li></ul>\n"
             "<h2>עוצמת עשן והתאמת עץ לסוג בשר</h2>\n"
             "<p>Brisket וצלעות בקר מסתדרים עם Hickory/Oak. עוף והודו נהנים מ-Apple. Mesquite מתאים לסטייקים קצרים, ובמינון נמוך בלבד בבישול ארוך.</p>\n"
+            "<h2>איזה שבבי עץ מתאימים לכל סוג בשר?</h2>\n"
+            "<ul><li><strong>בקר:</strong> Hickory + Oak לעומק עשן בינוני-חזק.</li><li><strong>עוף:</strong> Apple או Cherry לעשן עדין שלא משתלט.</li><li><strong>דגים:</strong> Apple בלבד או Oak עדין מאוד.</li><li><strong>ירקות:</strong> Oak עדין או Cherry למתיקות קלה.</li></ul>\n"
             "<h2>מיתוס ההשריה: האם צריך להשרות שבבים?</h2>\n"
-            "<p>ברוב המעשנות אין צורך להשרות שבבים. השריה מייצרת בעיקר אדים, לא עשן נקי. עדיף שבב יבש וזרימת אוויר יציבה לקבלת blue smoke.</p>\n"
+            "<p>ברוב המעשנות אין צורך להשרות שבבים. השריה מייצרת בעיקר אדים, לא עשן נקי. עדיף שבב יבש וזרימת אוויר יציבה לקבלת thin blue smoke.</p>\n"
             "<h2>טמפרטורות מעשנה מומלצות</h2>\n"
             "<p>עישון קלאסי: 107–135°C. עוף: 135–160°C לסיום עור פריך. ניטור פנימי חשוב יותר מטמפ' תא בלבד, עם מדחום דיגיטלי כפול.</p>\n"
             "<h2>כמה שבבים מוסיפים ומתי?</h2>\n"
-            "<p>מוסיפים בכמויות קטנות בתחילת הבישול, במיוחד ב-60–90 הדקות הראשונות. עשן סמיך ולבן מצביע על שריפה לא נקייה; יעד הוא עשן דק וכחלחל.</p>\n"
-            "<h3>טעויות נפוצות</h3><p>שימוש יתר ב-Mesquite, פתיחת מכסה תכופה, והוספת שבבים רטובים גורמים למרירות ולחוסר יציבות תרמית.</p>\n"
+            "<p>מוסיפים חופן קטן (כ-1/2 כוס) כל 30–45 דקות בתחילת הבישול, במיוחד ב-60–90 הדקות הראשונות. עשן סמיך ולבן מצביע על שריפה לא נקייה; יעד הוא thin blue smoke, דק וכחלחל.</p>\n"
+            "<h3>טעויות נפוצות</h3><p>שימוש יתר ב-Mesquite, פתיחת מכסה תכופה, והוספת שבבים רטובים גורמים למרירות (bitter smoke) ולחוסר יציבות תרמית.</p>\n"
             "<h3>טיפ מקצועי</h3><p>לתוצאה מאוזנת ערבבו Oak עם Apple ביחס 70/30 לבקר ארוך, ו-Apple בלבד לעוף ודגים.</p>\n"
-            "<h3>הבדלי טעם בין עצים</h3><p>Hickory מדגיש עומק ועוצמה, Oak מאזן, Apple מוסיף מתיקות עדינה ו-Mesquite מתאים למינון קצר ומדויק.</p>\n"
+            "<h3>הבדלי טעם בין עצים</h3><p>Hickory מדגיש עומק ועוצמה, Oak מאזן, Apple מוסיף מתיקות עדינה, Cherry פירותי, ו-Mesquite מתאים למינון קצר ומדויק.</p>\n"
             "<h2>מוצרים משלימים</h2>\n"
             + (f"<ul>{links_html}</ul>\n" if links_html else "<p>כרגע אין קישורים פנימיים רלוונטיים להצגה.</p>\n")
         )
@@ -189,8 +209,8 @@ def generate_daily_article_draft(db: Session) -> ContentArticleDraft:
         ],
     }
     section_prompts = [
-        {"section": "פתיח", "placement_hint": "[IMAGE_1_HERE]", "prompt": f"{slug.replace('-', ' ')} wood chips smoking inside offset smoker with clean blue smoke around brisket"},
-        {"section": "שלב-אחר-שלב", "placement_hint": "[IMAGE_2_HERE]", "prompt": f"Close-up of Hickory Oak Apple wood chips feeding smoker firebox, stable temperature gauges and smoke flow"},
+        {"section": "פתיח", "placement_hint": "[IMAGE_1_HERE]", "prompt": "Close-up of different wood chip types by texture and color (Hickory, Oak, Apple, Mesquite, Cherry), physically separated piles, no text in image, realistic studio lighting"},
+        {"section": "שלב-אחר-שלב", "placement_hint": "[IMAGE_2_HERE]", "prompt": "Smoker box filled with wood chips producing thin blue smoke inside a grill smoker chamber, realistic BBQ photo, no text"},
     ]
     draft = ContentArticleDraft(
         status="CONTENT_DRAFT", topic_title=title, title=title, slug=slug,
@@ -201,7 +221,7 @@ def generate_daily_article_draft(db: Session) -> ContentArticleDraft:
         internal_links_json=json.dumps(related, ensure_ascii=False),
         faq_schema_json=json.dumps(faq_schema, ensure_ascii=False),
         section_image_prompts_json=json.dumps(section_prompts, ensure_ascii=False),
-        featured_image_prompt=f"Apple wood chips smoking inside offset smoker with blue smoke around brisket, realistic BBQ photography",
+        featured_image_prompt="wood chips in smoker box with thin blue smoke inside grill smoker, meat in background, realistic BBQ photography",
         image_alt_text=f"{title} - הדגמה על גריל", image_title=f"תמונת שער: {title}", image_caption="הדגמה מעשית של השיטה במאמר.",
         image_filename_slug=f"compass-grill-{slug}", image_style_rules="realistic outdoor BBQ photography",
         generated_image_url=None, uploaded_media_id=None, image_publish_status="NOT_PUBLISHED",

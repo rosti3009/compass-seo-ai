@@ -306,13 +306,34 @@ def test_regression_wood_chips_topic_quality_and_prompts(client: TestClient, mon
     assert '<h1' not in body
     assert draft['slug'] != 'compass-grill-article'
     assert draft['slug'] == 'wood-chips-for-smoking-meat'
-    assert 'hickory' in body and 'oak' in body and 'apple' in body
+    assert all(term in body for term in ['hickory', 'oak', 'apple', 'mesquite'])
+    assert 'thin blue smoke' in body
     prompt_blob = (draft['featured_image_prompt'] + ' ' + ' '.join(i.get('prompt', '') for i in draft.get('section_image_prompts', []))).lower()
-    assert any(t in prompt_blob for t in ['wood chips', 'smoker', 'smoke'])
+    assert any(t in prompt_blob for t in ['smoker box', 'wood chips'])
 
-    assert float(draft["quality"]["article_quality_score"]) > 70
+    assert float(draft["quality"]["article_quality_score"]) > 75
 
     details = client.get(f"/content/articles/{draft['id']}").json()['draft']
     assert details['debug']['generator_version'] == 'v2-topic-specific-2026-05-25'
     assert details['debug']['h1_removed'] is True
     assert details['debug']['slug_source'] in {'title', 'focus_keyword', 'topic_mapping', 'hard_fallback'}
+
+
+def test_generate_image_returns_clear_error_when_provider_has_no_url(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    draft = client.post('/content/articles/generate-daily-draft').json()['draft']
+
+    class _BadProvider:
+        def generate_hero_image(self, _prompt: str, *, draft_slug: str):
+            from app.services.image_generation import ImageGenerationResult
+            return ImageGenerationResult(
+                enabled=True,
+                provider='broken-provider',
+                status='generated',
+                image_url=None,
+                message_he=f'generated for {draft_slug}',
+            )
+
+    monkeypatch.setattr('app.api.routes.get_image_provider', lambda: _BadProvider())
+    response = client.post(f"/content/articles/{draft['id']}/generate-image")
+    assert response.status_code == 502
+    assert 'without image URL' in response.json()['detail']
