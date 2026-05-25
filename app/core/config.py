@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     istore_admin_cookie: str | None = None
     istore_xsrf_token: str | None = None
     istore_inertia_version: str | None = None
+    istore_create_submit_mode: str = "form"
     istore_language_id: int = 3
     istore_blog_is_blog: int = 0
     openai_api_key: str | None = None

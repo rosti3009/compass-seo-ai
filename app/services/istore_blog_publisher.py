@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+from json import dumps as json_dumps
 from typing import Any
 from urllib.parse import parse_qs, urljoin, urlparse
 
@@ -38,6 +39,7 @@ class IStoreCreateResult:
 
 
 CREATE_REDIRECT_PATH = "/client/shop_information/create"
+VALID_SUBMIT_MODES = {"json", "form", "multipart"}
 
 
 class IStoreAdminShopInformationPublisher:
@@ -84,11 +86,13 @@ class IStoreAdminShopInformationPublisher:
 
     def publish(self, draft: ContentArticleDraft, dry_run: bool = False) -> dict[str, Any]:
         payload = self._build_payload(draft)
+        submit_mode = self._resolve_submit_mode()
         if dry_run:
             contract = self._sanitized_request_contract(payload)
             return {
                 "dry_run": True,
                 "endpoint": CREATE_REDIRECT_PATH,
+                "submit_mode": submit_mode,
                 "payload": payload,
                 "headers": self._build_create_headers(sanitize=True),
                 "request_contract": contract,
@@ -128,12 +132,15 @@ class IStoreAdminShopInformationPublisher:
 
     def _create_shop_information(self, payload: dict[str, Any]) -> IStoreCreateResult:
         self._validate_create_payload(payload)
+        submit_mode = self._resolve_submit_mode()
         url = urljoin(self.base_url, CREATE_REDIRECT_PATH.lstrip("/"))
         headers = self._build_create_headers(sanitize=False)
+        request_kwargs = self._build_submit_payload(payload, submit_mode)
         sanitized_contract = self._sanitized_request_contract(payload)
         logger.info(
-            "[ISTORE BLOG PUBLISH] sanitized request contract: endpoint=%s payload_keys=%s language_id=%s is_blog=%s has_cookie=%s cookie_names=%s has_xsrf=%s has_inertia_version=%s",
+            "[ISTORE BLOG PUBLISH] sanitized request contract: endpoint=%s submit_mode=%s payload_keys=%s language_id=%s is_blog=%s has_cookie=%s cookie_names=%s has_xsrf=%s has_inertia_version=%s",
             sanitized_contract["endpoint"],
+            submit_mode,
             sorted((sanitized_contract.get("payload") or {}).keys()),
             self.language_id,
             (sanitized_contract.get("payload") or {}).get("is_blog"),
@@ -142,8 +149,13 @@ class IStoreAdminShopInformationPublisher:
             sanitized_contract.get("xsrf_token_present"),
             sanitized_contract.get("inertia_version_present"),
         )
-        response = self.session.post(url, headers=headers, json=payload, timeout=self.timeout_seconds, allow_redirects=False)
-        self._log_create_response(response)
+        logger.info(
+            "ISTORE submit request: mode=%s outgoing_content_type=%s",
+            submit_mode,
+            headers.get("Content-Type", "[auto]"),
+        )
+        response = self.session.post(url, headers=headers, timeout=self.timeout_seconds, allow_redirects=False, **request_kwargs)
+        self._log_create_response(response, submit_mode)
         if response.status_code != 302:
             raise IStoreBlogPublishError(
                 f"ISTORE admin create failed: expected 302 redirect, got HTTP {response.status_code}"
@@ -170,9 +182,9 @@ class IStoreAdminShopInformationPublisher:
         )
 
     def _build_create_headers(self, sanitize: bool) -> dict[str, str]:
+        submit_mode = self._resolve_submit_mode()
         headers = {
             "Accept": "text/html, application/xhtml+xml",
-            "Content-Type": "application/json",
             "X-Inertia": "true",
             "X-Requested-With": "XMLHttpRequest",
             "X-XSRF-TOKEN": self.xsrf_token,
@@ -185,6 +197,10 @@ class IStoreAdminShopInformationPublisher:
             ),
             "Cookie": self.admin_cookie,
         }
+        if submit_mode == "json":
+            headers["Content-Type"] = "application/json"
+        elif submit_mode == "form":
+            headers["Content-Type"] = "application/x-www-form-urlencoded"
         if settings.istore_inertia_version:
             headers["X-Inertia-Version"] = settings.istore_inertia_version
         if sanitize:
@@ -193,6 +209,52 @@ class IStoreAdminShopInformationPublisher:
                 for key, value in headers.items()
             }
         return headers
+
+    def _resolve_submit_mode(self) -> str:
+        configured = str(settings.istore_create_submit_mode or "form").strip().lower()
+        if configured in VALID_SUBMIT_MODES:
+            return configured
+        logger.warning("Invalid ISTORE_CREATE_SUBMIT_MODE '%s'; falling back to form", configured)
+        return "form"
+
+    def _build_submit_payload(self, payload: dict[str, Any], submit_mode: str) -> dict[str, Any]:
+        if submit_mode == "json":
+            return {"json": payload}
+
+        flattened = self._flatten_payload(payload)
+        if submit_mode == "form":
+            return {"data": flattened}
+        if submit_mode == "multipart":
+            return {"files": [(k, (None, v)) for k, v in flattened]}
+        return {"json": payload}
+
+    def _flatten_payload(self, payload: dict[str, Any]) -> list[tuple[str, str]]:
+        output: list[tuple[str, str]] = []
+
+        def _walk(prefix: str, value: Any) -> None:
+            if isinstance(value, dict):
+                for key, inner in value.items():
+                    key_prefix = f"{prefix}[{key}]" if prefix else str(key)
+                    _walk(key_prefix, inner)
+                return
+            if isinstance(value, list):
+                for idx, inner in enumerate(value):
+                    key_prefix = f"{prefix}[{idx}]"
+                    _walk(key_prefix, inner)
+                if not value:
+                    output.append((prefix, "[]"))
+                return
+            if value is None:
+                output.append((prefix, ""))
+            elif isinstance(value, bool):
+                output.append((prefix, "1" if value else "0"))
+            elif isinstance(value, (int, float, str)):
+                output.append((prefix, str(value)))
+            else:
+                output.append((prefix, json_dumps(value, ensure_ascii=False)))
+
+        _walk("", payload)
+        return output
 
     def _sanitized_request_contract(self, payload: dict[str, Any]) -> dict[str, Any]:
         headers = self._build_create_headers(sanitize=False)
@@ -293,13 +355,21 @@ class IStoreAdminShopInformationPublisher:
                     return extracted
         return None
 
-    def _log_create_response(self, response: requests.Response) -> None:
+    def _log_create_response(self, response: requests.Response, submit_mode: str) -> None:
         safe_text = self._sanitize((getattr(response, "text", "") or "")[:500])
+        diagnostic_headers = {
+            "location": self._sanitize(response.headers.get("Location", "")),
+            "content-type": self._sanitize(response.headers.get("Content-Type", "")),
+            "x-inertia": self._sanitize(response.headers.get("X-Inertia", "")),
+            "set-cookie": self._sanitize(response.headers.get("Set-Cookie", "")),
+        }
         logger.info(
-            "ISTORE create response: status_code=%s location=%s response_url=%s response_text=%s",
+            "ISTORE create response: submit_mode=%s status_code=%s location=%s response_url=%s response_headers=%s response_text=%s",
+            submit_mode,
             response.status_code,
-            self._sanitize(response.headers.get("Location", "")),
+            diagnostic_headers["location"],
             self._sanitize(getattr(response, "url", "")),
+            diagnostic_headers,
             safe_text,
         )
 
