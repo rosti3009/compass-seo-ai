@@ -496,5 +496,31 @@ def test_generate_image_response_includes_required_diagnostics(client: TestClien
     monkeypatch.setattr('app.api.routes.get_image_provider', lambda: _Provider())
     payload = client.post(f"/content/articles/{draft['id']}/generate-image").json()
     diagnostics = payload['diagnostics']
-    for key in ['provider_name','provider_response_received','raw_provider_url_present','generated_image_url','featured_image_url','image_url_present','image_storage_success','image_generation_metadata']:
+    for key in ['provider_name','provider_response_received','raw_provider_url_present','generated_image_url','featured_image_url','image_url_present','image_storage_success','image_file_saved','image_public_url','image_file_path','image_generation_metadata']:
         assert key in diagnostics
+
+
+def test_stub_provider_saves_local_image_and_returns_static_url(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.core.config import settings
+
+    draft = client.post('/content/articles/generate-daily-draft').json()['draft']
+    monkeypatch.setattr(settings, 'image_provider', 'openai')
+
+    response = client.post(f"/content/articles/{draft['id']}/generate-image")
+    assert response.status_code == 200
+    payload = response.json()
+
+    image_url = payload['generated_image_url']
+    assert image_url.startswith('/static/generated-images/')
+    assert 'images.example.com' not in image_url
+
+    file_check = client.get(image_url)
+    assert file_check.status_code == 200
+    assert file_check.headers['content-type'].startswith('image/')
+
+    assert payload['open_image_url'] == image_url
+    assert payload['download_image_url'] == image_url
+    assert payload['copy_image_url'] == image_url
+    assert payload['diagnostics']['image_file_saved'] is True
+    assert payload['diagnostics']['image_public_url'] == image_url
+    assert payload['diagnostics']['image_file_path'] == f"app{image_url}"

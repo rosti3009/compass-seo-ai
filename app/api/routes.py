@@ -3160,6 +3160,9 @@ def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, obje
     provider = get_image_provider()
     draft.featured_image_prompt = build_realistic_hero_prompt(draft.featured_image_prompt)
     result = provider.generate_hero_image(draft.featured_image_prompt, draft_slug=draft.slug)
+    image_file_path = None
+    image_public_url = result.image_url
+    image_file_saved = False
     diagnostics = {
         "provider_name": result.provider,
         "provider_response_received": True,
@@ -3168,6 +3171,9 @@ def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, obje
         "featured_image_url": result.image_url,
         "image_url_present": bool(result.image_url),
         "image_storage_success": False,
+        "image_file_saved": image_file_saved,
+        "image_public_url": image_public_url,
+        "image_file_path": image_file_path,
         "image_generation_metadata": {
             "width": result.width,
             "height": result.height,
@@ -3210,6 +3216,9 @@ def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, obje
         "generated_at": result.generated_at,
     }, ensure_ascii=False)
     diagnostics["image_storage_success"] = bool(result.image_url)
+    diagnostics["image_file_saved"] = bool(result.image_url and str(result.image_url).startswith("/static/generated-images/"))
+    diagnostics["image_public_url"] = result.image_url
+    diagnostics["image_file_path"] = (f"app{result.image_url}" if result.image_url and result.image_url.startswith("/static/") else None)
     db.add(draft)
     db.commit()
     db.refresh(draft)
