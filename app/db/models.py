@@ -716,6 +716,7 @@ class ContentArticleDraft(Base):
     featured_image_status: Mapped[str] = mapped_column(String(64), default="planned", nullable=False)
     featured_image_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     featured_image_local_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    image_generation_metadata_json: Mapped[str] = mapped_column(Text, default="{}")
     verification_status: Mapped[str] = mapped_column(String(64), default="NOT_VERIFIED", nullable=False)
     published_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -758,6 +759,7 @@ class ContentArticleDraft(Base):
             "featured_image_status": self.featured_image_status,
             "featured_image_url": self.featured_image_url,
             "featured_image_local_path": self.featured_image_local_path,
+            "image_generation_metadata": _json_load(self.image_generation_metadata_json, {}),
             "verification_status": self.verification_status,
             "published_url": self.published_url,
             "published_at": self.published_at.isoformat() if self.published_at else None,
