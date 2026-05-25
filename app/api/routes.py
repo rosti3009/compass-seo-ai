@@ -1673,7 +1673,23 @@ def generate_daily_content_article(db: DatabaseSession) -> dict[str, object]:
 def generate_random_daily_content_article(db: DatabaseSession) -> dict[str, object]:
     draft, reused, _ = generate_daily_article_draft(db, randomize=True)
     quality = _article_quality_summary(draft)
-    return {"success": True, "selected_topic": draft.topic_title, "reused": reused, "draft_id": draft.id, "title": draft.title, "slug": draft.slug, "quality_score": quality.get("article_quality_score")}
+    logger.info(
+        "[RANDOM_DAILY_ARTICLE_GENERATION] selected_topic=%s reused=%s draft_id=%s slug=%s",
+        draft.topic_title,
+        reused,
+        draft.id,
+        draft.slug,
+    )
+    return {
+        "success": True,
+        "selected_topic": draft.topic_title,
+        "reused": reused,
+        "draft_id": draft.id,
+        "title": draft.title,
+        "slug": draft.slug,
+        "article_quality_score": quality.get("article_quality_score"),
+        "publish_readiness": quality.get("publish_readiness"),
+    }
 
 
 @router.post("/content/articles/generate-topic-draft")

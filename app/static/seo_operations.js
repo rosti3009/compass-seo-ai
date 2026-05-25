@@ -1,5 +1,7 @@
 const HEBREW_PERSISTENCE_MESSAGE = "הפעולה הסתיימה ונשמרה. חזרה אחורה בדפדפן לא מבטלת אותה.";
 const RISK_ORDER = { critical: 4, high: 3, medium: 2, low: 1 };
+const RANDOM_DAILY_ENDPOINT = "/content/articles/generate-random-daily-draft";
+let randomDailyRequestInFlight = false;
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
@@ -129,8 +131,11 @@ async function runDashboardAction(button) {
   const panel = document.getElementById(targetId) || document.getElementById("operation-result");
   const original = button.textContent;
   const label = button.dataset.label || original;
+  const isRandomDailyAction = (button.dataset.endpoint || "") === RANDOM_DAILY_ENDPOINT;
+  if (isRandomDailyAction && randomDailyRequestInFlight) return;
+  if (isRandomDailyAction) randomDailyRequestInFlight = true;
   button.disabled = true;
-  button.textContent = `⏳ ${label}`;
+  button.textContent = isRandomDailyAction ? "יוצר מאמר יומי רנדומלי..." : `⏳ ${label}`;
   if (panel) panel.innerHTML = `<h2>מריץ פעולה: ${escapeHtml(label)}</h2><p><span class="spinner"></span> נא להמתין...</p>`;
   try {
     const headers = { Accept: "application/json" };
@@ -144,15 +149,24 @@ async function runDashboardAction(button) {
     const payload = contentType.includes("application/json") ? await response.json() : { message: await response.text() };
     if (!response.ok) {
       const detail = payload.detail || payload.message || `HTTP ${response.status}`;
+      if (isRandomDailyAction && panel) panel.innerHTML = `<div class="notice error"><strong>שגיאה ביצירת מאמר יומי רנדומלי:</strong> ${escapeHtml(typeof detail === "string" ? detail : JSON.stringify(detail))}</div>`;
       renderResult(panel, label, { ...payload, errors: [typeof detail === "string" ? detail : JSON.stringify(detail)] }, false);
+      return;
+    }
+    if (isRandomDailyAction && payload.success && payload.draft_id) {
+      const successMessage = `המאמר נוצר בהצלחה: ${payload.selected_topic || ""} · ${payload.title || ""}`;
+      if (panel) panel.innerHTML = `<div class="notice success">${escapeHtml(successMessage)}</div>`;
+      window.location.assign(`/seo/simple-workspace#article-${payload.draft_id}`);
       return;
     }
     renderResult(panel, label, payload, true);
   } catch (error) {
+    if (isRandomDailyAction && panel) panel.innerHTML = `<div class="notice error"><strong>שגיאה ביצירת מאמר יומי רנדומלי:</strong> ${escapeHtml(error.message)}</div>`;
     renderResult(panel, label, { errors: [error.message] }, false);
   } finally {
     button.disabled = false;
     button.textContent = original;
+    if (isRandomDailyAction) randomDailyRequestInFlight = false;
   }
 }
 

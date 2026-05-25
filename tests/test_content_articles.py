@@ -1,4 +1,5 @@
 from collections.abc import Generator
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -650,8 +651,25 @@ def test_generate_random_daily_endpoint_response(client: TestClient) -> None:
     assert payload['selected_topic']
     assert isinstance(payload['reused'], bool)
     assert payload['draft_id'] > 0
+    assert payload['title']
     assert payload['slug']
-    assert payload['quality_score'] is not None
+    assert payload['article_quality_score'] is not None
+    assert payload['publish_readiness'] is not None
+
+
+def test_generate_random_daily_creates_only_one_draft(client: TestClient) -> None:
+    before = client.get('/content/articles/drafts').json()['drafts']
+    response = client.post('/content/articles/generate-random-daily-draft')
+    assert response.status_code == 200
+    after = client.get('/content/articles/drafts').json()['drafts']
+    assert len(after) == len(before) + 1
+
+
+def test_generate_random_daily_selects_random_topic(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr('app.services.content_articles.random.choice', lambda topics: topics[-1])
+    payload = client.post('/content/articles/generate-random-daily-draft').json()
+    assert payload['success'] is True
+    assert payload['selected_topic'] == 'איך להכין כנפיים קריספיות על הגריל'
 
 
 def test_topic_reuse_after_pool_exhaustion(client: TestClient) -> None:
@@ -660,3 +678,18 @@ def test_topic_reuse_after_pool_exhaustion(client: TestClient) -> None:
         reused_flags.append(client.post('/content/articles/generate-random-daily-draft').json()['reused'])
     assert any(flag is False for flag in reused_flags)
     assert reused_flags[-1] is True
+
+
+def test_simple_workspace_random_daily_button_wiring(client: TestClient) -> None:
+    response = client.get('/seo/simple-workspace')
+    assert response.status_code == 200
+    html = response.text
+    assert 'data-action="fetch"' in html
+    assert 'data-endpoint="/content/articles/generate-random-daily-draft"' in html
+
+
+def test_random_daily_button_disabled_state_and_hebrew_loading_text_in_js() -> None:
+    js = Path('app/static/seo_operations.js').read_text(encoding='utf-8')
+    assert 'randomDailyRequestInFlight' in js
+    assert 'button.disabled = true;' in js
+    assert 'יוצר מאמר יומי רנדומלי...' in js
