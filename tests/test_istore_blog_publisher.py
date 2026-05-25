@@ -50,6 +50,16 @@ def test_payload_shape_matches_shop_information_create_contract() -> None:
     }
 
 
+def test_payload_shape_uses_minimal_payload_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    publisher = _publisher()
+    monkeypatch.setattr("app.services.istore_blog_publisher.settings.istore_create_minimal_payload", True)
+    payload = publisher._build_payload(_Draft())
+    assert payload["descriptions"]["3"]["title"] == "בדיקת יצירת עמוד"
+    assert payload["descriptions"]["3"]["description"] == "<p>בדיקה</p>"
+    assert payload["dynamic_fields"] == []
+    assert payload["is_blog"] == 1
+
+
 def test_extract_id_from_302_location_header() -> None:
     publisher = _publisher()
     assert publisher._extract_shop_information_id("/client/shop_information/edit/98765") == "98765"
@@ -101,6 +111,30 @@ def test_dry_run_shows_payload_without_tokens_or_cookies() -> None:
     assert contract["xsrf_token_present"] is True
     assert contract["xsrf_source"] == "parsed"
     assert contract["inertia_version_present"] is False
+    assert contract["minimal_payload"] is False
+    assert isinstance(contract["payload_description_length"], int)
+    assert isinstance(contract["payload_title_length"], int)
+    assert isinstance(contract["estimated_json_length"], int)
+
+
+def test_publish_returns_minimal_test_result_without_live_verification(monkeypatch: pytest.MonkeyPatch) -> None:
+    publisher = _publisher()
+    monkeypatch.setattr("app.services.istore_blog_publisher.settings.istore_create_minimal_payload", True)
+
+    class _CreateResponse:
+        status_code = 302
+        headers = {"Location": "/client/shop_information/edit/123"}
+        url = "https://app.istores.co.il/client/shop_information/edit/123"
+        text = "ok"
+
+        @staticmethod
+        def json() -> dict[str, object]:
+            return {}
+
+    monkeypatch.setattr(publisher.session, "post", lambda *a, **k: _CreateResponse())
+    out = publisher.publish(_Draft())
+    assert out["minimal_payload_test"] is True
+    assert out["external_content_id"] == "123"
 
 
 def test_raw_cookie_and_xsrf_override_are_used_with_sanitized_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:

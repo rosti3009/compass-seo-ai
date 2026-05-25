@@ -245,3 +245,31 @@ def test_publish_404_verification_keeps_draft_not_published(
     check = client.get(f"/content/articles/{draft['id']}").json()['draft']
     assert check['status'] == 'APPROVED'
     assert check['verification_status'] == 'NOT_VERIFIED'
+
+
+def test_minimal_payload_publish_returns_success_without_marking_published(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    draft = client.post('/content/articles/generate-daily-draft').json()['draft']
+    client.post(f"/content/articles/{draft['id']}/approve")
+
+    monkeypatch.setattr('app.api.routes._blog_publish_adapter_ready', lambda: True)
+
+    class _Publisher:
+        def publish(self, _draft):
+            return {
+                "external_content_id": "555",
+                "minimal_payload_test": True,
+            }
+
+    monkeypatch.setattr('app.api.routes.IStoreBlogPublisher.from_settings', lambda: _Publisher())
+
+    response = client.post(f"/content/articles/{draft['id']}/publish")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['published'] is False
+    assert payload['external_content_id'] == '555'
+    assert payload['result_he'] == 'ISTORE minimal create test succeeded; full article payload still needs investigation.'
+
+    check = client.get(f"/content/articles/{draft['id']}").json()['draft']
+    assert check['status'] == 'APPROVED'

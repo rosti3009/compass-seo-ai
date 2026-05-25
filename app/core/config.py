@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     istore_xsrf_token_override: str | None = None
     istore_inertia_version: str | None = None
     istore_create_submit_mode: str = "form"
+    istore_create_minimal_payload: bool = False
     istore_language_id: int = 3
     istore_blog_is_blog: int = 0
     openai_api_key: str | None = None
