@@ -40,6 +40,20 @@ class IStoreCreateResult:
 
 CREATE_REDIRECT_PATH = "/client/shop_information/create"
 VALID_SUBMIT_MODES = {"json", "form", "multipart"}
+MOBILE_BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/148.0.0.0 Mobile Safari/537.36"
+)
+BROWSER_HEADERS = {
+    "Accept-Language": "he,en;q=0.9,en-US;q=0.8,ru;q=0.7",
+    "sec-ch-ua": '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"',
+    "sec-ch-ua-mobile": "?1",
+    "sec-ch-ua-platform": '"Android"',
+    "sec-fetch-dest": "empty",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-site": "same-origin",
+    "priority": "u=1, i",
+}
 
 
 class IStoreAdminShopInformationPublisher:
@@ -213,6 +227,7 @@ class IStoreAdminShopInformationPublisher:
         submit_mode = self._resolve_submit_mode()
         cookie_header = (settings.istore_raw_cookie_header or self.admin_cookie or "").strip()
         xsrf_token = (settings.istore_xsrf_token_override or self.xsrf_token or "").strip()
+        use_browser_headers = bool(settings.istore_use_browser_headers)
         headers = {
             "Accept": "text/html, application/xhtml+xml",
             "X-Inertia": "true",
@@ -227,6 +242,10 @@ class IStoreAdminShopInformationPublisher:
             ),
             "Cookie": cookie_header,
         }
+        if use_browser_headers:
+            headers["User-Agent"] = MOBILE_BROWSER_USER_AGENT
+            headers.update(BROWSER_HEADERS)
+
         if submit_mode == "json":
             headers["Content-Type"] = "application/json"
         elif submit_mode == "form":
@@ -314,6 +333,8 @@ class IStoreAdminShopInformationPublisher:
             "payload_description_length": len(description),
             "payload_title_length": len(title),
             "estimated_json_length": estimated_json_length,
+            "use_browser_headers": bool(settings.istore_use_browser_headers),
+            "browser_headers": {k: v for k, v in self._sanitize_headers_for_debug(headers).items() if k in BROWSER_HEADERS},
         }
 
     def _sanitize_headers_for_debug(self, headers: dict[str, str]) -> dict[str, str]:
