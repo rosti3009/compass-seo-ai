@@ -1824,6 +1824,7 @@ def debug_istore_browser_create_test(draft_id: int, db: DatabaseSession, dry_run
         "screenshot_path": result.get("screenshot_path"),
         "selector_availability": result.get("selector_availability"),
         "planned_fields": result.get("planned_fields"),
+        "dom_diagnostics": result.get("dom_diagnostics"),
         "dry_run": dry_run,
     }
 
