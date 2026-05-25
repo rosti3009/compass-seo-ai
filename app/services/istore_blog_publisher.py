@@ -87,18 +87,28 @@ class IStoreAdminShopInformationPublisher:
     def publish(self, draft: ContentArticleDraft, dry_run: bool = False) -> dict[str, Any]:
         payload = self._build_payload(draft)
         submit_mode = self._resolve_submit_mode()
+        minimal_payload = bool(settings.istore_create_minimal_payload)
         if dry_run:
             contract = self._sanitized_request_contract(payload)
             return {
                 "dry_run": True,
                 "endpoint": CREATE_REDIRECT_PATH,
                 "submit_mode": submit_mode,
+                "minimal_payload": minimal_payload,
                 "payload": payload,
                 "headers": self._build_create_headers(sanitize=True),
                 "request_contract": contract,
             }
 
         create_result = self._create_shop_information(payload)
+        if minimal_payload:
+            return {
+                "endpoint": CREATE_REDIRECT_PATH,
+                "external_content_id": create_result.external_content_id,
+                "redirect_location": create_result.location,
+                "minimal_payload_test": True,
+                "result_he": "ISTORE minimal create test succeeded; full article payload still needs investigation.",
+            }
         live_url = self._resolve_live_url(draft, create_result.external_content_id)
         verification = self._verify_live_url(live_url, draft.title)
 
@@ -112,6 +122,24 @@ class IStoreAdminShopInformationPublisher:
 
     def _build_payload(self, draft: ContentArticleDraft) -> dict[str, Any]:
         language_id = str(self.language_id)
+        if settings.istore_create_minimal_payload:
+            return {
+                "descriptions": {
+                    language_id: {
+                        "title": "בדיקת יצירת עמוד",
+                        "description": "<p>בדיקה</p>",
+                        "meta_title": "בדיקת יצירת עמוד",
+                        "meta_description": "בדיקה",
+                    }
+                },
+                "dynamic_fields": [],
+                "end_date": None,
+                "is_blog": self.blog_is_blog,
+                "keyword": "",
+                "sort_order": 0,
+                "start_date": None,
+                "status": 1,
+            }
         return {
             "descriptions": {
                 language_id: {
@@ -264,6 +292,11 @@ class IStoreAdminShopInformationPublisher:
         duplicate_cookie_names = sorted({name for name in cookie_names if cookie_names.count(name) > 1})
         cookie_source = "raw_header" if (settings.istore_raw_cookie_header or "").strip() else "parsed"
         xsrf_source = "override" if (settings.istore_xsrf_token_override or "").strip() else "parsed"
+        language_id = str(self.language_id)
+        desc = (payload.get("descriptions") or {}).get(language_id, {}) if isinstance(payload.get("descriptions"), dict) else {}
+        title = str(desc.get("title") or "")
+        description = str(desc.get("description") or "")
+        estimated_json_length = len(json_dumps(payload, ensure_ascii=False))
         return {
             "endpoint": CREATE_REDIRECT_PATH,
             "method": "POST",
@@ -277,6 +310,10 @@ class IStoreAdminShopInformationPublisher:
             "xsrf_length": len(headers.get("X-XSRF-TOKEN", "")),
             "xsrf_source": xsrf_source,
             "inertia_version_present": bool(headers.get("X-Inertia-Version")),
+            "minimal_payload": bool(settings.istore_create_minimal_payload),
+            "payload_description_length": len(description),
+            "payload_title_length": len(title),
+            "estimated_json_length": estimated_json_length,
         }
 
     def _sanitize_headers_for_debug(self, headers: dict[str, str]) -> dict[str, str]:

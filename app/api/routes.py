@@ -1708,7 +1708,11 @@ def publish_content_draft(draft_id: int, db: DatabaseSession, dry_run: bool = Fa
         "destination_under_blog": bool(draft.target_url and draft.target_url.startswith("https://compassgrill.co.il/blog/")),
     }
     if dry_run:
-        contract = IStoreBlogPublisher.from_settings().publish(draft, dry_run=True).get("request_contract")
+        contract: dict[str, object] | None = None
+        try:
+            contract = IStoreBlogPublisher.from_settings().publish(draft, dry_run=True).get("request_contract")
+        except IStoreBlogPublishError:
+            contract = None
         return {
             "success": True,
             "dry_run": True,
@@ -1726,6 +1730,19 @@ def publish_content_draft(draft_id: int, db: DatabaseSession, dry_run: bool = Fa
         raise HTTPException(status_code=400, detail=f"פרסום נכשל: {exc}") from exc
 
     external_content_id = str(result.get("external_content_id") or "").strip()
+    if bool(result.get("minimal_payload_test")):
+        return {
+            "success": True,
+            "published": False,
+            "publish_status": draft.status,
+            "verification_status": draft.verification_status,
+            "external_content_id": external_content_id,
+            "result_he": "ISTORE minimal create test succeeded; full article payload still needs investigation.",
+            "publish_adapter": "IStoreBlogPublisher",
+            "publish_result": result,
+            "draft": draft.to_dict(),
+        }
+
     live_url = str(result.get("live_url") or "").strip()
     verification = result.get("verification") if isinstance(result.get("verification"), dict) else {}
     verified_ok = bool(verification.get("title_found")) and int(verification.get("status_code", 0)) == 200
@@ -1768,6 +1785,10 @@ def debug_istore_create_dry_run(draft_id: int, db: DatabaseSession) -> dict[str,
         "method": contract.get("method"),
         "headers": contract.get("headers", {}),
         "payload": contract.get("payload", {}),
+        "minimal_payload": contract.get("minimal_payload", False),
+        "payload_description_length": contract.get("payload_description_length", 0),
+        "payload_title_length": contract.get("payload_title_length", 0),
+        "estimated_json_length": contract.get("estimated_json_length", 0),
         "cookie_names": contract.get("cookie_names", []),
         "xsrf_length": contract.get("xsrf_length", 0),
     }
