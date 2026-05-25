@@ -183,3 +183,30 @@ def test_scheduler_preserves_no_auto_publish_safety(
     assert safety["auto_publish"] is False
     assert safety["auto_mark_publishing_packages_applied"] is False
     assert response.json()["runs"][0]["publishing_packages_created"] == 0
+
+def test_daily_article_env_disabled_by_default() -> None:
+    from app.core.config import Settings
+
+    settings = Settings()
+    assert settings.daily_article_generation_enabled is False
+
+
+def test_scheduler_generates_one_draft_per_day_guard(client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.db.models import ContentArticleDraft
+
+    monkeypatch.setattr('app.services.seo_scheduler.settings.daily_article_generation_enabled', True)
+    monkeypatch.setattr('app.services.seo_scheduler.settings.daily_article_generation_timezone', 'Asia/Jerusalem')
+
+    def fake_run_seo_automation(db: Session, max_tasks: int = 10, generate_articles: bool = False, sync_gsc: bool = True) -> SEOAutomationRun:
+        run = SEOAutomationRun(status='completed', summary_json='{}')
+        db.add(run); db.commit(); db.refresh(run)
+        return run
+
+    monkeypatch.setattr('app.services.seo_scheduler.run_seo_automation', fake_run_seo_automation)
+    for i in range(2):
+        db_session.add(SEOScheduleConfig(name=f'due {i}', enabled=True, frequency='daily', hour_utc=5, max_tasks=1, generate_articles=False, sync_gsc=False, next_run_at=datetime.now(UTC)-timedelta(minutes=1)))
+    db_session.commit()
+
+    response = client.post('/seo/scheduler/run-due')
+    assert response.status_code == 200
+    assert db_session.query(ContentArticleDraft).count() == 1

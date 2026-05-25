@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
     content_daily_articles_enabled: bool = False
+    daily_article_generation_enabled: bool = False
+    daily_article_generation_hour: int = Field(default=8, ge=0, le=23)
+    daily_article_generation_timezone: str = "Asia/Jerusalem"
     image_provider: str | None = None
 
 
