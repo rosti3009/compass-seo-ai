@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     istore_xsrf_token: str | None = None
     istore_inertia_version: str | None = None
     istore_language_id: int = 3
-    istore_blog_is_blog: int = 1
+    istore_blog_is_blog: int = 0
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
     content_daily_articles_enabled: bool = False

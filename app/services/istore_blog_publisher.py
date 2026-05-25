@@ -85,11 +85,13 @@ class IStoreAdminShopInformationPublisher:
     def publish(self, draft: ContentArticleDraft, dry_run: bool = False) -> dict[str, Any]:
         payload = self._build_payload(draft)
         if dry_run:
+            contract = self._sanitized_request_contract(payload)
             return {
                 "dry_run": True,
                 "endpoint": CREATE_REDIRECT_PATH,
                 "payload": payload,
                 "headers": self._build_create_headers(sanitize=True),
+                "request_contract": contract,
             }
 
         create_result = self._create_shop_information(payload)
@@ -128,6 +130,18 @@ class IStoreAdminShopInformationPublisher:
         self._validate_create_payload(payload)
         url = urljoin(self.base_url, CREATE_REDIRECT_PATH.lstrip("/"))
         headers = self._build_create_headers(sanitize=False)
+        sanitized_contract = self._sanitized_request_contract(payload)
+        logger.info(
+            "[ISTORE BLOG PUBLISH] sanitized request contract: endpoint=%s payload_keys=%s language_id=%s is_blog=%s has_cookie=%s cookie_names=%s has_xsrf=%s has_inertia_version=%s",
+            sanitized_contract["endpoint"],
+            sorted((sanitized_contract.get("payload") or {}).keys()),
+            self.language_id,
+            (sanitized_contract.get("payload") or {}).get("is_blog"),
+            bool(sanitized_contract.get("cookie_names")),
+            sanitized_contract.get("cookie_names"),
+            sanitized_contract.get("xsrf_token_present"),
+            sanitized_contract.get("inertia_version_present"),
+        )
         response = self.session.post(url, headers=headers, json=payload, timeout=self.timeout_seconds, allow_redirects=False)
         self._log_create_response(response)
         if response.status_code != 302:
@@ -138,10 +152,7 @@ class IStoreAdminShopInformationPublisher:
         location = response.headers.get("Location", "")
         if self._is_create_form_redirect(location):
             raise IStoreBlogPublishError(
-                "ISTORE rejected create request and redirected back to create form "
-                f"(status_code={response.status_code}, location={self._sanitize(location)}, "
-                f"response_url={self._sanitize(getattr(response, 'url', ''))}, "
-                f"response_text={self._sanitize((getattr(response, 'text', '') or '')[:1000])})"
+                "ISTORE rejected create request. Compare manual request contract with /debug/istore/create-dry-run."
             )
 
         external_content_id = self._extract_shop_information_id(location, response)
@@ -182,6 +193,38 @@ class IStoreAdminShopInformationPublisher:
                 for key, value in headers.items()
             }
         return headers
+
+    def _sanitized_request_contract(self, payload: dict[str, Any]) -> dict[str, Any]:
+        headers = self._build_create_headers(sanitize=False)
+        cookie_names = self._cookie_names(headers.get("Cookie", ""))
+        return {
+            "endpoint": CREATE_REDIRECT_PATH,
+            "method": "POST",
+            "headers": self._sanitize_headers_for_debug(headers),
+            "payload": payload,
+            "cookie_names": cookie_names,
+            "xsrf_token_present": bool(headers.get("X-XSRF-TOKEN")),
+            "xsrf_length": len(headers.get("X-XSRF-TOKEN", "")),
+            "inertia_version_present": bool(headers.get("X-Inertia-Version")),
+        }
+
+    def _sanitize_headers_for_debug(self, headers: dict[str, str]) -> dict[str, str]:
+        sanitized: dict[str, str] = {}
+        for key, value in headers.items():
+            if key in {"Cookie", "X-XSRF-TOKEN"}:
+                continue
+            sanitized[key] = value
+        return sanitized
+
+    def _cookie_names(self, cookie_header: str) -> list[str]:
+        if not cookie_header:
+            return []
+        names: list[str] = []
+        for part in cookie_header.split(";"):
+            name = part.strip().split("=", 1)[0].strip()
+            if name:
+                names.append(name)
+        return names
 
     def _validate_create_payload(self, payload: dict[str, Any]) -> None:
         language_id = str(self.language_id)
