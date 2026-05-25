@@ -36,3 +36,12 @@ def test_image_provider_safely_disabled_and_prompt_realistic(monkeypatch) -> Non
     prompt = build_realistic_hero_prompt("Premium BBQ hero")
     assert "no text inside image" in prompt
     assert "no unrealistic meat" in prompt
+
+
+def test_stub_provider_returns_https_url_when_enabled(monkeypatch) -> None:
+    monkeypatch.setattr("app.services.image_generation.settings.image_provider", "openai")
+    provider = get_image_provider()
+    result = provider.generate_hero_image("bbq", draft_slug="test")
+    assert result.enabled is True
+    assert result.image_url is not None
+    assert result.image_url.startswith("https://")

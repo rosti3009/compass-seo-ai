@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 
 import requests
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -3161,10 +3161,19 @@ def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, obje
     draft.featured_image_prompt = build_realistic_hero_prompt(draft.featured_image_prompt)
     result = provider.generate_hero_image(draft.featured_image_prompt, draft_slug=draft.slug)
     diagnostics = {
+        "provider_name": result.provider,
         "provider_response_received": True,
+        "raw_provider_url_present": bool(result.image_url),
+        "generated_image_url": result.image_url,
+        "featured_image_url": result.image_url,
         "image_url_present": bool(result.image_url),
         "image_storage_success": False,
-        "provider_name": result.provider,
+        "image_generation_metadata": {
+            "width": result.width,
+            "height": result.height,
+            "provider": result.provider,
+            "generated_at": result.generated_at,
+        },
     }
     logger.info(
         "Image provider response for draft_id=%s slug=%s provider=%s status=%s image_url=%s diagnostics=%s",
@@ -3177,13 +3186,18 @@ def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, obje
     )
     if result.status == "generated" and not result.image_url:
         logger.warning(
-            "Image provider returned empty URL for generated image draft_id=%s provider=%s",
+            "Image provider returned empty URL for generated image draft_id=%s provider=%s diagnostics=%s",
             draft.id,
             result.provider,
+            diagnostics,
         )
-        raise HTTPException(
+        return JSONResponse(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Image provider reported success without image URL.",
+            content={
+                "success": False,
+                "error": "Image provider returned no URL",
+                "diagnostics": diagnostics,
+            },
         )
     draft.featured_image_status = result.status
     draft.image_publish_status = "NOT_PUBLISHED"
