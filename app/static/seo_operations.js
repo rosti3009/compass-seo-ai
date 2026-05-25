@@ -252,9 +252,20 @@ function renderArticlePreview(card, draft) {
   const container = card.querySelector("[data-preview-container]");
   if (!container) return;
   const imageUrl = draft.generated_image_url || draft.featured_image_url || "";
+  const imageAlt = draft.image_alt_text || "";
   const markers = `${draft.article_body || ""}\n[IMAGE_1_HERE]\n[IMAGE_2_HERE]`;
-  const previewHtml = `<article><h1>${escapeHtml(draft.title || "")}</h1>${imageUrl ? `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(draft.image_alt_text || "")}" style="max-width:320px;height:auto"/>` : ""}<div>${draft.article_body || ""}</div><pre>${escapeHtml(markers)}</pre></article>`;
+  const previewHtml = `<article><h1>${escapeHtml(draft.title || "")}</h1>${imageUrl ? `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(imageAlt)}" style="max-width:320px;height:auto"/>` : ""}<div>${draft.article_body || ""}</div><pre>${escapeHtml(markers)}</pre></article>`;
   container.innerHTML = previewHtml;
+  const previewImageBlock = card.querySelector("[data-preview-image-block]");
+  if (previewImageBlock) {
+    if (imageUrl) {
+      previewImageBlock.hidden = false;
+      previewImageBlock.innerHTML = `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(imageAlt)}" style="max-width:320px;height:auto"/><p><strong>ALT:</strong> ${escapeHtml(imageAlt)}</p>`;
+    } else {
+      previewImageBlock.hidden = true;
+      previewImageBlock.innerHTML = "";
+    }
+  }
   card.dataset.fullHtml = `<h1>${draft.title || ""}</h1>${imageUrl ? `<img src="${imageUrl}" alt="${draft.image_alt_text || ""}">` : ""}${draft.article_body || ""}`;
   card.dataset.cleanHtml = draft.article_body || "";
   card.dataset.previewHtml = markers;
@@ -274,10 +285,42 @@ async function runManualImageAction(button, action) {
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.detail || "הפעולה נכשלה");
     const draft = payload.draft || {};
+    const generatedImageUrl = draft.generated_image_url
+      || payload.generated_image_url
+      || draft.featured_image_url
+      || payload.featured_image_url
+      || payload.open_image_url
+      || payload.download_image_url
+      || "";
+    const imageStatus = draft.featured_image_status || payload.image_status || payload.status || "";
+    if (generatedImageUrl && !draft.generated_image_url) draft.generated_image_url = generatedImageUrl;
+    if (generatedImageUrl && !draft.featured_image_url) draft.featured_image_url = generatedImageUrl;
+    if (imageStatus && !draft.featured_image_status) draft.featured_image_status = imageStatus;
     renderArticlePreview(card, draft);
-    if (feedback) feedback.textContent = action === "plan" ? "תכנון התמונה עודכן בהצלחה" : "התמונה נוצרה בהצלחה";
-    if (action === "image" && draft.generated_image_url && feedback) {
-      feedback.innerHTML = `התמונה נוצרה בהצלחה · <a href="${escapeHtml(draft.generated_image_url)}" target="_blank" rel="noopener">פתיחה/הורדה</a>`;
+    const statusNode = card.querySelector("[data-image-status]");
+    if (statusNode) statusNode.textContent = imageStatus || (action === "image" ? "generated" : "planned");
+    const linksNode = card.querySelector("[data-image-links]");
+    if (action === "plan" && feedback) feedback.textContent = "תכנון התמונה עודכן בהצלחה";
+    if (action === "image" && feedback) {
+      if (!generatedImageUrl) {
+        console.warn("Image was generated but response has no URL", payload);
+        feedback.textContent = "התמונה נוצרה אך לא התקבל קישור לתמונה";
+      } else {
+        const openUrl = payload.open_image_url || generatedImageUrl;
+        const downloadUrl = payload.download_image_url || generatedImageUrl;
+        feedback.innerHTML = `התמונה נוצרה בהצלחה · <a href="${escapeHtml(openUrl)}" target="_blank" rel="noopener">פתח תמונה</a> · <a href="${escapeHtml(downloadUrl)}" download>הורד תמונה</a>`;
+      }
+    }
+    if (linksNode) {
+      if (generatedImageUrl) {
+        const openUrl = payload.open_image_url || generatedImageUrl;
+        const downloadUrl = payload.download_image_url || generatedImageUrl;
+        linksNode.hidden = false;
+        linksNode.innerHTML = `<a href="${escapeHtml(openUrl)}" target="_blank" rel="noopener">פתח תמונה</a> · <a href="${escapeHtml(downloadUrl)}" download>הורד תמונה</a>`;
+      } else {
+        linksNode.hidden = true;
+        linksNode.innerHTML = "";
+      }
     }
   } catch (error) {
     if (feedback) feedback.textContent = `שגיאה: ${error.message}`;
