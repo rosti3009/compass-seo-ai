@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.db.models import ContentArticleDraft, IStoreProduct
 
 logger = logging.getLogger(__name__)
+GENERATOR_VERSION = "v2-topic-specific-2026-05-25"
 
 TOPIC_POOL = [
     ("איך לבחור שבבי עץ לעישון בשר", "שבבי עץ לעישון", "informational"),
@@ -41,6 +42,25 @@ def _slugify(text: str) -> str:
         return slug
     normalized = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
     return normalized or "bbq-hebrew-guide"
+
+
+def _fallback_topic_slug(keyword: str, title: str) -> tuple[str, str]:
+    slug = _slugify(keyword)
+    if slug and slug != "bbq-hebrew-guide":
+        return slug, "focus_keyword"
+    slug = _slugify(title)
+    if slug and slug != "bbq-hebrew-guide":
+        return slug, "title"
+    mapped = SLUG_OVERRIDES.get(title)
+    if mapped:
+        return mapped, "topic_mapping"
+    return "grill-smoking-guide", "hard_fallback"
+
+
+def _remove_h1_tags(html: str) -> tuple[str, bool]:
+    cleaned = re.sub(r"<h1[^>]*>.*?</h1>", "", html, flags=re.IGNORECASE | re.DOTALL)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned, cleaned != html
 
 
 def _select_topic(db: Session) -> tuple[str, str, str]:
@@ -107,6 +127,26 @@ def _safe_product_url(product: object) -> str:
 
 
 def _build_article_html(title: str, keyword: str, related: list[dict[str, str | float]]) -> str:
+    if keyword == "שבבי עץ לעישון":
+        links_html = "".join([f"<li><a href='{p['url']}'>{p['title']}</a></li>" for p in related[:4]])
+        return (
+            "<p>שבבי עץ לעישון משנים לחלוטין את תוצאת הברביקיו: סוג העץ, כמות העשן והטמפרטורה קובעים עומק טעם, צבע ואיזון מרירות.</p>\n"
+            "<h2>Hickory, Oak, Apple, Mesquite – מה ההבדל בטעם?</h2>\n"
+            "<p><strong>Hickory</strong> נותן עשן חזק, אגוזי ובייקוני; <strong>Oak</strong> מאוזן ומתאים לבישול ארוך; <strong>Apple wood</strong> מתקתק ועדין; <strong>Mesquite</strong> עוצמתי, אדמתי ומהיר.</p>\n"
+            "<h2>עוצמת עשן והתאמת עץ לסוג בשר</h2>\n"
+            "<p>Brisket וצלעות בקר מסתדרים עם Hickory/Oak. עוף והודו נהנים מ-Apple. Mesquite מתאים לסטייקים קצרים, ובמינון נמוך בלבד בבישול ארוך.</p>\n"
+            "<h2>מיתוס ההשריה: האם צריך להשרות שבבים?</h2>\n"
+            "<p>ברוב המעשנות אין צורך להשרות שבבים. השריה מייצרת בעיקר אדים, לא עשן נקי. עדיף שבב יבש וזרימת אוויר יציבה לקבלת blue smoke.</p>\n"
+            "<h2>טמפרטורות מעשנה מומלצות</h2>\n"
+            "<p>עישון קלאסי: 107–135°C. עוף: 135–160°C לסיום עור פריך. ניטור פנימי חשוב יותר מטמפ' תא בלבד, עם מדחום דיגיטלי כפול.</p>\n"
+            "<h2>כמה שבבים מוסיפים ומתי?</h2>\n"
+            "<p>מוסיפים בכמויות קטנות בתחילת הבישול, במיוחד ב-60–90 הדקות הראשונות. עשן סמיך ולבן מצביע על שריפה לא נקייה; יעד הוא עשן דק וכחלחל.</p>\n"
+            "<h3>טעויות נפוצות</h3><p>שימוש יתר ב-Mesquite, פתיחת מכסה תכופה, והוספת שבבים רטובים גורמים למרירות ולחוסר יציבות תרמית.</p>\n"
+            "<h3>טיפ מקצועי</h3><p>לתוצאה מאוזנת ערבבו Oak עם Apple ביחס 70/30 לבקר ארוך, ו-Apple בלבד לעוף ודגים.</p>\n"
+            "<h3>הבדלי טעם בין עצים</h3><p>Hickory מדגיש עומק ועוצמה, Oak מאזן, Apple מוסיף מתיקות עדינה ו-Mesquite מתאים למינון קצר ומדויק.</p>\n"
+            "<h2>מוצרים משלימים</h2>\n"
+            + (f"<ul>{links_html}</ul>\n" if links_html else "<p>כרגע אין קישורים פנימיים רלוונטיים להצגה.</p>\n")
+        )
     links_html = "".join([f"<li><a href='{p['url']}'>{p['title']}</a></li>" for p in related[:4]])
     return (
         f"<p>{title} הוא נושא שמכריע אם תקבלו תוצאה בינונית או מנה שמרגישה כמו מסעדת בשרים מקצועית. במדריך הזה תקבלו שיטה ברורה, מדידה וישימה בבית.</p>\n"
@@ -137,8 +177,8 @@ def _build_article_html(title: str, keyword: str, related: list[dict[str, str | 
 def generate_daily_article_draft(db: Session) -> ContentArticleDraft:
     title, keyword, intent = _select_topic(db)
     related = _related_products(db, keyword)
-    slug = _slugify(title)
-    body = _build_article_html(title, keyword, related)
+    slug, _slug_source = _fallback_topic_slug(keyword, title)
+    body, _ = _remove_h1_tags(_build_article_html(title, keyword, related))
     faq_schema = {
         "@context": "https://schema.org",
         "@type": "FAQPage",
@@ -149,8 +189,8 @@ def generate_daily_article_draft(db: Session) -> ContentArticleDraft:
         ],
     }
     section_prompts = [
-        {"section": "פתיח", "placement_hint": "[IMAGE_1_HERE]", "prompt": f"Hebrew BBQ blog hero showing {slug.replace('-', ' ')}, realistic grill setup and food texture"},
-        {"section": "שלב-אחר-שלב", "placement_hint": "[IMAGE_2_HERE]", "prompt": f"Step-by-step cooking process for {slug.replace('-', ' ')}, close-up on grill grates, thermometers, fire zones"},
+        {"section": "פתיח", "placement_hint": "[IMAGE_1_HERE]", "prompt": f"{slug.replace('-', ' ')} wood chips smoking inside offset smoker with clean blue smoke around brisket"},
+        {"section": "שלב-אחר-שלב", "placement_hint": "[IMAGE_2_HERE]", "prompt": f"Close-up of Hickory Oak Apple wood chips feeding smoker firebox, stable temperature gauges and smoke flow"},
     ]
     draft = ContentArticleDraft(
         status="CONTENT_DRAFT", topic_title=title, title=title, slug=slug,
@@ -161,7 +201,7 @@ def generate_daily_article_draft(db: Session) -> ContentArticleDraft:
         internal_links_json=json.dumps(related, ensure_ascii=False),
         faq_schema_json=json.dumps(faq_schema, ensure_ascii=False),
         section_image_prompts_json=json.dumps(section_prompts, ensure_ascii=False),
-        featured_image_prompt=f"Realistic {slug.replace('-', ' ')} scene, grill, smoke, natural light, no logos",
+        featured_image_prompt=f"Apple wood chips smoking inside offset smoker with blue smoke around brisket, realistic BBQ photography",
         image_alt_text=f"{title} - הדגמה על גריל", image_title=f"תמונת שער: {title}", image_caption="הדגמה מעשית של השיטה במאמר.",
         image_filename_slug=f"compass-grill-{slug}", image_style_rules="realistic outdoor BBQ photography",
         generated_image_url=None, uploaded_media_id=None, image_publish_status="NOT_PUBLISHED",
