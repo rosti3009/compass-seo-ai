@@ -40,7 +40,7 @@
         </div>
         <h2>מאמרים לאישור</h2>
         {% for article in article_drafts %}
-        <article class="fix-card simple-fix-card">
+        <article class="fix-card simple-fix-card" data-article-id="{{ article.id }}">
           <h3>{{ article.title }}</h3>
           <p><strong>מילת מפתח:</strong> {{ article.focus_keyword }} | <strong>כוונה:</strong> {{ article.target_intent }}</p>
           <p><strong>Slug:</strong> {{ article.slug }}</p>
@@ -125,6 +125,15 @@
               </article>
             </div>
           </section>
+          <section class="manual-upload-card" data-live-preview>
+            <h5>תצוגה חיה (Live Preview)</h5>
+            <div class="actions">
+              <button type="button" class="secondary-button" data-action="copy-html" data-copy-type="full">העתק HTML מלא</button>
+              <button type="button" class="secondary-button" data-action="copy-html" data-copy-type="clean">העתק HTML נקי</button>
+              <button type="button" class="secondary-button" data-action="copy-html" data-copy-type="preview">העתק HTML לתצוגה עם סמנים</button>
+            </div>
+            <div class="preview-box" data-preview-container></div>
+          </section>
           <p><strong>קישורים פנימיים:</strong> {{ article.internal_links }}</p>
           <p><strong>סטטוס:</strong> {{ article.status }}</p>
           <p><strong>המאמר יעלה ל:</strong> <span dir="ltr">{{ article.target_url }}</span></p>
@@ -153,9 +162,10 @@
             {% if article.publish_readiness == 'NEEDS_IMPROVEMENT' %}
               <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/generate-daily-draft" data-method="POST">צור מאמר מחדש</button>
             {% endif %}
-            <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/{{ article.id }}/generate-image-plan" data-method="POST">צור תכנון תמונה</button>
-            <button type="button" disabled>צור תמונה</button>
+            <button type="button" class="secondary-button" data-action="generate-image-plan" data-draft-id="{{ article.id }}">צור תכנון תמונה</button>
+            <button type="button" class="secondary-button" data-action="generate-image" data-draft-id="{{ article.id }}">צור תמונה</button>
           </div>
+          <p class="empty" data-image-feedback>מוכן להפקת תכנון/תמונה.</p>
         </article>
         {% else %}
         <p class="empty">אין מאמרים ממתינים לאישור כרגע.</p>

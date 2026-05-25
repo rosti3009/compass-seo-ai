@@ -3100,12 +3100,29 @@ async def sitemap_discover() -> dict:
 @router.post("/content/articles/{draft_id}/generate-image-plan")
 def generate_article_image_plan(draft_id: int, db: DatabaseSession) -> dict[str, object]:
     draft = _get_content_draft_or_404(db, draft_id)
+    draft.featured_image_prompt = build_realistic_hero_prompt(draft.featured_image_prompt)
+    draft.featured_image_status = "planned"
+    draft.image_publish_status = "NOT_PUBLISHED"
+    db.add(draft)
+    db.commit()
+    db.refresh(draft)
+    return {
+        "success": True,
+        "message_he": "תכנון התמונה עודכן בהצלחה",
+        "draft": draft.to_dict(),
+    }
+
+
+@router.post("/content/articles/{draft_id}/generate-image")
+def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, object]:
+    draft = _get_content_draft_or_404(db, draft_id)
     provider = get_image_provider()
     draft.featured_image_prompt = build_realistic_hero_prompt(draft.featured_image_prompt)
     result = provider.generate_hero_image(draft.featured_image_prompt, draft_slug=draft.slug)
     draft.featured_image_status = result.status
     draft.image_publish_status = "NOT_PUBLISHED"
     draft.generated_image_url = result.image_url
+    draft.featured_image_url = result.image_url
     db.add(draft)
     db.commit()
     db.refresh(draft)
