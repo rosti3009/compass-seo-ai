@@ -60,7 +60,7 @@ from app.services.istore_approval import (
     reject_fix as reject_istore_approval_fix,
 )
 from app.services.istore_blog_publisher import IStoreBlogPublisher, IStoreBlogPublishError
-from app.services.istore_browser_automation import check_istore_browser_status
+from app.services.istore_browser_automation import check_istore_browser_status, create_shop_information_page
 from app.services.istore_mapping import (
     PUBLISHABLE_CONFIDENCE_THRESHOLD,
     assign_product_mapping,
@@ -1799,6 +1799,32 @@ def debug_istore_create_dry_run(draft_id: int, db: DatabaseSession) -> dict[str,
         "estimated_json_length": contract.get("estimated_json_length", 0),
         "cookie_names": contract.get("cookie_names", []),
         "xsrf_length": contract.get("xsrf_length", 0),
+    }
+
+
+@router.post("/debug/istore/browser-create-test")
+def debug_istore_browser_create_test(draft_id: int, db: DatabaseSession, dry_run: bool = True) -> dict[str, object]:
+    draft = _get_content_draft_or_404(db, draft_id)
+    payload = {
+        "title": draft.title,
+        "description": draft.article_body,
+        "meta_title": draft.meta_title,
+        "meta_description": draft.meta_description,
+        "slug": draft.slug,
+        "status": None,
+        "is_blog": None,
+    }
+    result = create_shop_information_page(payload=payload, dry_run=dry_run).to_dict()
+    return {
+        "success": bool(result.get("success")),
+        "current_url": result.get("current_url", ""),
+        "external_content_id": result.get("external_content_id"),
+        "otp_required": bool(result.get("otp_required", False)),
+        "error": result.get("error"),
+        "screenshot_path": result.get("screenshot_path"),
+        "selector_availability": result.get("selector_availability"),
+        "planned_fields": result.get("planned_fields"),
+        "dry_run": dry_run,
     }
 
 
