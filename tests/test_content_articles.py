@@ -295,3 +295,24 @@ def test_minimal_payload_publish_returns_success_without_marking_published(
 
     check = client.get(f"/content/articles/{draft['id']}").json()['draft']
     assert check['status'] == 'APPROVED'
+
+def test_regression_wood_chips_topic_quality_and_prompts(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "app.services.content_articles._select_topic",
+        lambda _db: ("איך לבחור שבבי עץ לעישון בשר", "שבבי עץ לעישון", "informational"),
+    )
+    draft = client.post('/content/articles/generate-daily-draft').json()['draft']
+    body = draft['article_body'].lower()
+    assert '<h1' not in body
+    assert draft['slug'] != 'compass-grill-article'
+    assert draft['slug'] == 'wood-chips-for-smoking-meat'
+    assert 'hickory' in body and 'oak' in body and 'apple' in body
+    prompt_blob = (draft['featured_image_prompt'] + ' ' + ' '.join(i.get('prompt', '') for i in draft.get('section_image_prompts', []))).lower()
+    assert any(t in prompt_blob for t in ['wood chips', 'smoker', 'smoke'])
+
+    assert float(draft["quality"]["article_quality_score"]) > 70
+
+    details = client.get(f"/content/articles/{draft['id']}").json()['draft']
+    assert details['debug']['generator_version'] == 'v2-topic-specific-2026-05-25'
+    assert details['debug']['h1_removed'] is True
+    assert details['debug']['slug_source'] in {'title', 'focus_keyword', 'topic_mapping', 'hard_fallback'}
