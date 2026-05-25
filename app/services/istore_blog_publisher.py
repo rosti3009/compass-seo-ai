@@ -37,6 +37,9 @@ class IStoreCreateResult:
     response_url: str
 
 
+CREATE_REDIRECT_PATH = "/client/shop_information/create"
+
+
 class IStoreAdminShopInformationPublisher:
     def __init__(
         self,
@@ -82,14 +85,19 @@ class IStoreAdminShopInformationPublisher:
     def publish(self, draft: ContentArticleDraft, dry_run: bool = False) -> dict[str, Any]:
         payload = self._build_payload(draft)
         if dry_run:
-            return {"dry_run": True, "endpoint": "client/shop_information/create", "payload": payload}
+            return {
+                "dry_run": True,
+                "endpoint": CREATE_REDIRECT_PATH,
+                "payload": payload,
+                "headers": self._build_create_headers(sanitize=True),
+            }
 
         create_result = self._create_shop_information(payload)
         live_url = self._resolve_live_url(draft, create_result.external_content_id)
         verification = self._verify_live_url(live_url, draft.title)
 
         return {
-            "endpoint": "client/shop_information/create",
+            "endpoint": CREATE_REDIRECT_PATH,
             "external_content_id": create_result.external_content_id,
             "redirect_location": create_result.location,
             "live_url": live_url,
@@ -117,15 +125,9 @@ class IStoreAdminShopInformationPublisher:
         }
 
     def _create_shop_information(self, payload: dict[str, Any]) -> IStoreCreateResult:
-        url = urljoin(self.base_url, "client/shop_information/create")
-        headers = {
-            "Accept": "application/json, text/plain, */*",
-            "Content-Type": "application/json",
-            "Cookie": self.admin_cookie,
-            "X-XSRF-TOKEN": self.xsrf_token,
-            "X-Inertia": "true",
-            "X-Requested-With": "XMLHttpRequest",
-        }
+        self._validate_create_payload(payload)
+        url = urljoin(self.base_url, CREATE_REDIRECT_PATH.lstrip("/"))
+        headers = self._build_create_headers(sanitize=False)
         response = self.session.post(url, headers=headers, json=payload, timeout=self.timeout_seconds, allow_redirects=False)
         self._log_create_response(response)
         if response.status_code != 302:
@@ -134,6 +136,14 @@ class IStoreAdminShopInformationPublisher:
             )
 
         location = response.headers.get("Location", "")
+        if self._is_create_form_redirect(location):
+            raise IStoreBlogPublishError(
+                "ISTORE rejected create request and redirected back to create form "
+                f"(status_code={response.status_code}, location={self._sanitize(location)}, "
+                f"response_url={self._sanitize(getattr(response, 'url', ''))}, "
+                f"response_text={self._sanitize((getattr(response, 'text', '') or '')[:1000])})"
+            )
+
         external_content_id = self._extract_shop_information_id(location, response)
         if not external_content_id:
             status_code = response.status_code
@@ -147,6 +157,52 @@ class IStoreAdminShopInformationPublisher:
             status_code=response.status_code,
             response_url=getattr(response, "url", ""),
         )
+
+    def _build_create_headers(self, sanitize: bool) -> dict[str, str]:
+        headers = {
+            "Accept": "text/html, application/xhtml+xml",
+            "Content-Type": "application/json",
+            "X-Inertia": "true",
+            "X-Requested-With": "XMLHttpRequest",
+            "X-XSRF-TOKEN": self.xsrf_token,
+            "Referer": urljoin(self.base_url, CREATE_REDIRECT_PATH.lstrip("/")),
+            "Origin": self.base_url.rstrip("/"),
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/125.0.0.0 Safari/537.36"
+            ),
+            "Cookie": self.admin_cookie,
+        }
+        if settings.istore_inertia_version:
+            headers["X-Inertia-Version"] = settings.istore_inertia_version
+        if sanitize:
+            return {
+                key: ("[REDACTED]" if key in {"Cookie", "X-XSRF-TOKEN"} else value)
+                for key, value in headers.items()
+            }
+        return headers
+
+    def _validate_create_payload(self, payload: dict[str, Any]) -> None:
+        language_id = str(self.language_id)
+        desc = (payload.get("descriptions") or {}).get(language_id, {}) if isinstance(payload.get("descriptions"), dict) else {}
+        required_desc = ["title", "description", "meta_title", "meta_description"]
+        missing = [f"descriptions[{language_id}].{field}" for field in required_desc if not str(desc.get(field) or "").strip()]
+
+        top_level_fields = ["dynamic_fields", "is_blog", "keyword", "sort_order", "start_date", "end_date", "status"]
+        missing.extend([field for field in top_level_fields if field not in payload])
+        if payload.get("dynamic_fields") != []:
+            missing.append("dynamic_fields must equal []")
+
+        if missing:
+            raise IStoreBlogPublishError(f"Invalid ISTORE create payload; missing/invalid fields: {', '.join(missing)}")
+
+    def _is_create_form_redirect(self, location: str) -> bool:
+        if not location:
+            return False
+        parsed = urlparse(location)
+        path = parsed.path or location
+        return path.rstrip("/") == CREATE_REDIRECT_PATH
 
     def _extract_shop_information_id(self, location: str, response: requests.Response | None = None) -> str | None:
         candidates = [location or ""]

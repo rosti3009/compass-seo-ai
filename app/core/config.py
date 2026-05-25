@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     istore_admin_base_url: str = "https://app.istores.co.il"
     istore_admin_cookie: str | None = None
     istore_xsrf_token: str | None = None
+    istore_inertia_version: str | None = None
     istore_language_id: int = 3
     istore_blog_is_blog: int = 1
     openai_api_key: str | None = None
