@@ -1406,15 +1406,26 @@ def _simple_workspace_context(db: Session) -> dict[str, object]:
 
 def _article_quality_summary(draft: ContentArticleDraft) -> dict[str, float | str]:
     links = json.loads(draft.internal_links_json or "[]") if draft.internal_links_json else []
-    products = (
-        json.loads(draft.suggested_related_products_json or "[]")
-        if draft.suggested_related_products_json
-        else []
-    )
+    products = json.loads(draft.suggested_related_products_json or "[]") if draft.suggested_related_products_json else []
+    body = draft.article_body or ""
     semantic = round(sum(float(item.get("semantic_topic_match_score", 0)) for item in links) / max(len(links), 1), 1)
     suggestion = round(sum(float(item.get("relatedness_score", 0)) for item in products) / max(len(products), 1), 1)
     seo = 90.0 if len(draft.meta_title) <= 65 and 70 <= len(draft.meta_description) <= 160 else 72.0
-    article_quality = min(100.0, round((seo * 0.3) + (semantic * 0.35) + (suggestion * 0.35), 1))
+    structure = 100.0
+    if "<h1" in body.lower():
+        structure -= 30
+    h2_count = len(re.findall(r"<h2[\s>]", body, flags=re.IGNORECASE))
+    h3_count = len(re.findall(r"<h3[\s>]", body, flags=re.IGNORECASE))
+    if h2_count < 5:
+        structure -= 25
+    if h3_count < 3:
+        structure -= 20
+    if "compass-grill-article" in (draft.slug or ""):
+        structure -= 15
+    repeated = ["במדריך הזה נסביר", "בחירה נכונה", "שלבים מעשיים"]
+    repeated_penalty = 8 * sum(1 for t in repeated if t in body)
+    structure = max(0.0, structure - repeated_penalty)
+    article_quality = min(100.0, round((seo * 0.2) + (semantic * 0.3) + (suggestion * 0.3) + (structure * 0.2), 1))
     readiness = "READY_FOR_REVIEW" if article_quality >= 75 else "NEEDS_IMPROVEMENT"
     return {
         "seo_quality_score": seo,
