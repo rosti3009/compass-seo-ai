@@ -3130,6 +3130,12 @@ def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, obje
         "success": True,
         "image_generation_enabled": result.enabled,
         "image_provider": result.provider,
+        "image_status": result.status,
+        "status": result.status,
+        "generated_image_url": result.image_url,
+        "featured_image_url": result.image_url,
+        "open_image_url": result.image_url,
+        "download_image_url": result.image_url,
         "message_he": result.message_he,
         "draft": draft.to_dict(),
     }

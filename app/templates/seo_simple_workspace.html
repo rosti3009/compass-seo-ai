@@ -133,6 +133,13 @@
               <button type="button" class="secondary-button" data-action="copy-html" data-copy-type="preview">העתק HTML לתצוגה עם סמנים</button>
             </div>
             <div class="preview-box" data-preview-container></div>
+            <div data-preview-image-block {% if not (article.generated_image_url or article.featured_image_url) %}hidden{% endif %}>
+              {% set preview_image_url = article.generated_image_url or article.featured_image_url %}
+              {% if preview_image_url %}
+              <img src="{{ preview_image_url }}" alt="{{ article.image_alt_text }}" style="max-width:320px;height:auto"/>
+              <p><strong>ALT:</strong> {{ article.image_alt_text }}</p>
+              {% endif %}
+            </div>
           </section>
           <p><strong>קישורים פנימיים:</strong> {{ article.internal_links }}</p>
           <p><strong>סטטוס:</strong> {{ article.status }}</p>
@@ -143,7 +150,15 @@
           <p><strong>כותרת תמונה:</strong> {{ article.image_title }}</p>
           <p><strong>כיתוב תמונה:</strong> {{ article.image_caption }}</p>
           <p><strong>שם קובץ:</strong> {{ article.image_filename_slug }}</p>
-          <p><strong>סטטוס תמונה:</strong> {{ article.featured_image_status }}</p>
+          <p><strong>סטטוס תמונה:</strong> <span data-image-status>{{ article.featured_image_status }}</span></p>
+          <p data-image-links {% if not (article.generated_image_url or article.featured_image_url) %}hidden{% endif %}>
+            {% set existing_image_url = article.generated_image_url or article.featured_image_url %}
+            {% if existing_image_url %}
+            <a href="{{ existing_image_url }}" target="_blank" rel="noopener">פתח תמונה</a>
+            ·
+            <a href="{{ existing_image_url }}" download>הורד תמונה</a>
+            {% endif %}
+          </p>
           <p><strong>SEO quality score:</strong> {{ article.seo_quality_score }}</p>
           <p><strong>Semantic relevance score:</strong> {{ article.semantic_relevance_score }}</p>
           <p><strong>Suggested link relevance:</strong> {{ article.suggested_link_relevance }}</p>

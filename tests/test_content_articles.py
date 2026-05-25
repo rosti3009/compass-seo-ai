@@ -66,6 +66,12 @@ def test_generate_article_image_uses_provider(client: TestClient) -> None:
     payload = response.json()
     assert payload['image_generation_enabled'] is False
     assert payload['draft']['featured_image_status'] == 'planned'
+    assert payload['image_status'] == 'planned'
+    assert payload['status'] == 'planned'
+    assert payload['generated_image_url'] is None
+    assert payload['featured_image_url'] is None
+    assert payload['open_image_url'] is None
+    assert payload['download_image_url'] is None
 
 
 def test_publish_blocks_and_dry_run(client: TestClient) -> None:
