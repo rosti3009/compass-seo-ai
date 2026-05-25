@@ -1432,8 +1432,8 @@ def _article_quality_summary(draft: ContentArticleDraft) -> dict[str, float | st
     links = json.loads(draft.internal_links_json or "[]") if draft.internal_links_json else []
     products = json.loads(draft.suggested_related_products_json or "[]") if draft.suggested_related_products_json else []
     body = draft.article_body or ""
-    semantic = round(sum(float(item.get("semantic_topic_match_score", 0)) for item in links) / max(len(links), 1), 1)
-    suggestion = round(sum(float(item.get("relatedness_score", 0)) for item in products) / max(len(products), 1), 1)
+    semantic = round(sum(float(item.get("semantic_topic_match_score", 0)) for item in links) / len(links), 1) if links else 80.0
+    suggestion = round(sum(float(item.get("relatedness_score", 0)) for item in products) / len(products), 1) if products else 80.0
     seo = 90.0 if len(draft.meta_title) <= 65 and 70 <= len(draft.meta_description) <= 160 else 72.0
     structure = 100.0
     if "<h1" in body.lower():
