@@ -34,8 +34,8 @@
 
       <section class="panel" aria-label="מאמרים לאישור">
         <div class="actions">
-          <button type="button" class="inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/generate-daily-draft" data-method="POST" data-label="צור מאמר חדש">צור מאמר חדש</button>
-          <button type="button" class="inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/generate-random-daily-draft" data-method="POST" data-label="צור מאמר יומי רנדומלי">צור מאמר יומי רנדומלי</button>
+          <button type="button" class="inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/generate-daily-draft" data-method="POST" data-refresh-on-success="true" data-label="צור מאמר חדש">צור מאמר חדש</button>
+          <button type="button" class="inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/generate-random-daily-draft" data-method="POST" data-refresh-on-success="true" data-label="צור מאמר יומי רנדומלי">צור מאמר יומי רנדומלי</button>
           <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/drafts" data-method="GET" data-label="רענן מאמרים">רענן מאמרים</button>
           <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/seo/fixes/regenerate-stale" data-method="POST" data-label="רענן תיקונים">רענן תיקונים</button>
         </div>
@@ -58,8 +58,9 @@
           </label>
           <button type="submit" class="secondary-button">כור מאמר לפי נושא</button>
         </form>
-        <h2>מאמרים לאישור</h2>
-        {% for article in article_drafts %}
+        <h2>המאמר הפעיל לעבודה</h2>
+        {% if active_article %}
+        {% set article = active_article %}
         <article id="article-{{ article.id }}" class="fix-card simple-fix-card" data-article-id="{{ article.id }}">
           <h3>{{ article.title }}</h3>
           <p><strong>מילת מפתח:</strong> {{ article.focus_keyword }} | <strong>כוונה:</strong> {{ article.target_intent }}</p>
@@ -220,16 +221,35 @@
             <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/{{ article.id }}/publish?dry_run=true" data-method="POST">בדיקת פרסום יבשה</button>
             <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/{{ article.id }}/publish" data-method="POST" {% if blocked_article %}disabled title="נדרש שיפור לפני אישור"{% endif %}>פרסם ידנית</button>
             {% if article.publish_readiness == 'NEEDS_IMPROVEMENT' %}
-              <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/generate-daily-draft" data-method="POST">צור מאמר מחדש</button>
+              <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/generate-daily-draft" data-method="POST" data-refresh-on-success="true">צור מאמר מחדש</button>
             {% endif %}
             <button type="button" class="secondary-button" data-action="generate-image-plan" data-draft-id="{{ article.id }}">צור תכנון תמונה</button>
             <button type="button" class="secondary-button" data-action="generate-image" data-draft-id="{{ article.id }}">צור תמונה</button>
+            <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/{{ article.id }}/archive-manual-work" data-method="POST" data-label="סיים עבודה / העבר לארכיון" data-refresh-on-success="true">סיים עבודה / העבר לארכיון</button>
+            <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/{{ article.id }}/set-active" data-method="POST" data-label="הפוך למאמר פעיל" data-refresh-on-success="true">הפוך למאמר פעיל</button>
           </div>
           <p class="empty" data-image-feedback>מוכן להפקת תכנון/תמונה.</p>
         </article>
         {% else %}
         <p class="empty">אין מאמרים ממתינים לאישור כרגע.</p>
-        {% endfor %}
+        {% endif %}
+
+        <details>
+          <summary>מאמרים קודמים</summary>
+          <div class="compact-articles-list">
+            {% for article in archived_articles %}
+            <div class="compact-article-row">
+              <span><strong>{{ article.title }}</strong></span>
+              <span dir="ltr">{{ article.slug }}</span>
+              <span>{{ article.status }}</span>
+              <span>{{ article.created_at }}</span>
+              <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/{{ article.id }}/set-active" data-method="POST" data-label="הפוך למאמר פעיל" data-refresh-on-success="true">הפוך למאמר פעיל</button>
+            </div>
+            {% else %}
+            <p class="empty">אין מאמרים קודמים.</p>
+            {% endfor %}
+          </div>
+        </details>
       </section>
 
       <section class="cards simple-summary" aria-label="מה צריך טיפול היום">

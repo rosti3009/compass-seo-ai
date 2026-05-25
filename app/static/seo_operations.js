@@ -148,6 +148,10 @@ async function runDashboardAction(button) {
       return;
     }
     renderResult(panel, label, payload, true);
+    if (button.dataset.refreshOnSuccess === "true") {
+      window.location.reload();
+      return;
+    }
   } catch (error) {
     renderResult(panel, label, { errors: [error.message] }, false);
   } finally {
