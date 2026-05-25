@@ -50,13 +50,21 @@
           <details><summary>תצוגה מקדימה</summary><div>{{ article.article_body|safe }}</div></details>
           <section class="manual-upload-layout" aria-label="הכנה להעלאה ידנית ל-ISTORE">
             <h4>manual-upload-view · הכנה מהירה לעובד חנות</h4>
+            <p><strong>העתקה לפי סדר ל־ISTORE:</strong> 1) כותרת 2) שם ייחודי לקישור 3) תוכן ראשי 4) כותרת לקידום במנועי חיפוש 5) תיאור לקידום במנועי חיפוש 6) מילות מפתח לקידום במנועי חיפוש 7) תמונה ראשית 8) ALT לתמונה</p>
             <div class="manual-upload-grid">
               <article class="manual-upload-card">
                 <h5>תמונה ראשית</h5>
                 <p><strong>תמונה מוצעת:</strong> {{ article.image_title or ('תמונת שער: ' ~ article.title) }}</p>
                 <p><strong>AI prompt:</strong> {{ article.featured_image_prompt }}</p>
-                <p><strong>ALT:</strong> {{ article.image_alt_text }}</p>
-                <p><strong>מידות מומלצות:</strong> 1200×630 פיקסלים (JPG/WebP)</p>
+                
+                {% set existing_image_url = article.generated_image_url or article.featured_image_url %}
+                {% if existing_image_url %}
+                <img src="{{ existing_image_url }}" alt="{{ article.image_alt_text }}" style="max-width:320px;height:auto"/>
+                <p><strong>image URL:</strong> {{ existing_image_url }}</p>
+                <button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ existing_image_url }}">Copy image URL</button>
+                <button type="button" class="secondary-button" data-action="copy-text" data-copy-text='<p><img src="{{ existing_image_url }}" alt="{{ article.image_alt_text }}"></p>'>Copy image HTML</button>
+                {% endif %}
+                                <p><strong>מידות מומלצות:</strong> 1200×630 פיקסלים (JPG/WebP)</p>
                 <div class="actions">
                   <button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ article.featured_image_prompt }}">העתק prompt</button>
                   <button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ article.image_alt_text }}">העתק ALT</button>
@@ -79,30 +87,31 @@
                   <p><strong>כותרת סעיף:</strong> פתיח / מבוא</p>
                   <p><strong>מיקום מומלץ:</strong> [IMAGE_1_HERE]</p>
                   <p><strong>Image prompt:</strong> {{ article.featured_image_prompt }}</p>
-                  <p><strong>ALT:</strong> {{ article.image_alt_text }}</p>
+                  
                   <p><strong>כיתוב (אופציונלי):</strong> {{ article.image_caption }}</p>
                 </div>
                 <div class="inline-image-row">
                   <p><strong>כותרת סעיף:</strong> סיכום / פעולה מומלצת</p>
                   <p><strong>מיקום מומלץ:</strong> [IMAGE_2_HERE]</p>
                   <p><strong>Image prompt:</strong> {{ article.featured_image_prompt }}</p>
-                  <p><strong>ALT:</strong> {{ article.image_alt_text }}</p>
+                  
                   <p><strong>כיתוב (אופציונלי):</strong> {{ article.image_caption }}</p>
                 </div>
                 {% endfor %}
               </article>
 
               <article class="manual-upload-card">
-                <h5>תוכן ראשי / HTML נקי</h5>
-                <p><strong>עם סמני תמונה:</strong></p>
+                <h5>בלוקי העתקה סופיים</h5>
+                <p><strong>HTML נקי ללא תמונות</strong></p>
+                <p><strong>HTML עם תמונות לפי מיקומים</strong></p>
                 <textarea class="manual-html" rows="8" readonly>{{ article.article_body }}
 [IMAGE_1_HERE]
 [IMAGE_2_HERE]</textarea>
-                <p><strong>HTML נקי (ללא סמנים):</strong></p>
+                <p><strong>HTML עם תמונה ראשית בתחילת המאמר</strong></p>
                 <textarea class="manual-html" rows="8" readonly>{{ article.article_body }}</textarea>
                 <div class="actions">
-                  <button type="button" class="secondary-button" data-action="copy-from-target" data-copy-target="article-html-markers-{{ article.id }}">העתק HTML עם סמנים</button>
-                  <button type="button" class="secondary-button" data-action="copy-from-target" data-copy-target="article-html-clean-{{ article.id }}">העתק HTML נקי</button>
+                  <button type="button" class="secondary-button" data-action="copy-from-target" data-copy-target="article-html-markers-{{ article.id }}">העתק HTML עם תמונות לפי מיקומים</button>
+                  <button type="button" class="secondary-button" data-action="copy-from-target" data-copy-target="article-html-clean-{{ article.id }}">העתק HTML עם תמונה ראשית בתחילת המאמר</button>
                 </div>
                 <textarea id="article-html-markers-{{ article.id }}" class="copy-source-hidden" readonly>{{ article.article_body }}
 [IMAGE_1_HERE]
@@ -111,17 +120,18 @@
               </article>
 
               <article class="manual-upload-card checklist-card">
-                <h5>Checklist</h5>
+                <h5>Checklist עובד</h5>
                 <ol>
-                  <li>העלה תמונה ראשית</li>
-                  <li>הדבק כותרת</li>
-                  <li>הדבק גוף מאמר</li>
-                  <li>הכנס תמונות inline לפי הסמנים</li>
-                  <li>הדבק meta title</li>
-                  <li>הדבק meta description</li>
-                  <li>הדבק slug</li>
-                  <li>הפעל blog visibility</li>
-                  <li>שמור עמוד</li>
+                  <li>העתק כותרת</li>
+                  <li>העתק slug</li>
+                  <li>העלה/בחר תמונה ראשית</li>
+                  <li>הדבק HTML עם תמונות</li>
+                  <li>הדבק Meta Title</li>
+                  <li>הדבק Meta Description</li>
+                  <li>הדבק Keywords</li>
+                  <li>בחר סטטוס פעיל</li>
+                  <li>בחר הצג בבלוג כן</li>
+                  <li>שמור</li>
                 </ol>
               </article>
             </div>
@@ -130,15 +140,19 @@
             <h5>תצוגה חיה (Live Preview)</h5>
             <div class="actions">
               <button type="button" class="secondary-button" data-action="copy-html" data-copy-type="full">העתק HTML מלא</button>
-              <button type="button" class="secondary-button" data-action="copy-html" data-copy-type="clean">העתק HTML נקי</button>
+              <button type="button" class="secondary-button" data-action="copy-html" data-copy-type="clean">העתק HTML עם תמונה ראשית בתחילת המאמר</button>
               <button type="button" class="secondary-button" data-action="copy-html" data-copy-type="preview">העתק HTML לתצוגה עם סמנים</button>
             </div>
             <div class="preview-box" data-preview-container></div>
+            <details>
+              <summary>תכנון תמונות פנימיות</summary>
+              <pre data-preview-markers></pre>
+            </details>
             <div data-preview-image-block {% if not (article.generated_image_url or article.featured_image_url) %}hidden{% endif %}>
               {% set preview_image_url = article.generated_image_url or article.featured_image_url %}
               {% if preview_image_url %}
               <img src="{{ preview_image_url }}" alt="{{ article.image_alt_text }}" style="max-width:320px;height:auto"/>
-              <p><strong>ALT:</strong> {{ article.image_alt_text }}</p>
+              
               {% endif %}
             </div>
           </section>
