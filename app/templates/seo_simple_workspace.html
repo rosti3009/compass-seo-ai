@@ -39,9 +39,28 @@
           <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/drafts" data-method="GET" data-label="רענן מאמרים">רענן מאמרים</button>
           <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/seo/fixes/regenerate-stale" data-method="POST" data-label="רענן תיקונים">רענן תיקונים</button>
         </div>
+        <form class="manual-topic-form" id="manual-topic-form">
+          <h3>כור מאמר לפי נושא</h3>
+          <label>נושא המאמר
+            <input name="topic_title" type="text" required value="אבני בזלת לגריל – איך הן משפרות צלייה בגריל גז">
+          </label>
+          <label>מילת מפתח
+            <input name="focus_keyword" type="text" required value="אבני בזלת לגריל">
+          </label>
+          <label>כוונת חיפוש
+            <input name="target_intent" type="text" required value="commercial_informational">
+          </label>
+          <label>slug רצוי
+            <input name="preferred_slug" type="text" value="basalt-stones-for-gas-grill">
+          </label>
+          <label>רשימת נושאים מרובה (מושבת)
+            <textarea disabled placeholder="מושבת: תמיכה בנושא יחיד בלבד"></textarea>
+          </label>
+          <button type="submit" class="secondary-button">כור מאמר לפי נושא</button>
+        </form>
         <h2>מאמרים לאישור</h2>
         {% for article in article_drafts %}
-        <article class="fix-card simple-fix-card" data-article-id="{{ article.id }}">
+        <article id="article-{{ article.id }}" class="fix-card simple-fix-card" data-article-id="{{ article.id }}">
           <h3>{{ article.title }}</h3>
           <p><strong>מילת מפתח:</strong> {{ article.focus_keyword }} | <strong>כוונה:</strong> {{ article.target_intent }}</p>
           <p><strong>Slug:</strong> {{ article.slug }}</p>

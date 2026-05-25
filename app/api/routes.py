@@ -38,7 +38,7 @@ from app.integrations.gsc import GSCAPIError, GSCClient
 from app.integrations.gsc import MissingGoogleCredentialsError as MissingGSCCredentialsError
 from app.integrations.istore import IStoreAPIError, IStoreClient, MissingIStoreSettingsError
 from app.integrations.openai_client import OpenAIClient
-from app.services.content_articles import generate_daily_article_draft
+from app.services.content_articles import generate_daily_article_draft, generate_topic_article_draft
 from app.services.crawler import SEOCrawler
 from app.services.hebrew_seo import analyze_page_hebrew_seo, israeli_seasonality, summarize_hebrew_insights
 from app.services.image_generation import build_realistic_hero_prompt, get_image_provider
@@ -129,6 +129,13 @@ class ContentArticleEditRequest(BaseModel):
     meta_title: str | None = None
     meta_description: str | None = None
     article_body: str | None = None
+
+
+class ManualTopicArticleRequest(BaseModel):
+    topic_title: str | list[str]
+    focus_keyword: str
+    target_intent: str = "commercial_informational"
+    preferred_slug: str | None = None
 
 
 class IStorePayloadValidationRequest(BaseModel):
@@ -1667,6 +1674,40 @@ def generate_random_daily_content_article(db: DatabaseSession) -> dict[str, obje
     draft, reused, _ = generate_daily_article_draft(db, randomize=True)
     quality = _article_quality_summary(draft)
     return {"success": True, "selected_topic": draft.topic_title, "reused": reused, "draft_id": draft.id, "title": draft.title, "slug": draft.slug, "quality_score": quality.get("article_quality_score")}
+
+
+@router.post("/content/articles/generate-topic-draft")
+def generate_topic_content_article(payload: ManualTopicArticleRequest, db: DatabaseSession) -> dict[str, object]:
+    topic = payload.topic_title[0] if isinstance(payload.topic_title, list) else payload.topic_title
+    draft = generate_topic_article_draft(
+        db,
+        topic_title=topic,
+        focus_keyword=payload.focus_keyword,
+        target_intent=payload.target_intent,
+        preferred_slug=payload.preferred_slug,
+    )
+    quality = _article_quality_summary(draft)
+    manual_upload_url = f"/seo/simple-workspace#article-{draft.id}"
+    logger.info(
+        "[MANUAL_SINGLE_ARTICLE_GENERATION] topic=%s keyword=%s generated_slug=%s draft_id=%s",
+        topic,
+        payload.focus_keyword,
+        draft.slug,
+        draft.id,
+    )
+    return {
+        "success": True,
+        "auto_publish": False,
+        "draft": {
+            "draft_id": draft.id,
+            "title": draft.title,
+            "slug": draft.slug,
+            "meta_title": draft.meta_title,
+            "meta_description": draft.meta_description,
+            "quality": quality,
+            "manual_upload_url": manual_upload_url,
+        },
+    }
 
 
 @router.get("/content/articles/drafts")

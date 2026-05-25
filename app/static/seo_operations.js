@@ -424,6 +424,29 @@ function bindOperations(root = document) {
   });
   applyDiffHighlights(root);
   bindReviewFilters(root);
+  const manualForm = document.getElementById("manual-topic-form");
+  if (manualForm && manualForm.dataset.bound !== "true") {
+    manualForm.dataset.bound = "true";
+    manualForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const resultPanel = document.getElementById("simple-action-result");
+      const formData = new FormData(manualForm);
+      const payload = {
+        topic_title: String(formData.get("topic_title") || ""),
+        focus_keyword: String(formData.get("focus_keyword") || ""),
+        target_intent: String(formData.get("target_intent") || ""),
+        preferred_slug: String(formData.get("preferred_slug") || "") || null,
+      };
+      const response = await fetch("/content/articles/generate-topic-draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json();
+      if (resultPanel) resultPanel.innerHTML = `<pre>${escapeHtml(JSON.stringify(data, null, 2))}</pre>`;
+      if (response.ok) window.location.reload();
+    });
+  }
 }
 
 document.addEventListener("DOMContentLoaded", () => bindOperations());

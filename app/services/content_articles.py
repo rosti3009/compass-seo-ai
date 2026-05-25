@@ -277,3 +277,43 @@ def generate_daily_article_draft(db: Session, *, randomize: bool = False) -> tup
     db.commit()
     db.refresh(draft)
     return draft, reused, last_generated_at
+
+
+def generate_topic_article_draft(
+    db: Session,
+    *,
+    topic_title: str,
+    focus_keyword: str,
+    target_intent: str,
+    preferred_slug: str | None = None,
+) -> ContentArticleDraft:
+    related = _related_products(db, focus_keyword)
+    slug = _slugify(preferred_slug or "") if preferred_slug else _fallback_topic_slug(focus_keyword, topic_title)[0]
+    body, _ = _remove_h1_tags(_build_article_html(topic_title, focus_keyword, related))
+    section_prompts = [
+        {"section": "פתיח", "placement_hint": "[IMAGE_1_HERE]", "prompt": "Close-up of different wood chip types by texture and color (Hickory, Oak, Apple, Mesquite, Cherry), physically separated piles, no text in image, realistic studio lighting"},
+        {"section": "שלב-אחר-שלב", "placement_hint": "[IMAGE_2_HERE]", "prompt": "Smoker box filled with wood chips producing thin blue smoke inside a grill smoker chamber, realistic BBQ photo, no text"},
+    ]
+    featured_prompt = "wood chips in smoker box with thin blue smoke inside grill smoker, meat in background, realistic BBQ photography"
+    basalt_topic = "אבני בזלת לגריל"
+    if basalt_topic in topic_title or basalt_topic in focus_keyword:
+        featured_prompt = "realistic close-up of black basalt lava stones inside a gas grill, glowing heat, steak grilling above, outdoor BBQ, natural light, ultra realistic, no text, no logos"
+    draft = ContentArticleDraft(
+        status="CONTENT_DRAFT", topic_title=topic_title, title=topic_title, slug=slug,
+        meta_title=f"{topic_title} | Compass Grill",
+        meta_description=f"{topic_title} - מדריך מעשי בעברית עם שלבים, טמפרטורות, טעויות נפוצות וטיפים מקצועיים.",
+        focus_keyword=focus_keyword, target_intent=target_intent, article_body=body,
+        suggested_related_products_json=json.dumps(related, ensure_ascii=False),
+        internal_links_json=json.dumps(related, ensure_ascii=False),
+        section_image_prompts_json=json.dumps(section_prompts, ensure_ascii=False),
+        featured_image_prompt=featured_prompt,
+        image_alt_text=f"{topic_title} - הדגמה על גריל", image_title=f"תמונת שער: {topic_title}", image_caption="הדגמה מעשית של השיטה במאמר.",
+        image_filename_slug=f"compass-grill-{slug}", image_style_rules="realistic outdoor BBQ photography",
+        generated_image_url=None, uploaded_media_id=None, image_publish_status="NOT_PUBLISHED",
+        target_site_section="blog", target_publish_type="article", target_blog_base_url="https://compassgrill.co.il/blog/",
+        target_path=f"/blog/{slug}", target_url=f"https://compassgrill.co.il/blog/{slug}", publish_destination_status="ready", featured_image_status="planned",
+    )
+    db.add(draft)
+    db.commit()
+    db.refresh(draft)
+    return draft

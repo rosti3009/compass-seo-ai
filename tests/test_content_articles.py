@@ -44,6 +44,74 @@ def test_workspace_has_article_controls(client: TestClient) -> None:
     assert response.status_code == 200
     assert 'צור מאמר חדש' in response.text
     assert 'מאמרים לאישור' in response.text
+    assert 'כור מאמר לפי נושא' in response.text
+    assert 'תמיכה בנושא יחיד בלבד' in response.text
+
+
+def test_generate_topic_draft_returns_single_draft_and_manual_fields(client: TestClient) -> None:
+    response = client.post(
+        "/content/articles/generate-topic-draft",
+        json={
+            "topic_title": "אבני בזלת לגריל – איך הן משפרות צלייה בגריל גז",
+            "focus_keyword": "אבני בזלת לגריל",
+            "target_intent": "commercial_informational",
+            "preferred_slug": "basalt-stones-for-gas-grill",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    draft = payload["draft"]
+    assert payload["auto_publish"] is False
+    assert draft["slug"] == "basalt-stones-for-gas-grill"
+    assert draft["manual_upload_url"].startswith("/seo/simple-workspace#article-")
+    assert "<h1" not in client.get(f"/content/articles/{draft['draft_id']}").json()["draft"]["article_body"].lower()
+
+
+def test_generate_topic_draft_uses_only_first_topic_when_array_received(client: TestClient) -> None:
+    response = client.post(
+        "/content/articles/generate-topic-draft",
+        json={
+            "topic_title": ["נושא ראשון", "נושא שני"],
+            "focus_keyword": "מילת מפתח",
+            "target_intent": "commercial_informational",
+            "preferred_slug": "custom-topic-slug",
+        },
+    )
+    assert response.status_code == 200
+    draft_id = response.json()["draft"]["draft_id"]
+    draft = client.get(f"/content/articles/{draft_id}").json()["draft"]
+    assert draft["title"] == "נושא ראשון"
+
+
+def test_generate_topic_draft_no_additional_queue_or_cluster_or_schedule_runs(client: TestClient) -> None:
+    response = client.post(
+        "/content/articles/generate-topic-draft",
+        json={
+            "topic_title": "אבני בזלת לגריל – איך הן משפרות צלייה בגריל גז",
+            "focus_keyword": "אבני בזלת לגריל",
+            "target_intent": "commercial_informational",
+            "preferred_slug": "basalt-stones-for-gas-grill",
+        },
+    )
+    assert response.status_code == 200
+    drafts = client.get("/content/articles/drafts").json()["drafts"]
+    assert len(drafts) == 1
+    assert drafts[0]["topic_title"] == "אבני בזלת לגריל – איך הן משפרות צלייה בגריל גז"
+
+
+def test_generate_topic_draft_sets_basalt_featured_image_prompt(client: TestClient) -> None:
+    response = client.post(
+        "/content/articles/generate-topic-draft",
+        json={
+            "topic_title": "אבני בזלת לגריל – איך הן משפרות צלייה בגריל גז",
+            "focus_keyword": "אבני בזלת לגריל",
+            "target_intent": "commercial_informational",
+            "preferred_slug": "basalt-stones-for-gas-grill",
+        },
+    )
+    draft_id = response.json()["draft"]["draft_id"]
+    draft = client.get(f"/content/articles/{draft_id}").json()["draft"]
+    assert "black basalt lava stones" in draft["featured_image_prompt"]
 
 
 def test_generate_article_defaults_and_image_plan(client: TestClient) -> None:
