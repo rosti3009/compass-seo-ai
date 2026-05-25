@@ -165,8 +165,16 @@
           <p><strong>Suggested link relevance:</strong> {{ article.suggested_link_relevance }}</p>
           <p><strong>Article quality score:</strong> {{ article.article_quality_score }}</p>
           <p><strong>Publish readiness:</strong> {{ article.publish_readiness }}</p>
-          {% set blocked_article = article.publish_readiness != 'READY_FOR_REVIEW' or article.semantic_relevance_score < 70 or article.article_quality_score < 75 or article.suggested_link_relevance < 70 %}
-          {% if blocked_article %}
+          {% set readiness_state = article.publish_readiness or 'NEEDS_IMPROVEMENT' %}
+          {% set readiness_map = {
+            'READY_FOR_REVIEW': {'label': 'מוכן לבדיקה', 'class': 'status-approved'},
+            'NEEDS_IMPROVEMENT': {'label': 'נדרש שיפור לפני אישור', 'class': 'status-missing'},
+            'APPROVED': {'label': 'אושר ומוכן לפרסום', 'class': 'status-published'}
+          } %}
+          {% set readiness_display = readiness_map.get(readiness_state, readiness_map['NEEDS_IMPROVEMENT']) %}
+          <p><span class="badge status-badge {{ readiness_display['class'] }}">{{ readiness_display['label'] }}</span></p>
+          {% set blocked_article = readiness_state == 'NEEDS_IMPROVEMENT' or article.semantic_relevance_score < 70 or article.article_quality_score < 75 or article.suggested_link_relevance < 70 %}
+          {% if readiness_state == 'NEEDS_IMPROVEMENT' %}
             <p class="empty"><strong>נדרש שיפור לפני אישור</strong></p>
           {% endif %}
           <div class="actions">

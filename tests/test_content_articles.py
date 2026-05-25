@@ -235,6 +235,49 @@ def test_simple_workspace_shows_blocked_warning_and_regen_button(client: TestCli
     assert 'צור מאמר מחדש' in response.text
 
 
+
+
+def test_manual_upload_readiness_text_mapping(client: TestClient) -> None:
+    client.post('/content/articles/generate-daily-draft')
+    import app.api.routes as routes
+
+    original = routes._article_quality_summary
+    try:
+        routes._article_quality_summary = lambda draft: {  # type: ignore[assignment]
+            **original(draft),
+            "semantic_relevance_score": 90.0,
+            "suggested_link_relevance": 90.0,
+            "article_quality_score": 90.0,
+            "publish_readiness": "READY_FOR_REVIEW",
+        }
+        response = client.get('/seo/simple-workspace')
+        assert response.status_code == 200
+        assert 'מוכן לבדיקה' in response.text
+        assert 'נדרש שיפור לפני אישור' not in response.text
+
+        routes._article_quality_summary = lambda draft: {  # type: ignore[assignment]
+            **original(draft),
+            "semantic_relevance_score": 90.0,
+            "suggested_link_relevance": 90.0,
+            "article_quality_score": 90.0,
+            "publish_readiness": "APPROVED",
+        }
+        approved_response = client.get('/seo/simple-workspace')
+        assert approved_response.status_code == 200
+        assert 'אושר ומוכן לפרסום' in approved_response.text
+
+        routes._article_quality_summary = lambda draft: {  # type: ignore[assignment]
+            **original(draft),
+            "semantic_relevance_score": 20.0,
+            "suggested_link_relevance": 20.0,
+            "article_quality_score": 40.0,
+            "publish_readiness": "NEEDS_IMPROVEMENT",
+        }
+        needs_improvement_response = client.get('/seo/simple-workspace')
+        assert needs_improvement_response.status_code == 200
+        assert 'נדרש שיפור לפני אישור' in needs_improvement_response.text
+    finally:
+        routes._article_quality_summary = original
 def test_hebrew_tabun_slug_is_not_gas_grill_vs_charcoal(client: TestClient) -> None:
     for _ in range(8):
         draft = client.post('/content/articles/generate-daily-draft').json()['draft']
