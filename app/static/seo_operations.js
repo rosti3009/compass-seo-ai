@@ -139,6 +139,7 @@ async function runDashboardAction(button) {
       headers["Content-Type"] = "application/json";
       options.body = button.dataset.body;
     }
+    options.cache = "no-store";
     const response = await fetch(button.dataset.endpoint, options);
     const contentType = response.headers.get("content-type") || "";
     const payload = contentType.includes("application/json") ? await response.json() : { message: await response.text() };
@@ -149,7 +150,9 @@ async function runDashboardAction(button) {
     }
     renderResult(panel, label, payload, true);
     if (button.dataset.refreshOnSuccess === "true") {
-      window.location.reload();
+      const refreshed = new URL(window.location.href);
+      refreshed.searchParams.set("_refresh", String(Date.now()));
+      window.location.replace(refreshed.toString());
       return;
     }
   } catch (error) {

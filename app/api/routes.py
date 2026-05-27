@@ -1413,9 +1413,9 @@ def _simple_workspace_context(db: Session) -> dict[str, object]:
         },
         "primary_label": primary_label,
         "primary_href": primary_href,
-        "active_article": ({**active_article.to_dict(), **_article_quality_summary(active_article)} if active_article else None),
+        "active_article": ({**active_article.to_dict(), **_article_quality_summary(active_article), "debug": _draft_debug(active_article, "title")} if active_article else None),
         "archived_articles": [
-            {**d.to_dict(), **_article_quality_summary(d)}
+            {**d.to_dict(), **_article_quality_summary(d), "debug": _draft_debug(d, "title")}
             for d in all_article_drafts
             if d.id != active_id
         ],
@@ -1436,6 +1436,21 @@ def _latest_active_candidate(db: Session) -> ContentArticleDraft | None:
         .order_by(ContentArticleDraft.created_at.desc(), ContentArticleDraft.id.desc())
         .first()
     )
+
+
+def _article_generation_response(draft: ContentArticleDraft, endpoint_used: str) -> dict[str, object]:
+    quality = _article_quality_summary(draft)
+    debug = _draft_debug(draft, "title")
+    diagnostics = {
+        "article_id": draft.id,
+        "created_at": draft.created_at.isoformat() if draft.created_at else None,
+        "generator_version": debug.get("generator_version"),
+        "selected_generator": debug.get("selected_generator"),
+        "generator_source": debug.get("generator_source"),
+        "detected_topic_type": debug.get("detected_topic_type"),
+        "endpoint_used": endpoint_used,
+    }
+    return {"success": True, "draft": {**draft.to_dict(), "debug": {**debug, "endpoint_used": endpoint_used}, "quality": quality}, "diagnostics": diagnostics}
 def _strip_h1_tags(html: str) -> tuple[str, bool]:
     cleaned = re.sub(r"<h1[^>]*>.*?</h1>", "", html or "", flags=re.IGNORECASE | re.DOTALL)
     return cleaned, cleaned != (html or "")
@@ -1719,7 +1734,10 @@ def generate_daily_content_article(db: DatabaseSession) -> dict[str, object]:
     draft, reused, last_generated_at = generate_daily_article_draft(db)
     _set_active_manual_article(db, draft)
     db.commit()
-    return {"success": True, "draft": {**draft.to_dict(), "debug": _draft_debug(draft, "title"), "quality": _article_quality_summary(draft)}, "reused": reused, "last_generated_at": last_generated_at.isoformat() if last_generated_at else None, "auto_publish": False}
+    db.refresh(draft)
+    response = _article_generation_response(draft, "/content/articles/generate-daily-draft")
+    response.update({"reused": reused, "last_generated_at": last_generated_at.isoformat() if last_generated_at else None, "auto_publish": False})
+    return response
 
 
 @router.post("/content/articles/generate-random-daily-draft")
@@ -1727,8 +1745,10 @@ def generate_random_daily_content_article(db: DatabaseSession) -> dict[str, obje
     draft, reused, _ = generate_daily_article_draft(db, randomize=True)
     _set_active_manual_article(db, draft)
     db.commit()
-    quality = _article_quality_summary(draft)
-    return {"success": True, "selected_topic": draft.topic_title, "reused": reused, "draft_id": draft.id, "title": draft.title, "slug": draft.slug, "quality_score": quality.get("article_quality_score")}
+    db.refresh(draft)
+    response = _article_generation_response(draft, "/content/articles/generate-random-daily-draft")
+    response.update({"selected_topic": draft.topic_title, "reused": reused, "draft_id": draft.id, "title": draft.title, "slug": draft.slug, "quality_score": response["draft"]["quality"].get("article_quality_score")})
+    return response
 
 
 @router.post("/content/articles/generate-topic-draft")
@@ -1743,7 +1763,9 @@ def generate_topic_content_article(payload: ManualTopicArticleRequest, db: Datab
     )
     _set_active_manual_article(db, draft)
     db.commit()
-    quality = _article_quality_summary(draft)
+    db.refresh(draft)
+    response = _article_generation_response(draft, "/content/articles/generate-topic-draft")
+    quality = response["draft"]["quality"]
     manual_upload_url = f"/seo/simple-workspace#article-{draft.id}"
     logger.info(
         "[MANUAL_SINGLE_ARTICLE_GENERATION] topic=%s keyword=%s generated_slug=%s draft_id=%s",
@@ -1753,7 +1775,7 @@ def generate_topic_content_article(payload: ManualTopicArticleRequest, db: Datab
         draft.id,
     )
     return {
-        "success": True,
+        **response,
         "auto_publish": False,
         "draft": {
             "draft_id": draft.id,
@@ -1763,8 +1785,27 @@ def generate_topic_content_article(payload: ManualTopicArticleRequest, db: Datab
             "meta_description": draft.meta_description,
             "quality": quality,
             "manual_upload_url": manual_upload_url,
-            "debug": _draft_debug(draft, "title"),
+            "debug": {**response["draft"]["debug"], "endpoint_used": "/content/articles/generate-topic-draft"},
         },
+    }
+
+
+@router.get("/seo/content-articles/latest-debug")
+def latest_content_article_debug(db: DatabaseSession) -> dict[str, object]:
+    latest = db.query(ContentArticleDraft).order_by(ContentArticleDraft.created_at.desc(), ContentArticleDraft.id.desc()).first()
+    active = db.query(ContentArticleDraft).filter(ContentArticleDraft.is_active_manual_article.is_(True)).order_by(ContentArticleDraft.created_at.desc(), ContentArticleDraft.id.desc()).first()
+    if latest is None:
+        return {"latest_article_id": None, "active_article_id": None}
+    debug = _draft_debug(latest, "title")
+    return {
+        "latest_article_id": latest.id,
+        "active_article_id": active.id if active else None,
+        "title": latest.title,
+        "slug": latest.slug,
+        "generator_version": debug.get("generator_version"),
+        "generator_source": debug.get("generator_source"),
+        "selected_generator": debug.get("selected_generator"),
+        "created_at": latest.created_at.isoformat() if latest.created_at else None,
     }
 
 
