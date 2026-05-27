@@ -151,6 +151,41 @@ def test_generate_topic_draft_sets_basalt_featured_image_prompt(client: TestClie
     assert "black basalt lava stones" in draft["featured_image_prompt"]
 
 
+@pytest.mark.parametrize(
+    ("topic_title", "focus_keyword", "slug", "must_have", "forbidden", "image_term"),
+    [
+        ("פיקניה על הגריל – מדריך מלא", "פיקניה", "picanha-on-grill", ["שכבת שומן", "54–56°C", "חיתוך נגד הסיבים"], ["74°C", "עוף"], "picanha"),
+        ("איך להכין כנפיים קריספיות על הגריל", "כנפיים קריספיות", "crispy-grilled-wings", ["ייבוש", "74°C", "גלייז"], ["פיקניה", "מדיום רייר"], "wings"),
+        ("אבני בזלת לגריל – איך הן משפרות צלייה בגריל גז", "אבני בזלת לגריל", "basalt-stones-for-gas-grill", ["פיזור חום", "התלקחויות", "יציבות חום"], ["74°C", "מתכון עוף"], "basalt"),
+    ],
+)
+def test_topic_specific_generation_regression(
+    client: TestClient,
+    topic_title: str,
+    focus_keyword: str,
+    slug: str,
+    must_have: list[str],
+    forbidden: list[str],
+    image_term: str,
+) -> None:
+    response = client.post(
+        "/content/articles/generate-topic-draft",
+        json={"topic_title": topic_title, "focus_keyword": focus_keyword, "target_intent": "commercial_informational", "preferred_slug": slug},
+    )
+    assert response.status_code == 200
+    draft = response.json()["draft"]
+    assert draft["slug"] == slug
+    full = client.get(f"/content/articles/{draft['draft_id']}").json()["draft"]
+    for term in must_have:
+        assert term in full["article_body"]
+    for term in forbidden:
+        assert term not in full["article_body"]
+    assert image_term in full["featured_image_prompt"].lower()
+    assert draft["quality"]["article_quality_score"] >= 85
+    assert draft["quality"]["publish_readiness"] == "READY_FOR_REVIEW"
+    assert draft["debug"]["generator_source"] == "specialized"
+
+
 def test_generate_article_defaults_and_image_plan(client: TestClient) -> None:
     draft = client.post('/content/articles/generate-daily-draft').json()['draft']
     assert draft['target_site_section'] == 'blog'
