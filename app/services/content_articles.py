@@ -70,6 +70,77 @@ TOPIC_ROUTING = {
     "charcoal": ["פחם קוקוס", "פחם עץ", "פחם"],
 }
 
+GENERIC_FILLER_PHRASES = [
+    "הנושא הזה מכריע אם תקבלו תוצאה בינונית",
+    "ציוד ומוצרים שכדאי להכין מראש",
+    "חימום מוקדם 15–20 דקות",
+]
+
+
+def _classify_topic(topic_title: str, focus_keyword: str, target_intent: str) -> dict[str, object]:
+    blob = f"{topic_title} {focus_keyword}".lower()
+    base = {
+        "topic_type": "bbq_general",
+        "product_type": "general",
+        "content_type": "guide",
+        "search_intent": target_intent or "informational",
+        "target_keyword": focus_keyword,
+        "related_keywords": [focus_keyword],
+        "required_sections": ["intro", "steps", "faq", "cta"],
+        "forbidden_sections": [],
+        "selected_generator": "generic_fallback",
+        "generator_source": "fallback",
+        "fallback_reason": "no_specialized_topic_match",
+        "forbidden_terms": [],
+        "required_terms": [],
+    }
+    if "פיקניה" in blob:
+        base.update({
+            "topic_type": "beef_cut",
+            "product_type": "picanha",
+            "content_type": "grilling_guide",
+            "search_intent": target_intent or "how-to",
+            "related_keywords": ["פיקניה", "שכבת שומן", "מלח גס", "שיפוד ברזילאי", "חיתוך נגד הסיבים"],
+            "required_sections": ["intro", "fat_cap", "reverse_sear_or_skewer", "temperature", "flareups", "rest", "faq", "cta"],
+            "forbidden_sections": ["chicken_recipe"],
+            "selected_generator": "picanha_specialized",
+            "generator_source": "specialized",
+            "fallback_reason": "",
+            "required_terms": ["שכבת שומן", "מלח גס", "חיתוך נגד הסיבים", "54–56°C", "מנוחה"],
+            "forbidden_terms": ["74°C", "גלייז", "עוף"],
+        })
+    elif "כנפיים" in blob and "קריספ" in blob:
+        base.update({
+            "topic_type": "chicken_recipe",
+            "product_type": "wings",
+            "content_type": "how_to_recipe",
+            "search_intent": target_intent or "how-to",
+            "related_keywords": ["כנפיים קריספיות", "ייבוש", "בייקינג פאודר", "חום עקיף", "74°C"],
+            "required_sections": ["intro", "drying", "indirect_then_direct", "temperature", "glaze", "faq", "cta"],
+            "forbidden_sections": ["beef_doneness"],
+            "selected_generator": "crispy_wings_specialized",
+            "generator_source": "specialized",
+            "fallback_reason": "",
+            "required_terms": ["ייבוש", "74°C", "גלייז", "חום עקיף"],
+            "forbidden_terms": ["פיקניה", "מדיום רייר", "שכבת שומן בקר"],
+        })
+    elif "בזלת" in blob or "לבה" in blob:
+        base.update({
+            "topic_type": "product_guide",
+            "product_type": "basalt_stones",
+            "content_type": "commercial_informational",
+            "search_intent": target_intent or "commercial_informational",
+            "related_keywords": ["אבני בזלת לגריל", "פיזור חום", "הפחתת התלקחויות", "גריל גז"],
+            "required_sections": ["intro", "heat_distribution", "placement", "maintenance", "faq", "cta"],
+            "forbidden_sections": ["meat_recipe"],
+            "selected_generator": "basalt_stones_specialized",
+            "generator_source": "specialized",
+            "fallback_reason": "",
+            "required_terms": ["פיזור חום", "התלקחויות", "יציבות חום", "מיקום מעל המבערים", "ניקוי והחלפה"],
+            "forbidden_terms": ["74°C", "מדיום רייר", "מתכון עוף", "מתכון בקר"],
+        })
+    return base
+
 def _today_in_timezone(timezone: str) -> date:
     return datetime.now(ZoneInfo(timezone)).date()
 
@@ -267,6 +338,18 @@ def _safe_product_url(product: object) -> str:
 
 
 def _build_article_html(title: str, keyword: str, related: list[dict[str, str | float]]) -> str:
+    profile = _classify_topic(title, keyword, "")
+    if profile["selected_generator"] == "picanha_specialized":
+        return (
+            "<p><strong>פיקניה על הגריל</strong> דורשת עבודה מדויקת עם שכבת השומן, חום דו-אזורי ומדחום ליבה כדי להגיע לטעם ברזילאי אמיתי.</p>"
+            "<h2>הכנת הנתח: שכבת שומן, מלח גס ותזמון</h2><p>משאירים שכבת שומן בעובי אחיד, חורצים קלות את השומן וממליחים במלח גס 20–40 דקות לפני צלייה.</p>"
+            "<h2>שתי שיטות שעובדות: צריבה הפוכה או שיפוד ברזילאי</h2><p>אפשר להתחיל בחום עקיף ואז צריבה חזקה בסוף (Reverse Sear), או להשחיל לקשת ברזילאית ולצלות בסיבובים קצרים מעל חום ישיר.</p>"
+            "<h2>טמפרטורת יעד לפיקניה</h2><p>מורידים מהאש ב-54–56°C למדיום רייר ומאפשרים עליה קלה במנוחה.</p>"
+            "<h2>ניהול התלקחויות מהשומן</h2><p>שכבת השומן מטפטפת במהירות: עובדים עם אזור קר לבקרת להבות ומסובבים את הנתח במקום להזיז כל הזמן.</p>"
+            "<h2>חיתוך נכון ומנוחה לפני הגשה</h2><p>נותנים מנוחה 7–10 דקות ומבצעים חיתוך נגד הסיבים לפרוסות עסיסיות ורכות.</p>"
+            "<h2>שאלות נפוצות על פיקניה</h2><h3>אפשר בלי מדחום?</h3><p>אפשר, אבל פחות עקבי. במדחום ליבה מקבלים דיוק בכל צלייה.</p><h3>כמה עבה לפרוס?</h3><p>פרוסות בעובי בינוני שומרות איזון בין עסיסיות לצריבה.</p>"
+            "<p><strong>CTA:</strong> רוצים תוצאה יציבה בכל צלייה? הוסיפו מדחום איכותי ומלח גס לעמדת העבודה.</p>"
+        )
     if _topic_kind(title, keyword) == "wings":
         return (
             "<p>כנפיים על הגריל יוצאות קריספיות רק כששולטים ביובש, חום ותזמון גלייז. הנה שיטה מדויקת שעובדת.</p>\n"
@@ -303,6 +386,19 @@ def _build_article_html(title: str, keyword: str, related: list[dict[str, str | 
             "<h3>הבדלי טעם בין עצים</h3><p>Hickory מדגיש עומק ועוצמה, Oak מאזן, Apple מוסיף מתיקות עדינה, Cherry פירותי, ו-Mesquite מתאים למינון קצר ומדויק.</p>\n"
             "<h2>מוצרים משלימים</h2>\n"
             + (f"<ul>{links_html}</ul>\n" if links_html else "<p>כרגע אין קישורים פנימיים רלוונטיים להצגה.</p>\n")
+        )
+    if profile["selected_generator"] == "basalt_stones_specialized":
+        links_html = "".join([f"<li><a href='{p['url']}'>{p['title']}</a></li>" for p in related[:4]])
+        return (
+            "<p><strong>אבני בזלת לגריל</strong> משפרות פיזור חום ומייצבות את גריל הגז לאורך הצלייה, במיוחד בעבודה ארוכה.</p>"
+            "<h2>איך אבני בזלת משפרות פיזור חום</h2><p>האבנים אוגרות אנרגיה ומחזירות חום בצורה אחידה יותר בין אזורי הרשת.</p>"
+            "<h2>הפחתת התלקחויות ושמירה על יציבות חום</h2><p>שומן מטפטף על האבנים במקום ישירות למבער, ולכן פחות התלקחויות ופחות קפיצות חום.</p>"
+            "<h2>מיקום מעל המבערים/מתחת לרשת לפי מבנה הגריל</h2><p>בגרילים מסוימים מניחים מעל המבערים ובאחרים מתחת לרשת נשיאת החום. בודקים את הוראות היצרן ושומרים מעבר אוויר.</p>"
+            "<h2>ניקוי והחלפה</h2><p>מנקים שומן יבש אחרי קירור מלא, מחליפים אבנים סדוקות ושומרים על שכבה אחידה בכל תא חום.</p>"
+            "<h2>שאלות נפוצות</h2><h3>כל כמה זמן מחליפים?</h3><p>תלוי בתדירות שימוש; כשיש סדקים רבים או ירידת ביצועים מורגשת.</p><h3>זה מתאים לכל גריל?</h3><p>רק לדגמים שתומכים באבני בזלת/לבה לפי היצרן.</p>"
+            "<h2>מוצרים רלוונטיים באתר</h2>"
+            + (f"<ul>{links_html}</ul>" if links_html else "<p>כרגע אין קישורים פנימיים רלוונטיים להצגה.</p>")
+            + "<p><strong>CTA:</strong> רוצים צלייה יציבה יותר בגריל גז? התאימו סט אבני בזלת למבנה הגריל שלכם.</p>"
         )
     links_html = "".join([f"<li><a href='{p['url']}'>{p['title']}</a></li>" for p in related[:4]])
     body = (
@@ -394,6 +490,7 @@ def generate_topic_article_draft(
     preferred_slug: str | None = None,
 ) -> ContentArticleDraft:
     related, discovery_debug = _discover_related_links(db, focus_keyword)
+    topic_profile = _classify_topic(topic_title, focus_keyword, target_intent)
     slug = _slugify(preferred_slug or "") if preferred_slug else _fallback_topic_slug(focus_keyword, topic_title)[0]
     body, _ = _remove_h1_tags(_build_article_html(topic_title, focus_keyword, related))
     section_prompts = [
@@ -405,12 +502,15 @@ def generate_topic_article_draft(
         "wings": "crispy chicken wings on grill grates, golden brown skin, BBQ glaze on side, light smoke, realistic outdoor grill photography, no text, no logos",
         "basalt": "realistic close-up of black basalt lava stones inside a gas grill, glowing heat, steak grilling above, outdoor BBQ, natural light, ultra realistic, no text, no logos",
         "wood_chips": "wood chips in smoker box with thin blue smoke inside grill smoker, meat in background, realistic BBQ photography, no text, no logos",
+        "picanha": "picanha steak with fat cap on brazilian skewer over charcoal grill, reverse-sear style, realistic BBQ photography, no text, no logos",
     }
     featured_prompt = prompt_map.get(kind, "realistic outdoor grill photography focused on the specific topic ingredient/tool, no text, no logos")
+    meta_title = f"{focus_keyword} | Compass Grill"
+    meta_description = f"{focus_keyword}: מדריך ממוקד לפי כוונת חיפוש עם שלבים מעשיים, FAQ וכלים מתאימים."
     draft = ContentArticleDraft(
         status="CONTENT_DRAFT", topic_title=topic_title, title=topic_title, slug=slug,
-        meta_title=f"{topic_title} | Compass Grill",
-        meta_description=f"{topic_title} - מדריך מעשי בעברית עם שלבים, טמפרטורות, טעויות נפוצות וטיפים מקצועיים.",
+        meta_title=meta_title,
+        meta_description=meta_description,
         focus_keyword=focus_keyword, target_intent=target_intent, article_body=body,
         suggested_related_products_json=json.dumps(related, ensure_ascii=False),
         internal_links_json=json.dumps(related, ensure_ascii=False),
@@ -425,5 +525,5 @@ def generate_topic_article_draft(
     db.add(draft)
     db.commit()
     db.refresh(draft)
-    setattr(draft, "link_match_debug", discovery_debug)
+    setattr(draft, "link_match_debug", {**discovery_debug, **topic_profile, "detected_topic_type": topic_profile["topic_type"], "forbidden_terms_removed": []})
     return draft

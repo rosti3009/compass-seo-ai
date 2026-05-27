@@ -38,7 +38,12 @@ from app.integrations.gsc import GSCAPIError, GSCClient
 from app.integrations.gsc import MissingGoogleCredentialsError as MissingGSCCredentialsError
 from app.integrations.istore import IStoreAPIError, IStoreClient, MissingIStoreSettingsError
 from app.integrations.openai_client import OpenAIClient
-from app.services.content_articles import generate_daily_article_draft, generate_topic_article_draft
+from app.services.content_articles import (
+    GENERIC_FILLER_PHRASES,
+    _classify_topic as classify_topic,
+    generate_daily_article_draft,
+    generate_topic_article_draft,
+)
 from app.services.crawler import SEOCrawler
 from app.services.hebrew_seo import analyze_page_hebrew_seo, israeli_seasonality, summarize_hebrew_insights
 from app.services.image_generation import build_realistic_hero_prompt, get_image_provider
@@ -1449,9 +1454,18 @@ def _draft_debug(draft: ContentArticleDraft, slug_source: str = "title") -> dict
     body = draft.article_body or ""
     _, removed = _strip_h1_tags(body)
     link_debug = getattr(draft, "link_match_debug", {})
+    topic_profile = classify_topic(draft.topic_title or "", draft.focus_keyword or "", draft.target_intent or "")
+    forbidden_terms = topic_profile.get("forbidden_terms", [])
+    removed_terms = [term for term in forbidden_terms if term and term not in body]
     return {
         "generator_version": "v2-topic-specific-2026-05-25",
         "slug_source": slug_source,
+        "detected_topic_type": topic_profile.get("topic_type"),
+        "selected_generator": topic_profile.get("selected_generator"),
+        "search_intent": topic_profile.get("search_intent"),
+        "generator_source": topic_profile.get("generator_source"),
+        "fallback_reason": topic_profile.get("fallback_reason"),
+        "forbidden_terms_removed": removed_terms,
         "h1_removed": "<h1" not in body.lower(),
         "topic_keywords_detected": _topic_keywords_detected(body),
         "article_template_used": "wood_chips_specialized" if "hickory" in body.lower() else "topic_specific_default",
@@ -1488,11 +1502,17 @@ def _article_quality_summary(draft: ContentArticleDraft) -> dict[str, float | st
     if wing_topic and any(t in prompt_blob for t in ["wood chips", "smoker box", "hickory"]):
         wrong_prompt_penalty = 25
     generic_prompt_penalty = 15 if len(prompt_blob.strip()) < 25 else 0
+    topic_profile = classify_topic(draft.topic_title or "", draft.focus_keyword or "", draft.target_intent or "")
     technical_bonus = 26 if len(_topic_keywords_detected(body)) >= 7 else 0
     if wing_topic and all(t in body for t in ["74", "גלייז", "קריספ"]):
         technical_bonus += 18
     structure = max(0.0, structure - generic_slug_penalty - generic_prompt_penalty - wrong_prompt_penalty)
-    article_quality = min(100.0, round((seo * 0.18) + (semantic * 0.22) + (suggestion * 0.22) + (structure * 0.38) + technical_bonus, 1))
+    filler_penalty = 12 * sum(1 for phrase in GENERIC_FILLER_PHRASES if phrase in body)
+    forbidden_penalty = 15 * sum(1 for term in topic_profile.get("forbidden_terms", []) if term and term in body)
+    required_miss_penalty = 7 * sum(1 for term in topic_profile.get("required_terms", []) if term and term not in body)
+    faq_penalty = 12 if "שאלות נפוצות" not in body and "FAQ" not in body else 0
+    keyword_bonus = 10 if (draft.focus_keyword or "") in (draft.title or "") and (draft.focus_keyword or "") in (draft.meta_title or "") and (draft.focus_keyword or "") in body[:280] else 0
+    article_quality = min(100.0, round((seo * 0.18) + (semantic * 0.22) + (suggestion * 0.22) + (structure * 0.38) + technical_bonus + keyword_bonus - filler_penalty - forbidden_penalty - required_miss_penalty - faq_penalty, 1))
     readiness = "READY_FOR_REVIEW" if article_quality >= 75 else "NEEDS_IMPROVEMENT"
     return {
         "seo_quality_score": seo,
