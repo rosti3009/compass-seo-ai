@@ -73,84 +73,31 @@
             <p style="display:none">manual-upload-view · הכנה מהירה לעובד חנות</p>
             <h4>העתקה לאתר לפי החלונות ב־ISTORE</h4>
             {% set existing_image_url = article.generated_image_url or article.featured_image_url %}
+            {% set existing_image_url = article.generated_image_url or article.featured_image_url %}
+            {% set hero_html = '<p><img src="' ~ existing_image_url ~ '" alt="' ~ (article.image_alt_text or '') ~ '"></p>' if existing_image_url else '' %}
+            {% set publish_ready_html = (hero_html ~ '\n' ~ (article.article_body or ''))|replace('[IMAGE_1_HERE]', hero_html)|replace('[IMAGE_2_HERE]', '') %}
             <div class="manual-upload-card">
               <h5>1. כותרת</h5><textarea readonly>{{ article.title }}</textarea><button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ article.title }}">העתק</button><p>להדביק בשדה כותרת באתר</p>
               <h5>2. שם ייחודי לקישור / Slug</h5><textarea readonly>{{ article.slug }}</textarea><button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ article.slug }}">העתק</button><p>להדביק בשדה slug באתר</p>
-              <h5>3. תוכן ראשי להדבקה</h5><textarea id="final-content-box-{{ article.id }}" readonly>{{ article.article_body }}</textarea><button type="button" class="secondary-button" data-action="copy-from-target" data-copy-target="final-content-box-{{ article.id }}">העתק</button><p>להדביק בשדה תוכן ראשי באתר</p>
+              <h5>3. תוכן ראשי להדבקה</h5><textarea id="final-content-box-{{ article.id }}" readonly>{{ publish_ready_html|replace('[IMAGE_3_HERE]', '')|replace('[IMAGE_4_HERE]', '')|replace('[IMAGE_5_HERE]', '') }}</textarea><button type="button" class="secondary-button" data-action="copy-from-target" data-copy-target="final-content-box-{{ article.id }}">העתק</button><p>להדביק בשדה תוכן ראשי באתר</p>
               <h5>4. כותרת לקידום במנועי חיפוש</h5><textarea readonly>{{ article.meta_title }}</textarea><button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ article.meta_title }}">העתק</button><p>להדביק בשדה Meta Title באתר</p>
               <h5>5. תיאור לקידום במנועי חיפוש</h5><textarea readonly>{{ article.meta_description }}</textarea><button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ article.meta_description }}">העתק</button><p>להדביק בשדה Meta Description באתר</p>
               <h5>6. מילות מפתח</h5><textarea readonly>{{ article.focus_keyword }}</textarea><button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ article.focus_keyword }}">העתק</button><p>להדביק בשדה Keywords באתר</p>
-              <h5>7. תמונה ראשית</h5><textarea readonly>{{ existing_image_url or article.featured_image_prompt }}</textarea><button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ existing_image_url or article.featured_image_prompt }}">העתק</button><p>להדביק בשדה תמונה ראשית באתר</p>
+              <h5>7. תמונה ראשית</h5>
+              <p><strong>תמונה מוצעת:</strong> {{ article.image_title or ('תמונת שער: ' ~ article.title) }}</p>
+              {% if existing_image_url %}
+              <div class="actions">
+                <a class="secondary-button" href="{{ existing_image_url }}" target="_blank" rel="noopener">פתח תמונה</a>
+                <a class="secondary-button" href="{{ existing_image_url }}" download>הורד תמונה</a>
+                <button type="button" class="secondary-button" data-action="copy-image-url" data-image-url="{{ existing_image_url }}">העתק קישור תמונה ציבורי</button>
+              </div>
+              {% else %}
+              <textarea readonly>{{ article.featured_image_prompt }}</textarea><button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ article.featured_image_prompt }}">העתק prompt</button>
+              {% endif %}
+              <p>להדביק בשדה תמונה ראשית באתר</p>
               <h5>8. ALT לתמונה</h5><textarea readonly>{{ article.image_alt_text }}</textarea><button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ article.image_alt_text }}">העתק</button><p>להדביק בשדה ALT באתר</p>
             </div>
             <div class="manual-upload-grid">
-              <article class="manual-upload-card">
-                <h5>תמונה ראשית</h5>
-                <p><strong>תמונה מוצעת:</strong> {{ article.image_title or ('תמונת שער: ' ~ article.title) }}</p>
-                <p><strong>AI prompt:</strong> {{ article.featured_image_prompt }}</p>
-                
-                {% set existing_image_url = article.generated_image_url or article.featured_image_url %}
-                {% if existing_image_url %}
-                <img src="{{ existing_image_url }}" alt="{{ article.image_alt_text }}" style="max-width:320px;height:auto"/>
-                <p><strong>image URL:</strong> {{ existing_image_url }}</p>
-                <button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ existing_image_url }}">Copy image URL</button>
-                <button type="button" class="secondary-button" data-action="copy-text" data-copy-text='<p><img src="{{ existing_image_url }}" alt="{{ article.image_alt_text }}"></p>'>Copy image HTML</button>
-                {% endif %}
-                                <p><strong>מידות מומלצות:</strong> 1200×630 פיקסלים (JPG/WebP)</p>
-                <div class="actions">
-                  <button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ article.featured_image_prompt }}">העתק prompt</button>
-                  <button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ article.image_alt_text }}">העתק ALT</button>
-                </div>
-              </article>
-
-              <article class="manual-upload-card">
-                <h5>תמונות פנימיות</h5>
-                {% set section_images = article.section_image_prompts or [] %}
-                {% for section in section_images %}
-                <div class="inline-image-row">
-                  <p><strong>כותרת סעיף:</strong> {{ section.section_title or ('תמונה ' ~ loop.index) }}</p>
-                  <p><strong>מיקום מומלץ:</strong> {{ section.placement_hint or ('[IMAGE_' ~ loop.index ~ '_HERE]') }}</p>
-                  <p><strong>Image prompt:</strong> {{ section.prompt or section.image_prompt or '' }}</p>
-                  <p><strong>ALT:</strong> {{ section.alt_text or article.image_alt_text }}</p>
-                  <p><strong>כיתוב (אופציונלי):</strong> {{ section.caption or article.image_caption }}</p>
-                </div>
-                {% else %}
-                <div class="inline-image-row">
-                  <p><strong>כותרת סעיף:</strong> פתיח / מבוא</p>
-                  <p><strong>מיקום מומלץ:</strong> [IMAGE_1_HERE]</p>
-                  <p><strong>Image prompt:</strong> {{ article.featured_image_prompt }}</p>
-                  
-                  <p><strong>כיתוב (אופציונלי):</strong> {{ article.image_caption }}</p>
-                </div>
-                <div class="inline-image-row">
-                  <p><strong>כותרת סעיף:</strong> סיכום / פעולה מומלצת</p>
-                  <p><strong>מיקום מומלץ:</strong> [IMAGE_2_HERE]</p>
-                  <p><strong>Image prompt:</strong> {{ article.featured_image_prompt }}</p>
-                  
-                  <p><strong>כיתוב (אופציונלי):</strong> {{ article.image_caption }}</p>
-                </div>
-                {% endfor %}
-              </article>
-
-              <article class="manual-upload-card">
-                <h5>בלוקי העתקה סופיים</h5>
-                <p><strong>HTML נקי ללא תמונות</strong></p>
-                <p><strong>HTML עם תמונות לפי מיקומים</strong></p>
-                <textarea class="manual-html" rows="8" readonly>{{ article.article_body }}
-[IMAGE_1_HERE]
-[IMAGE_2_HERE]</textarea>
-                <p><strong>HTML עם תמונה ראשית בתחילת המאמר</strong></p>
-                <textarea class="manual-html" rows="8" readonly>{{ article.article_body }}</textarea>
-                <div class="actions">
-                  <button type="button" class="secondary-button" data-action="copy-from-target" data-copy-target="article-html-markers-{{ article.id }}">העתק HTML עם תמונות לפי מיקומים</button>
-                  <button type="button" class="secondary-button" data-action="copy-from-target" data-copy-target="article-html-clean-{{ article.id }}">העתק HTML עם תמונה ראשית בתחילת המאמר</button>
-                </div>
-                <textarea id="article-html-markers-{{ article.id }}" class="copy-source-hidden" readonly>{{ article.article_body }}
-[IMAGE_1_HERE]
-[IMAGE_2_HERE]</textarea>
-                <textarea id="article-html-clean-{{ article.id }}" class="copy-source-hidden" readonly>{{ article.article_body }}</textarea>
-              </article>
-
               <article class="manual-upload-card checklist-card">
                 <h5>Checklist עובד</h5>
                 <ol>
@@ -165,10 +112,17 @@
                   <li>בחר הצג בבלוג כן</li>
                   <li>שמור</li>
                 </ol>
+                <p><strong>מוכן להעלאה לאתר</strong></p>
               </article>
             </div>
           </section>
           <details><summary>מתקדם</summary><section class="manual-upload-card" data-live-preview>
+            <h5>בלוקי HTML נוספים ומידע טכני</h5>
+            <textarea class="manual-html" rows="8" readonly>{{ (article.article_body or '')|replace('[IMAGE_3_HERE]', '')|replace('[IMAGE_4_HERE]', '')|replace('[IMAGE_5_HERE]', '') }}</textarea>
+            <textarea id="article-html-markers-{{ article.id }}" class="copy-source-hidden" readonly>{{ article.article_body }}
+[IMAGE_1_HERE]
+[IMAGE_2_HERE]</textarea>
+            <textarea id="article-html-clean-{{ article.id }}" class="copy-source-hidden" readonly>{{ publish_ready_html|replace('[IMAGE_3_HERE]', '')|replace('[IMAGE_4_HERE]', '')|replace('[IMAGE_5_HERE]', '') }}</textarea>
             <h5>תצוגה חיה (Live Preview)</h5>
             <div class="actions">
               <button type="button" class="secondary-button" data-action="copy-html" data-copy-type="full">העתק HTML מלא</button>
@@ -188,10 +142,12 @@
               {% endif %}
             </div>
           </section></details>
-          <p><strong>קישורים פנימיים:</strong> {{ article.internal_links }}</p>
-          <p><strong>סטטוס:</strong> {{ article.status }}</p>
-          <p><strong>המאמר יעלה ל:</strong> <span dir="ltr">{{ article.target_url }}</span></p>
-          <div class="manual-upload-card">
+          <details>
+            <summary>מתקדם: קישורים/דיאגנוסטיקה/מטא-דאטה</summary>
+            <p><strong>קישורים פנימיים:</strong> {{ article.internal_links }}</p>
+            <p><strong>סטטוס:</strong> {{ article.status }}</p>
+            <p><strong>המאמר יעלה ל:</strong> <span dir="ltr">{{ article.target_url }}</span></p>
+            <div class="manual-upload-card">
             <h5>מוצרים/קישורים רלוונטיים</h5>
             {% set products = article.suggested_related_products or [] %}
             {% if products %}
@@ -209,14 +165,14 @@
             {% else %}
               <p class="empty">לא נמצאו מוצרים רלוונטיים.</p>
             {% endif %}
-          </div>
-          <p><strong>prompt לתמונה ראשית:</strong> {{ article.featured_image_prompt }}</p>
-          <p><strong>טקסט ALT:</strong> {{ article.image_alt_text }}</p>
-          <p><strong>כותרת תמונה:</strong> {{ article.image_title }}</p>
-          <p><strong>כיתוב תמונה:</strong> {{ article.image_caption }}</p>
-          <p><strong>שם קובץ:</strong> {{ article.image_filename_slug }}</p>
-          <p><strong>סטטוס תמונה:</strong> <span data-image-status>{{ article.featured_image_status }}</span></p>
-          <p data-image-links {% if not (article.generated_image_url or article.featured_image_url) %}hidden{% endif %}>
+            </div>
+            <p><strong>prompt לתמונה ראשית:</strong> {{ article.featured_image_prompt }}</p>
+            <p><strong>טקסט ALT:</strong> {{ article.image_alt_text }}</p>
+            <p><strong>כותרת תמונה:</strong> {{ article.image_title }}</p>
+            <p><strong>כיתוב תמונה:</strong> {{ article.image_caption }}</p>
+            <p><strong>שם קובץ:</strong> {{ article.image_filename_slug }}</p>
+            <p><strong>סטטוס תמונה:</strong> <span data-image-status>{{ article.featured_image_status }}</span></p>
+            <p data-image-links {% if not (article.generated_image_url or article.featured_image_url) %}hidden{% endif %}>
             {% set existing_image_url = article.generated_image_url or article.featured_image_url %}
             {% if existing_image_url %}
             <a href="{{ existing_image_url }}" target="_blank" rel="noopener">פתח תמונה</a>
@@ -225,12 +181,13 @@
             ·
             <a href="{{ existing_image_url }}" download>הורד תמונה</a>
             {% endif %}
-          </p>
-          <p><strong>SEO quality score:</strong> {{ article.seo_quality_score }}</p>
-          <p><strong>Semantic relevance score:</strong> {{ article.semantic_relevance_score }}</p>
-          <p><strong>Suggested link relevance:</strong> {{ article.suggested_link_relevance }}</p>
-          <p><strong>Article quality score:</strong> {{ article.article_quality_score }}</p>
-          <p><strong>Publish readiness:</strong> {{ article.publish_readiness }}</p>
+            </p>
+            <p><strong>SEO quality score:</strong> {{ article.seo_quality_score }}</p>
+            <p><strong>Semantic relevance score:</strong> {{ article.semantic_relevance_score }}</p>
+            <p><strong>Suggested link relevance:</strong> {{ article.suggested_link_relevance }}</p>
+            <p><strong>Article quality score:</strong> {{ article.article_quality_score }}</p>
+            <p><strong>Publish readiness:</strong> {{ article.publish_readiness }}</p>
+          </details>
           {% set readiness_state = article.publish_readiness or 'NEEDS_IMPROVEMENT' %}
           {% set readiness_map = {
             'READY_FOR_REVIEW': {'label': 'מוכן לבדיקה', 'class': 'status-approved'},
