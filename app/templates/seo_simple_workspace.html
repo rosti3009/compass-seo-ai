@@ -38,6 +38,7 @@
           <button type="button" class="inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/generate-random-daily-draft" data-method="POST" data-refresh-on-success="true" data-label="צור מאמר יומי רנדומלי">צור מאמר יומי רנדומלי</button>
           <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/drafts" data-method="GET" data-label="רענן מאמרים">רענן מאמרים</button>
           <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/seo/fixes/regenerate-stale" data-method="POST" data-label="רענן תיקונים">רענן תיקונים</button>
+          <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/internal-links/refresh-index" data-method="POST" data-label="רענון אינדקס קישורים">רענן אינדקס קישורים מהאתר</button>
         </div>
         <form class="manual-topic-form" id="manual-topic-form">
           <h3>כור מאמר לפי נושא</h3>
@@ -148,7 +149,7 @@
             <p><strong>סטטוס:</strong> {{ article.status }}</p>
             <p><strong>המאמר יעלה ל:</strong> <span dir="ltr">{{ article.target_url }}</span></p>
             <div class="manual-upload-card">
-            <h5>מוצרים/קישורים רלוונטיים</h5>
+            <h5>קישורים פנימיים מומלצים</h5>
             {% set products = article.suggested_related_products or [] %}
             {% if products %}
               <ul>
