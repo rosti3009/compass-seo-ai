@@ -693,7 +693,7 @@ def test_stub_provider_saves_local_image_and_returns_static_url(client: TestClie
     payload = response.json()
 
     image_url = payload['generated_image_url']
-    assert image_url.startswith('/static/generated-images/')
+    assert image_url.startswith('https://compass-seo-ai-1.onrender.com/static/generated-images/')
     assert 'images.example.com' not in image_url
 
     file_check = client.get(image_url)
@@ -706,7 +706,34 @@ def test_stub_provider_saves_local_image_and_returns_static_url(client: TestClie
     assert payload['copy_image_url'] == image_url
     assert payload['diagnostics']['image_file_saved'] is True
     assert payload['diagnostics']['image_public_url'] == image_url
-    assert payload['diagnostics']['image_file_path'] == f"app{image_url}"
+    assert payload['diagnostics']['image_file_path'] == "app/static/generated-images/wood-chips-for-smoking-meat-hero.png"
+
+
+def test_generate_image_creates_separate_hero_and_banner_assets_with_absolute_urls(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    draft = client.post('/content/articles/generate-daily-draft').json()['draft']
+
+    class _Provider:
+        def generate_hero_image(self, _prompt: str, *, draft_slug: str):
+            from app.services.image_generation import ImageGenerationResult
+            return ImageGenerationResult(enabled=True, provider='openai', status='generated', image_url=f'/static/generated-images/{draft_slug}.png')
+
+    monkeypatch.setattr('app.api.routes.get_image_provider', lambda: _Provider())
+    payload = client.post(f"/content/articles/{draft['id']}/generate-image").json()
+    assert payload["article_hero_image"]["public_url"].startswith("https://")
+    assert payload["general_banner_image"]["public_url"].startswith("https://")
+    assert payload["article_hero_image"]["prompt"] != payload["general_banner_image"]["prompt"]
+    assert "wide" in payload["general_banner_image"]["prompt"].lower()
+    assert "empty space" in payload["general_banner_image"]["prompt"].lower()
+
+
+def test_internal_links_injected_into_html_body(client: TestClient, db_session: Session) -> None:
+    db_session.add(IStoreProduct(istore_product_id="sku-b", product_name="אבני בזלת לגריל", product_url="https://compassgrill.co.il/product/basalt"))
+    db_session.add(IStoreProduct(istore_product_id="sku-c", product_name="מדחום לבשר", product_url="https://compassgrill.co.il/product/thermometer"))
+    db_session.commit()
+    response = client.post("/content/articles/generate-topic-draft", json={"topic_title": "אבני בזלת לגריל", "focus_keyword": "אבני בזלת לגריל", "target_intent": "commercial"})
+    draft_id = response.json()["draft"]["draft_id"]
+    full = client.get(f"/content/articles/{draft_id}").json()["draft"]
+    assert "<a href='https://compassgrill.co.il/product/" in full["article_body"]
 
 
 def test_generated_images_output_contains_img_and_removes_marker(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

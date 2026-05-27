@@ -558,6 +558,26 @@ def _build_article_html(
     return body
 
 
+def inject_internal_links_into_html(article_html: str, related: list[dict[str, str | float]]) -> tuple[str, list[dict[str, str]]]:
+    html = article_html or ""
+    injected: list[dict[str, str]] = []
+    used_urls: set[str] = set()
+    for link in related:
+        if len(injected) >= 6:
+            break
+        score = float(link.get("relevance_score") or 0)
+        url = str(link.get("url") or "").strip()
+        anchor = str(link.get("anchor_text") or link.get("title") or "").strip()
+        if score < 40 or not url or not anchor or url in used_urls:
+            continue
+        linked = f"<a href='{url}'>{anchor}</a>"
+        if anchor in html and linked not in html:
+            html = html.replace(anchor, linked, 1)
+            injected.append({"url": url, "anchor_text": anchor, "section": "body_paragraph"})
+            used_urls.add(url)
+    return html, injected
+
+
 def generate_daily_article_draft(db: Session, *, randomize: bool = False) -> tuple[ContentArticleDraft, bool, datetime | None]:
     if randomize:
         (title, keyword, intent), reused, last_generated_at = select_random_topic(db)
@@ -569,6 +589,7 @@ def generate_daily_article_draft(db: Session, *, randomize: bool = False) -> tup
     slug, _slug_source = _fallback_topic_slug(keyword, title)
     topic_profile = _classify_topic(title, keyword, intent)
     body, _ = _remove_h1_tags(_build_article_html(title, keyword, related, topic_profile=topic_profile))
+    body, injected_links = inject_internal_links_into_html(body, related)
     faq_schema = {
         "@context": "https://schema.org",
         "@type": "FAQPage",
@@ -593,7 +614,7 @@ def generate_daily_article_draft(db: Session, *, randomize: bool = False) -> tup
         meta_description=f"{title} - מדריך מעשי בעברית עם שלבים, טמפרטורות, טעויות נפוצות וטיפים מקצועיים.",
         focus_keyword=keyword, target_intent=intent, article_body=body,
         suggested_related_products_json=json.dumps(related, ensure_ascii=False),
-        internal_links_json=json.dumps(related, ensure_ascii=False),
+        internal_links_json=json.dumps(injected_links or related, ensure_ascii=False),
         faq_schema_json=json.dumps(faq_schema, ensure_ascii=False),
         section_image_prompts_json=json.dumps(section_prompts, ensure_ascii=False),
         featured_image_prompt=featured_prompt,
@@ -621,6 +642,7 @@ def generate_topic_article_draft(
     topic_profile = _classify_topic(topic_title, focus_keyword, target_intent)
     slug = _slugify(preferred_slug or "") if preferred_slug else _fallback_topic_slug(focus_keyword, topic_title)[0]
     body, _ = _remove_h1_tags(_build_article_html(topic_title, focus_keyword, related, topic_profile=topic_profile))
+    body, injected_links = inject_internal_links_into_html(body, related)
     section_prompts = [
         {"section": "פתיח", "placement_hint": "[IMAGE_1_HERE]", "prompt": "Close-up of different wood chip types by texture and color (Hickory, Oak, Apple, Mesquite, Cherry), physically separated piles, no text in image, realistic studio lighting"},
         {"section": "שלב-אחר-שלב", "placement_hint": "[IMAGE_2_HERE]", "prompt": "Smoker box filled with wood chips producing thin blue smoke inside a grill smoker chamber, realistic BBQ photo, no text"},
@@ -641,7 +663,7 @@ def generate_topic_article_draft(
         meta_description=meta_description,
         focus_keyword=focus_keyword, target_intent=target_intent, article_body=body,
         suggested_related_products_json=json.dumps(related, ensure_ascii=False),
-        internal_links_json=json.dumps(related, ensure_ascii=False),
+        internal_links_json=json.dumps(injected_links or related, ensure_ascii=False),
         section_image_prompts_json=json.dumps(section_prompts, ensure_ascii=False),
         featured_image_prompt=featured_prompt,
         image_alt_text=f"{topic_title} - הדגמה על גריל", image_title=f"תמונת שער: {topic_title}", image_caption="הדגמה מעשית של השיטה במאמר.",

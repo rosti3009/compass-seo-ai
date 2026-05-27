@@ -3345,9 +3345,21 @@ def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, obje
     draft = _get_content_draft_or_404(db, draft_id)
     provider = get_image_provider()
     draft.featured_image_prompt = build_realistic_hero_prompt(draft.featured_image_prompt)
-    result = provider.generate_hero_image(draft.featured_image_prompt, draft_slug=draft.slug)
+    public_base_url = "https://compass-seo-ai-1.onrender.com"
+    metadata = json.loads(draft.image_generation_metadata_json or "{}") if draft.image_generation_metadata_json else {}
+    assets = metadata.get("assets", {})
+    regeneration_count = int(metadata.get("regeneration_count", 0)) + 1
+
+    hero_prompt = build_realistic_hero_prompt(draft.featured_image_prompt)
+    banner_prompt = (
+        f"wide premium BBQ banner, {draft.focus_keyword} on grill, dark elegant BBQ background, "
+        "empty space for Hebrew text overlay, cinematic lighting, no text, no logos"
+    )
+    hero_result = provider.generate_hero_image(hero_prompt, draft_slug=f"{draft.slug}-hero")
+    banner_result = provider.generate_hero_image(banner_prompt, draft_slug=f"{draft.slug}-banner")
+    result = hero_result
     image_file_path = None
-    image_public_url = result.image_url
+    image_public_url = f"{public_base_url}{result.image_url}" if result.image_url and result.image_url.startswith("/") else result.image_url
     image_file_saved = False
     diagnostics = {
         "provider_name": result.provider,
@@ -3409,17 +3421,46 @@ def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, obje
         )
     draft.featured_image_status = result.status
     draft.image_publish_status = "NOT_PUBLISHED"
-    draft.generated_image_url = result.image_url
-    draft.featured_image_url = result.image_url
+    draft.generated_image_url = image_public_url
+    draft.featured_image_url = image_public_url
+    assets["article_hero_image"] = {
+        "image_type": "article_hero_image",
+        "public_url": image_public_url,
+        "local_path": (f"app{hero_result.image_url}" if hero_result.image_url and hero_result.image_url.startswith("/static/") else None),
+        "prompt": hero_prompt,
+        "alt_text": draft.image_alt_text,
+        "width": hero_result.width,
+        "height": hero_result.height,
+        "created_at": hero_result.generated_at,
+        "generation_status": hero_result.status,
+    }
+    banner_public_url = f"{public_base_url}{banner_result.image_url}" if banner_result.image_url and banner_result.image_url.startswith("/") else banner_result.image_url
+    assets["general_banner_image"] = {
+        "image_type": "general_banner_image",
+        "public_url": banner_public_url,
+        "local_path": (f"app{banner_result.image_url}" if banner_result.image_url and banner_result.image_url.startswith("/static/") else None),
+        "prompt": banner_prompt,
+        "alt_text": f"באנר כללי - {draft.focus_keyword}",
+        "width": banner_result.width,
+        "height": banner_result.height,
+        "created_at": banner_result.generated_at,
+        "generation_status": banner_result.status,
+    }
     draft.image_generation_metadata_json = json.dumps({
         "width": result.width,
         "height": result.height,
         "provider": result.provider,
         "generated_at": result.generated_at,
+        "assets": assets,
+        "generated_image_count": len([a for a in assets.values() if a.get("public_url")]),
+        "article_hero_image_status": hero_result.status,
+        "general_banner_image_status": banner_result.status,
+        "image_prompt_version": "v2-separate-assets",
+        "regeneration_count": regeneration_count,
     }, ensure_ascii=False)
     diagnostics["image_storage_success"] = bool(result.image_url)
     diagnostics["image_file_saved"] = bool(result.image_url and str(result.image_url).startswith("/static/generated-images/"))
-    diagnostics["image_public_url"] = result.image_url
+    diagnostics["image_public_url"] = image_public_url
     diagnostics["image_file_path"] = (f"app{result.image_url}" if result.image_url and result.image_url.startswith("/static/") else None)
     db.add(draft)
     db.commit()
@@ -3430,11 +3471,13 @@ def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, obje
         "image_provider": result.provider,
         "image_status": result.status,
         "status": result.status,
-        "generated_image_url": result.image_url,
-        "featured_image_url": result.image_url,
-        "open_image_url": result.image_url,
-        "download_image_url": result.image_url,
-        "copy_image_url": result.image_url,
+        "generated_image_url": image_public_url,
+        "featured_image_url": image_public_url,
+        "open_image_url": image_public_url,
+        "download_image_url": image_public_url,
+        "copy_image_url": image_public_url,
+        "article_hero_image": assets.get("article_hero_image"),
+        "general_banner_image": assets.get("general_banner_image"),
         "image_metadata": {
             "width": result.width,
             "height": result.height,
