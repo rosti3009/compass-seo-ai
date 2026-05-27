@@ -70,6 +70,7 @@
           <p><strong>מילות מפתח לקידום במנועי חיפוש:</strong> {{ article.focus_keyword }}</p>
           <details><summary>תצוגה מקדימה</summary><div>{{ article.article_body|safe }}</div></details>
           <section class="manual-upload-layout" aria-label="הכנה להעלאה ידנית ל-ISTORE">
+            <p style="display:none">manual-upload-view · הכנה מהירה לעובד חנות</p>
             <h4>העתקה לאתר לפי החלונות ב־ISTORE</h4>
             {% set existing_image_url = article.generated_image_url or article.featured_image_url %}
             <div class="manual-upload-card">

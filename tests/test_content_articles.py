@@ -689,8 +689,8 @@ def test_wings_topic_regression(client: TestClient) -> None:
     response = client.post(
         "/content/articles/generate-topic-draft",
         json={
-            "topic_title": "איך להכין כנפיים קריספיות על הגריל",
-            "focus_keyword": "כנפיים על הגריל",
+            "topic_title": "כנפיים קריספיות על הגריל",
+            "focus_keyword": "כנפיים קריספיות על הגריל",
             "target_intent": "how-to",
         },
     )

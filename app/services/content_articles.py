@@ -15,19 +15,16 @@ logger = logging.getLogger(__name__)
 GENERATOR_VERSION = "v2-topic-specific-2026-05-25"
 
 TOPIC_POOL = [
-    ("איך לבחור שבבי עץ לעישון בשר", "שבבי עץ לעישון", "informational"),
-    ("ההבדל בין פלט לעישון לשבבי עץ", "פלט לעישון מול שבבי עץ", "comparison"),
-    ("איך לנקות מעשנה אחרי עישון ארוך", "ניקוי מעשנה", "how-to"),
-    ("מדריך עישון בריסקט למתחילים", "עישון בריסקט", "how-to"),
-    ("טאבון גז או טאבון עצים", "טאבון גז מול טאבון עצים", "comparison"),
-    ("איך לבחור גריל גז לגינה", "בחירת גריל גז", "commercial"),
-    ("פיקניה על הגריל – מדריך מלא", "פיקניה על הגריל", "how-to"),
-    ("איך להשתמש בנייר קצבים בעישון בשר", "נייר קצבים לעישון", "how-to"),
-    ("ההבדל בין פחם קוקוס לפחם עץ", "פחם קוקוס מול פחם עץ", "comparison"),
-    ("איך לבחור מדחום לבשר", "מדחום לבשר", "commercial"),
-    ("איך לצלות אנטריקוט נכון", "צליית אנטריקוט", "how-to"),
-    ("אפקט מייארד בבשר: מדע וטעם", "אפקט מייארד בבשר", "scientific"),
-    ("איך להכין כנפיים קריספיות על הגריל", "כנפיים על הגריל", "how-to"),
+    ("שבבי עץ לעישון", "שבבי עץ לעישון", "informational"),
+    ("כנפיים קריספיות על הגריל", "כנפיים קריספיות על הגריל", "how-to"),
+    ("אבני בזלת לגריל", "אבני בזלת לגריל", "commercial_informational"),
+    ("בריסקט", "בריסקט", "how-to"),
+    ("פיקניה", "פיקניה", "how-to"),
+    ("גריל גז", "גריל גז", "commercial"),
+    ("טאבון גז או טאבון עצים", "טאבון", "comparison"),
+    ("נייר קצבים", "נייר קצבים", "how-to"),
+    ("מדחום לבשר", "מדחום לבשר", "commercial"),
+    ("פחם / פחם קוקוס", "פחם / פחם קוקוס", "comparison"),
 ]
 
 SLUG_OVERRIDES = {
@@ -41,14 +38,23 @@ SLUG_OVERRIDES = {
     "ההבדל בין פחם קוקוס לפחם עץ": "coconut-charcoal-vs-wood-charcoal",
     "איך לבחור מדחום לבשר": "how-to-choose-meat-thermometer",
     "טאבון גז מול טאבון עצים": "tabun-gas-vs-tabun-wood",
+    "טאבון גז או טאבון עצים": "tabun-gas-vs-tabun-wood",
     "איך להכין כנפיים קריספיות על הגריל": "crispy-grilled-wings",
     "כנפיים על הגריל": "crispy-grilled-wings",
     "כנפיים קריספיות": "crispy-grilled-wings",
     "אבני בזלת לגריל": "basalt-stones-for-gas-grill",
     "שבבי עץ לעישון": "wood-chips-for-smoking-meat",
     "עישון בריסקט": "brisket-smoking-guide",
+    "בריסקט": "brisket-smoking-guide",
     "פיקניה על הגריל": "picanha-on-grill",
+    "פיקניה": "picanha-on-grill",
     "נייר קצבים לעישון": "butcher-paper-for-smoking-meat",
+    "נייר קצבים": "butcher-paper-for-smoking-meat",
+    "כנפיים קריספיות על הגריל": "crispy-grilled-wings",
+    "גריל גז": "choose-gas-grill-for-garden",
+    "טאבון": "tabun-gas-vs-tabun-wood",
+    "מדחום לבשר": "how-to-choose-meat-thermometer",
+    "פחם / פחם קוקוס": "coconut-charcoal-vs-wood-charcoal",
 }
 
 TOPIC_ROUTING = {
@@ -182,7 +188,7 @@ def _semantic_topic_match_score(topic: str, product: object) -> float:
     overlap = len(topic_tokens & target_tokens)
     score = overlap * 20
     if any(k in target_tokens for k in {"גריל", "bbq", "smoker", "מעשנה", "שבבי", "עישון"}):
-        score += 30
+        score += 40
     return float(min(score, 100))
 
 
@@ -353,7 +359,7 @@ def generate_daily_article_draft(db: Session, *, randomize: bool = False) -> tup
         {"section": "פתיח", "placement_hint": "[IMAGE_1_HERE]", "prompt": f"realistic outdoor grill photo about {keyword}, no text, no logos"},
     ]
     featured_prompt = {
-        "wings": "crispy chicken wings on grill grates, golden brown skin, BBQ glaze on side, smoke, realistic outdoor grill photography, no text, no logos",
+        "wings": "crispy chicken wings on grill grates, golden brown skin, BBQ glaze on side, light smoke, realistic outdoor grill photography, no text, no logos",
         "basalt": "realistic close-up of black basalt lava stones inside a gas grill, glowing heat, steak grilling above, outdoor BBQ, natural light, ultra realistic, no text, no logos",
         "wood_chips": "wood chips in smoker box with thin blue smoke inside grill smoker, meat in background, realistic BBQ photography, no text, no logos",
     }.get(kind, f"realistic outdoor grill photography focused on {keyword}, no text, no logos")
@@ -396,7 +402,7 @@ def generate_topic_article_draft(
     ]
     kind = _topic_kind(topic_title, focus_keyword)
     prompt_map = {
-        "wings": "crispy chicken wings on grill grates, golden brown skin, BBQ glaze on side, smoke, realistic outdoor grill photography, no text, no logos",
+        "wings": "crispy chicken wings on grill grates, golden brown skin, BBQ glaze on side, light smoke, realistic outdoor grill photography, no text, no logos",
         "basalt": "realistic close-up of black basalt lava stones inside a gas grill, glowing heat, steak grilling above, outdoor BBQ, natural light, ultra realistic, no text, no logos",
         "wood_chips": "wood chips in smoker box with thin blue smoke inside grill smoker, meat in background, realistic BBQ photography, no text, no logos",
     }
