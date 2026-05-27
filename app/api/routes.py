@@ -43,6 +43,7 @@ from app.services.content_articles import (
     _classify_topic as classify_topic,
     generate_daily_article_draft,
     generate_topic_article_draft,
+    refresh_internal_link_index,
 )
 from app.services.crawler import SEOCrawler
 from app.services.hebrew_seo import analyze_page_hebrew_seo, israeli_seasonality, summarize_hebrew_insights
@@ -1728,6 +1729,13 @@ def seo_simple_bulk_approve(payload: SimpleBulkApprovalRequest, db: DatabaseSess
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Approval confirmation is required.")
     return _bulk_approve_simple_safe_fixes(db, payload.fix_ids)
 
+
+
+
+@router.post("/content/articles/internal-links/refresh-index")
+def refresh_article_internal_link_index() -> dict[str, object]:
+    stats = refresh_internal_link_index()
+    return {"success": True, "message": "אינדקס קישורים רוענן", **stats}
 
 @router.post("/content/articles/generate-daily-draft")
 def generate_daily_content_article(db: DatabaseSession) -> dict[str, object]:

@@ -858,3 +858,52 @@ def test_manual_upload_view_hides_empty_link_message_when_match_exists(client: T
     html = client.get('/seo/simple-workspace').text
     assert 'כרגע אין קישורים פנימיים רלוונטיים להצגה' not in html
     assert 'Copy product URL' in html
+
+from app.services import content_articles as content_articles_service
+
+
+def test_internal_link_matching_from_mocked_sitemaps(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    xml = """
+    <urlset xmlns='http://www.sitemaps.org/schemas/sitemap/0.9'>
+      <url><loc>https://compassgrill.co.il/products/picanha-steak</loc><lastmod>2026-05-01</lastmod></url>
+      <url><loc>https://compassgrill.co.il/products/basalt-lava-stones</loc><lastmod>2026-05-01</lastmod></url>
+      <url><loc>https://compassgrill.co.il/categories/wood-chips-smoking</loc><lastmod>2026-05-01</lastmod></url>
+      <url><loc>https://compassgrill.co.il/products/meat-thermometer</loc><lastmod>2026-05-01</lastmod></url>
+      <url><loc>https://compassgrill.co.il/products/unrelated-fish-knife</loc><lastmod>2026-05-01</lastmod></url>
+    </urlset>
+    """
+
+    class _Resp:
+        text = xml
+
+    monkeypatch.setattr(content_articles_service.requests, "get", lambda *a, **k: _Resp())
+    content_articles_service.refresh_internal_link_index()
+
+    picanha = client.post('/content/articles/generate-topic-draft', json={"topic_title": "פיקניה", "focus_keyword": "פיקניה", "target_intent": "commercial"}).json()["draft"]
+    full_picanha = client.get(f"/content/articles/{picanha['draft_id']}").json()["draft"]
+    assert any("picanha" in (l["url"]).lower() for l in full_picanha["internal_links"])
+
+    basalt = client.post('/content/articles/generate-topic-draft', json={"topic_title": "אבני בזלת לגריל", "focus_keyword": "אבני בזלת", "target_intent": "commercial"}).json()["draft"]
+    full_basalt = client.get(f"/content/articles/{basalt['draft_id']}").json()["draft"]
+    assert any("basalt" in (l["url"]).lower() or "lava" in (l["url"]).lower() for l in full_basalt["internal_links"])
+
+    chips = client.post('/content/articles/generate-topic-draft', json={"topic_title": "שבבי עץ לעישון", "focus_keyword": "שבבי עץ", "target_intent": "commercial"}).json()["draft"]
+    full_chips = client.get(f"/content/articles/{chips['draft_id']}").json()["draft"]
+    assert any("wood-chips" in (l["url"]).lower() or "smoking" in (l["url"]).lower() for l in full_chips["internal_links"])
+
+    thermo = client.post('/content/articles/generate-topic-draft', json={"topic_title": "מדחום לבשר", "focus_keyword": "מדחום לבשר", "target_intent": "commercial"}).json()["draft"]
+    full_thermo = client.get(f"/content/articles/{thermo['draft_id']}").json()["draft"]
+    assert any("thermometer" in (l["url"]).lower() for l in full_thermo["internal_links"])
+    assert not any("unrelated-fish-knife" in (l["url"]).lower() for l in full_thermo["internal_links"])
+
+
+def test_refresh_internal_links_endpoint(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    class _Resp:
+        text = "<urlset xmlns='http://www.sitemaps.org/schemas/sitemap/0.9'></urlset>"
+
+    monkeypatch.setattr(content_articles_service.requests, "get", lambda *a, **k: _Resp())
+    response = client.post('/content/articles/internal-links/refresh-index')
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert "sitemap_loaded_count" in payload

@@ -4,10 +4,13 @@ import json
 import logging
 import random
 import re
+import time
 from datetime import UTC, date, datetime, timedelta
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
+import requests
 
 from app.db.models import ContentArticleDraft, IStoreProduct
 
@@ -69,6 +72,76 @@ TOPIC_ROUTING = {
     "thermometer": ["מדחום לבשר", "מדחום"],
     "charcoal": ["פחם קוקוס", "פחם עץ", "פחם"],
 }
+
+
+
+SITEMAP_SOURCES = [
+    "https://compassgrill.co.il/sitemap.xml",
+    "https://compassgrill.co.il/sitemap-products.xml",
+    "https://compassgrill.co.il/sitemap-categories.xml",
+    "https://compassgrill.co.il/sitemap-brands.xml",
+    "https://compassgrill.co.il/sitemap-information.xml",
+]
+
+_INTERNAL_LINK_INDEX_CACHE: dict[str, object] = {"loaded_at": 0.0, "ttl_seconds": 21600, "entries": [], "stats": {}}
+
+
+def _infer_type_from_url(url: str) -> str:
+    path = urlparse(url).path.lower()
+    if "/products" in path:
+        return "product"
+    if "/categories" in path or "/category" in path:
+        return "category"
+    if "/brands" in path or "/brand" in path:
+        return "brand"
+    if "/blog" in path:
+        return "blog"
+    return "info"
+
+
+def _slug_from_url(url: str) -> str:
+    return (urlparse(url).path.strip("/").split("/")[-1] or "").lower()
+
+
+def _title_from_slug(slug: str) -> str:
+    return re.sub(r"[-_]+", " ", slug).strip()
+
+
+def _load_sitemap_index(force_refresh: bool = False) -> tuple[list[dict[str, object]], dict[str, object]]:
+    now = time.time()
+    if not force_refresh and _INTERNAL_LINK_INDEX_CACHE["entries"] and now - float(_INTERNAL_LINK_INDEX_CACHE["loaded_at"]) < int(_INTERNAL_LINK_INDEX_CACHE["ttl_seconds"]):
+        return _INTERNAL_LINK_INDEX_CACHE["entries"], _INTERNAL_LINK_INDEX_CACHE["stats"]
+
+    entries: list[dict[str, object]] = []
+    stats = {"sitemap_loaded_count": 0, "products_loaded_count": 0, "categories_loaded_count": 0}
+    for sitemap_url in SITEMAP_SOURCES:
+        try:
+            xml = requests.get(sitemap_url, timeout=20).text
+            locs = re.findall(r"<loc>(.*?)</loc>", xml, flags=re.IGNORECASE)
+            lastmods = re.findall(r"<lastmod>(.*?)</lastmod>", xml, flags=re.IGNORECASE)
+            is_index = "<sitemapindex" in xml.lower()
+            urls = [u.strip() for u in locs if u.strip().startswith("http") and not u.strip().endswith(".xml")] if is_index else [u.strip() for u in locs if u.strip().startswith("http")]
+            for i, u in enumerate(urls):
+                typ = _infer_type_from_url(u)
+                slug = _slug_from_url(u)
+                title = _title_from_slug(slug)
+                blob = _normalize_hebrew(f"{title} {slug} {u}")
+                entries.append({"url": u, "slug": slug, "title": title, "type": typ, "tokens": _tokenize_hebrew(blob), "lastmod": lastmods[i] if i < len(lastmods) else None})
+                if typ == "product":
+                    stats["products_loaded_count"] += 1
+                if typ == "category":
+                    stats["categories_loaded_count"] += 1
+            stats["sitemap_loaded_count"] += 1
+        except Exception:
+            logger.exception("Failed loading sitemap %s", sitemap_url)
+
+    _INTERNAL_LINK_INDEX_CACHE.update({"loaded_at": now, "entries": entries, "stats": stats})
+    return entries, stats
+
+
+def refresh_internal_link_index() -> dict[str, object]:
+    _load_sitemap_index(force_refresh=True)
+    return dict(_INTERNAL_LINK_INDEX_CACHE.get("stats") or {})
 
 GENERIC_FILLER_PHRASES = [
     "הנושא הזה מכריע אם תקבלו תוצאה בינונית",
@@ -239,6 +312,21 @@ def _normalize_hebrew(value: str) -> str:
     return text
 
 
+
+
+def _topic_synonyms(topic: str) -> list[str]:
+    normalized = _normalize_hebrew(topic)
+    syn = [topic]
+    if "פיקניה" in normalized or "picanha" in normalized:
+        syn += ["picanha", "steak", "meat"]
+    if "בזלת" in normalized or "לבה" in normalized:
+        syn += ["basalt", "lava stones", "grill accessories", "gas grill accessories"]
+    if "שבבי" in normalized or "עישון" in normalized:
+        syn += ["wood chips", "smoker", "smoking wood", "עישון"]
+    if "מדחום" in normalized:
+        syn += ["thermometer", "accessories", "מדחום"]
+    return list(dict.fromkeys(syn))
+
 def _match_terms_for_topic(topic: str) -> list[str]:
     terms = [topic]
     normalized = _normalize_hebrew(topic)
@@ -279,8 +367,10 @@ def _wood_link_priority_score(product: object) -> float:
 
 def _discover_related_links(db: Session, topic: str, limit: int = 6) -> tuple[list[dict[str, str | float]], dict[str, object]]:
     products = db.query(IStoreProduct).order_by(IStoreProduct.updated_at.desc()).limit(400).all()
+    sitemap_entries, sitemap_stats = _load_sitemap_index()
     out: list[dict[str, str | float]] = []
     terms = _match_terms_for_topic(topic)
+    terms.extend(_topic_synonyms(topic))
     normalized_terms = [_normalize_hebrew(t) for t in terms]
     excluded_low: list[dict[str, str | float]] = []
     for p in products:
@@ -302,10 +392,29 @@ def _discover_related_links(db: Session, topic: str, limit: int = 6) -> tuple[li
                 excluded_low.append({"title": title, "url": url, "relevance_score": score})
             continue
         out.append({"title": title, "url": url, "semantic_topic_match_score": score, "relatedness_score": score, "relevance_score": score})
+    for e in sitemap_entries:
+        blob = _normalize_hebrew(f"{e.get('title','')} {e.get('slug','')} {e.get('url','')}")
+        tokens = set(e.get("tokens") or set())
+        term_overlap = len(tokens & set(_tokenize_hebrew(_normalize_hebrew(topic))))
+        score = term_overlap * 22
+        if any(t in blob for t in normalized_terms):
+            score += 30
+        if e.get("type") in {"product","category"}:
+            score += 15
+        if score >= 40:
+            out.append({"title": e.get("title") or e.get("slug"), "url": e.get("url"), "type": e.get("type"), "semantic_topic_match_score": float(min(score,100)), "relatedness_score": float(min(score,100)), "relevance_score": float(min(score,100)), "reason": "sitemap topic match"})
+        elif score > 0:
+            excluded_low.append({"title": e.get("title"), "url": e.get("url"), "relevance_score": float(score)})
+
+    dedup={}
+    for item in out:
+        dedup[item.get("url","")] = item
+    out=list(dedup.values())
     out.sort(key=lambda item: float(item.get("semantic_topic_match_score", 0)), reverse=True)
     trimmed = out[: max(3, min(limit, 6))]
     best = trimmed[0] if trimmed else {}
     debug = {
+        **sitemap_stats,
         "link_discovery_source": ["db_products", "latest_crawl_cache", "sitemap_urls", "product_category_pages"],
         "searched_terms": terms,
         "matched_product_count": len(trimmed),
@@ -313,7 +422,9 @@ def _discover_related_links(db: Session, topic: str, limit: int = 6) -> tuple[li
         "best_match_title": best.get("title"),
         "best_match_url": best.get("url"),
         "best_match_score": best.get("semantic_topic_match_score", 0),
-        "excluded_low_relevance_links": excluded_low[:10],
+        "internal_link_candidates": len(out),
+        "excluded_low_relevance_links": excluded_low[:20],
+        "selected_internal_links": [i.get("url") for i in trimmed],
     }
     return trimmed, debug
 
