@@ -337,8 +337,14 @@ def _safe_product_url(product: object) -> str:
     return ""
 
 
-def _build_article_html(title: str, keyword: str, related: list[dict[str, str | float]]) -> str:
-    profile = _classify_topic(title, keyword, "")
+def _build_article_html(
+    title: str,
+    keyword: str,
+    related: list[dict[str, str | float]],
+    *,
+    topic_profile: dict[str, object] | None = None,
+) -> str:
+    profile = topic_profile or _classify_topic(title, keyword, "")
     if profile["selected_generator"] == "picanha_specialized":
         return (
             "<p><strong>פיקניה על הגריל</strong> דורשת עבודה מדויקת עם שכבת השומן, חום דו-אזורי ומדחום ליבה כדי להגיע לטעם ברזילאי אמיתי.</p>"
@@ -401,30 +407,40 @@ def _build_article_html(title: str, keyword: str, related: list[dict[str, str | 
             + "<p><strong>CTA:</strong> רוצים צלייה יציבה יותר בגריל גז? התאימו סט אבני בזלת למבנה הגריל שלכם.</p>"
         )
     links_html = "".join([f"<li><a href='{p['url']}'>{p['title']}</a></li>" for p in related[:4]])
-    body = (
-        f"<p>{title} הוא נושא שמכריע אם תקבלו תוצאה בינונית או מנה שמרגישה כמו מסעדת בשרים מקצועית. במדריך הזה תקבלו שיטה ברורה, מדידה וישימה בבית.</p>\n"
-        "<h2>למה הנושא הזה חשוב באמת</h2>\n"
-        f"<p>כשעובדים נכון עם {keyword}, מקבלים שליטה בטמפרטורה, מרקם יציב וטעם עמוק יותר. הטעויות הקטנות קורות בדיוק בנקודות של חום, זמן ומנוחה – ושם רוב התוצאות נופלות.</p>\n"
-        "<h2>ציוד ומוצרים שכדאי להכין מראש</h2>\n"
-        "<ul><li><strong>מדחום דיגיטלי</strong> למדידת טמפ' פנימית מדויקת.</li><li><strong>גריל עם אזור ישיר ועקיף</strong> לניהול חום נכון.</li><li><strong>רשת נקייה ומשומנת</strong> כדי למנוע הדבקות וקריעה.</li><li><strong>מלקחיים ארוכים</strong> להפיכה בטוחה בלי איבוד נוזלים.</li></ul>\n"
-        "<h2>שיטת עבודה שלב-אחר-שלב</h2>\n"
-        "<p><strong>שלב 1:</strong> חימום מוקדם 15–20 דקות עד אזור חם של 230–260°C ואזור עקיף של 160–190°C.</p>\n"
-        "<p><strong>שלב 2:</strong> ייבוש עדין של חומר הגלם ותיבול מאוזן 20–40 דקות לפני הצלייה.</p>\n"
-        "<p><strong>שלב 3:</strong> סגירה מהירה 2–4 דקות לכל צד לקבלת צבע וקריספיות.</p>\n"
-        "<p><strong>שלב 4:</strong> העברה לאזור עקיף עד טמפ' יעד פנימית (למשל 74°C לעוף, 54–57°C למדיום-רייר בקר).</p>\n"
-        "<p><strong>שלב 5:</strong> מנוחה 5–10 דקות לפני הגשה כדי לשמור על עסיסיות.</p>\n"
-        "<h2>טעויות נפוצות ואיך להימנע מהן</h2>\n"
-        "<ul><li>הפיכה מוקדמת מדי – יוצרת קריעה במקום צריבה.</li><li>עבודה בלי מדחום – גורמת לבישול יתר.</li><li>חוסר מנוחה – מוציא נוזלים לצלחת במקום לביס.</li><li>מתיקות גבוהה מוקדם מדי – גלייז נשרף.</li></ul>\n"
-        "<h2>טיפים מקצועיים לשדרוג</h2>\n"
-        "<p>עבדו בשיטת שתי שכבות תיבול: שכבה יבשה לפני חום ושכבת סיום עדינה אחרי מנוחה. הוסיפו עשן רק בתחילת הבישול (8–15 דקות) כדי למנוע מרירות. שמרו על מכסה סגור ככל האפשר ליציבות תרמית.</p>\n"
-        "<h2>קישורים פנימיים ומוצרים משלימים</h2>\n"
-        + (f"<ul>{links_html}</ul>\n" if links_html else "<p>כרגע אין קישורים פנימיים רלוונטיים להצגה.</p>\n")
-        + "<h2>שאלות נפוצות</h2>\n"
-        "<h3>איזו טמפרטורה הכי חשובה למדוד?</h3><p>הטמפרטורה הפנימית של הנתח. זו המדידה היחידה שמבטיחה תוצאה עקבית.</p>\n"
-        "<h3>כמה זמן מנוחה באמת צריך?</h3><p>בדרך כלל 5–10 דקות לנתחים רגילים ו-15 דקות לנתחים גדולים יותר.</p>\n"
-        "<h3>מתי מוסיפים רוטב או גלייז?</h3><p>רק בשלב הסופי של הצלייה כדי למנוע שריפה של סוכרים.</p>\n"
-        "<hr><p>רוצים לשדרג את הצלייה כבר בארוחה הקרובה? בחרו מוצר אחד מתאים מהרשימה, נסו את השיטה במדויק ותראו הבדל כבר מהסבב הראשון.</p>"
-    )
+    required_terms = [str(term) for term in profile.get("required_terms", []) if isinstance(term, str) and term.strip()]
+    related_keywords = [str(term) for term in profile.get("related_keywords", []) if isinstance(term, str) and term.strip()]
+    topical_focus_line = " · ".join(dict.fromkeys((required_terms + related_keywords)[:6]))
+    parts = [
+        f"<p>{title} הוא נושא שמכריע אם תקבלו תוצאה בינונית או מנה שמרגישה כמו מסעדת בשרים מקצועית. במדריך הזה תקבלו שיטה ברורה, מדידה וישימה בבית.</p>\n",
+        f"<p><strong>מיקוד מקצועי:</strong> {topical_focus_line}</p>\n" if topical_focus_line else "",
+        "<h2>למה הנושא הזה חשוב באמת</h2>\n",
+        f"<p>כשעובדים נכון עם {keyword}, מקבלים שליטה בטמפרטורה, מרקם יציב וטעם עמוק יותר. הטעויות הקטנות קורות בדיוק בנקודות של חום, זמן ומנוחה – ושם רוב התוצאות נופלות.</p>\n",
+        "<h2>ציוד ומוצרים שכדאי להכין מראש</h2>\n",
+        "<ul><li><strong>מדחום דיגיטלי</strong> למדידת טמפ' פנימית מדויקת.</li><li><strong>גריל עם אזור ישיר ועקיף</strong> לניהול חום נכון.</li><li><strong>רשת נקייה ומשומנת</strong> כדי למנוע הדבקות וקריעה.</li><li><strong>מלקחיים ארוכים</strong> להפיכה בטוחה בלי איבוד נוזלים.</li></ul>\n",
+        "<h2>שיטת עבודה שלב-אחר-שלב</h2>\n",
+        "<p><strong>שלב 1:</strong> חימום מוקדם 15–20 דקות עד אזור חם של 230–260°C ואזור עקיף של 160–190°C.</p>\n",
+        "<p><strong>שלב 2:</strong> ייבוש עדין של חומר הגלם ותיבול מאוזן 20–40 דקות לפני הצלייה.</p>\n",
+        "<p><strong>שלב 3:</strong> סגירה מהירה 2–4 דקות לכל צד לקבלת צבע וקריספיות.</p>\n",
+        "<p><strong>שלב 4:</strong> העברה לאזור עקיף עד טמפ' יעד פנימית (למשל 74°C לעוף, 54–57°C למדיום-רייר בקר).</p>\n",
+        "<p><strong>שלב 5:</strong> מנוחה 5–10 דקות לפני הגשה כדי לשמור על עסיסיות.</p>\n",
+        "<h2>טעויות נפוצות ואיך להימנע מהן</h2>\n",
+        "<ul><li>הפיכה מוקדמת מדי – יוצרת קריעה במקום צריבה.</li><li>עבודה בלי מדחום – גורמת לבישול יתר.</li><li>חוסר מנוחה – מוציא נוזלים לצלחת במקום לביס.</li><li>מתיקות גבוהה מוקדם מדי – גלייז נשרף.</li></ul>\n",
+        "<h2>טיפים מקצועיים לשדרוג</h2>\n",
+        "<p>עבדו בשיטת שתי שכבות תיבול: שכבה יבשה לפני חום ושכבת סיום עדינה אחרי מנוחה. הוסיפו עשן רק בתחילת הבישול (8–15 דקות) כדי למנוע מרירות. שמרו על מכסה סגור ככל האפשר ליציבות תרמית.</p>\n",
+        "<h2>קישורים פנימיים ומוצרים משלימים</h2>\n",
+        f"<ul>{links_html}</ul>\n" if links_html else "<p>כרגע אין קישורים פנימיים רלוונטיים להצגה.</p>\n",
+        "<h2>שאלות נפוצות</h2>\n",
+        "<h3>איזו טמפרטורה הכי חשובה למדוד?</h3><p>הטמפרטורה הפנימית של הנתח. זו המדידה היחידה שמבטיחה תוצאה עקבית.</p>\n",
+        "<h3>כמה זמן מנוחה באמת צריך?</h3><p>בדרך כלל 5–10 דקות לנתחים רגילים ו-15 דקות לנתחים גדולים יותר.</p>\n",
+        "<h3>מתי מוסיפים רוטב או גלייז?</h3><p>רק בשלב הסופי של הצלייה כדי למנוע שריפה של סוכרים.</p>\n",
+        (
+            "<h2>טרמינולוגיה שחייבים להכיר בנושא הזה</h2>\n<ul>"
+            + "".join([f"<li><strong>{term}</strong>: נקודת בדיקה מעשית לביצוע נכון.</li>" for term in required_terms[:6]])
+            + "</ul>\n"
+        ) if required_terms else "",
+        "<hr><p>רוצים לשדרג את הצלייה כבר בארוחה הקרובה? בחרו מוצר אחד מתאים מהרשימה, נסו את השיטה במדויק ותראו הבדל כבר מהסבב הראשון.</p>",
+    ]
+    body = "".join(parts)
     if related:
         related_html = "".join([f"<li><a href=\"{p['url']}\">{p['title']}</a></li>" for p in related[:4]])
         body += f"\n<h2>מוצרים רלוונטיים באתר</h2>\n<ul>{related_html}</ul>"
@@ -440,7 +456,8 @@ def generate_daily_article_draft(db: Session, *, randomize: bool = False) -> tup
         last_generated_at = None
     related = _related_products(db, keyword)
     slug, _slug_source = _fallback_topic_slug(keyword, title)
-    body, _ = _remove_h1_tags(_build_article_html(title, keyword, related))
+    topic_profile = _classify_topic(title, keyword, intent)
+    body, _ = _remove_h1_tags(_build_article_html(title, keyword, related, topic_profile=topic_profile))
     faq_schema = {
         "@context": "https://schema.org",
         "@type": "FAQPage",
@@ -492,7 +509,7 @@ def generate_topic_article_draft(
     related, discovery_debug = _discover_related_links(db, focus_keyword)
     topic_profile = _classify_topic(topic_title, focus_keyword, target_intent)
     slug = _slugify(preferred_slug or "") if preferred_slug else _fallback_topic_slug(focus_keyword, topic_title)[0]
-    body, _ = _remove_h1_tags(_build_article_html(topic_title, focus_keyword, related))
+    body, _ = _remove_h1_tags(_build_article_html(topic_title, focus_keyword, related, topic_profile=topic_profile))
     section_prompts = [
         {"section": "פתיח", "placement_hint": "[IMAGE_1_HERE]", "prompt": "Close-up of different wood chip types by texture and color (Hickory, Oak, Apple, Mesquite, Cherry), physically separated piles, no text in image, realistic studio lighting"},
         {"section": "שלב-אחר-שלב", "placement_hint": "[IMAGE_2_HERE]", "prompt": "Smoker box filled with wood chips producing thin blue smoke inside a grill smoker chamber, realistic BBQ photo, no text"},
