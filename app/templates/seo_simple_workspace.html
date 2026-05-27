@@ -36,7 +36,7 @@
         <div class="actions">
           <button type="button" class="inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/generate-daily-draft" data-method="POST" data-refresh-on-success="true" data-label="צור מאמר חדש">צור מאמר חדש</button>
           <button type="button" class="inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/generate-random-daily-draft" data-method="POST" data-refresh-on-success="true" data-label="צור מאמר יומי רנדומלי">צור מאמר יומי רנדומלי</button>
-          <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/drafts" data-method="GET" data-label="רענן מאמרים">רענן מאמרים</button>
+          <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/drafts" data-method="GET" data-label="רענן מאמרים" data-refresh-on-success="true">רענן מאמרים</button>
           <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/seo/fixes/regenerate-stale" data-method="POST" data-label="רענן תיקונים">רענן תיקונים</button>
         </div>
         <form class="manual-topic-form" id="manual-topic-form">
@@ -187,6 +187,13 @@
             <p><strong>Suggested link relevance:</strong> {{ article.suggested_link_relevance }}</p>
             <p><strong>Article quality score:</strong> {{ article.article_quality_score }}</p>
             <p><strong>Publish readiness:</strong> {{ article.publish_readiness }}</p>
+            <p><strong>article_id:</strong> {{ article.id }}</p>
+            <p><strong>created_at:</strong> {{ article.created_at }}</p>
+            <p><strong>generator_version:</strong> {{ article.debug.generator_version }}</p>
+            <p><strong>selected_generator:</strong> {{ article.debug.selected_generator }}</p>
+            <p><strong>generator_source:</strong> {{ article.debug.generator_source }}</p>
+            <p><strong>detected_topic_type:</strong> {{ article.debug.detected_topic_type }}</p>
+            <p><strong>endpoint_used:</strong> {{ article.debug.endpoint_used or 'workspace-load' }}</p>
           </details>
           {% set readiness_state = article.publish_readiness or 'NEEDS_IMPROVEMENT' %}
           {% set readiness_map = {

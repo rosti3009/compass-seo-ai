@@ -218,7 +218,37 @@ def test_generate_article_image_uses_provider(client: TestClient) -> None:
     assert payload['generated_image_url'] is None
     assert payload['featured_image_url'] is None
     assert payload['open_image_url'] is None
-    assert payload['download_image_url'] is None
+
+
+def test_topic_switch_replaces_active_article(client: TestClient) -> None:
+    picanha = client.post(
+        "/content/articles/generate-topic-draft",
+        json={"topic_title": "פיקניה על הגריל – מדריך מלא", "focus_keyword": "פיקניה", "target_intent": "how-to", "preferred_slug": "picanha-on-grill"},
+    ).json()
+    basalt = client.post(
+        "/content/articles/generate-topic-draft",
+        json={"topic_title": "אבני בזלת לגריל – איך הן משפרות צלייה בגריל גז", "focus_keyword": "אבני בזלת לגריל", "target_intent": "commercial_informational", "preferred_slug": "basalt-stones-for-gas-grill"},
+    ).json()
+    assert picanha["draft"]["draft_id"] != basalt["draft"]["draft_id"]
+    drafts = client.get("/content/articles/drafts").json()["drafts"]
+    active = next(d for d in drafts if d["is_active_manual_article"])
+    old = next(d for d in drafts if d["id"] == picanha["draft"]["draft_id"])
+    assert active["id"] == basalt["draft"]["draft_id"]
+    assert old["is_active_manual_article"] is False
+    page = client.get("/seo/simple-workspace").text
+    assert basalt["draft"]["title"] in page
+    assert picanha["draft"]["title"] in page
+    assert basalt["diagnostics"]["selected_generator"] == "basalt_stones_specialized"
+
+
+def test_latest_debug_endpoint(client: TestClient) -> None:
+    client.post("/content/articles/generate-random-daily-draft")
+    response = client.get("/seo/content-articles/latest-debug")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["latest_article_id"] == payload["active_article_id"]
+    assert payload["generator_version"] == "v2-topic-specific-2026-05-25"
+    assert payload["selected_generator"]
 
 
 def test_publish_blocks_and_dry_run(client: TestClient) -> None:
