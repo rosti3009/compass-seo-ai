@@ -41,6 +41,7 @@ from app.integrations.openai_client import OpenAIClient
 from app.services.content_articles import (
     GENERIC_FILLER_PHRASES,
     _classify_topic as classify_topic,
+    validate_article_relevance,
     generate_daily_article_draft,
     generate_topic_article_draft,
     refresh_internal_link_index,
@@ -1449,6 +1450,13 @@ def _article_generation_response(draft: ContentArticleDraft, endpoint_used: str)
         "selected_generator": debug.get("selected_generator"),
         "generator_source": debug.get("generator_source"),
         "detected_topic_type": debug.get("detected_topic_type"),
+        "selected_contract": debug.get("selected_contract"),
+        "search_intent": debug.get("search_intent"),
+        "title_body_relevance_score": debug.get("title_body_relevance_score"),
+        "validation_passed": debug.get("validation_passed"),
+        "missing_required_terms": debug.get("missing_required_terms"),
+        "forbidden_terms_found": debug.get("forbidden_terms_found"),
+        "regenerated_due_to_validation": debug.get("regenerated_due_to_validation"),
         "endpoint_used": endpoint_used,
     }
     return {"success": True, "draft": {**draft.to_dict(), "debug": {**debug, "endpoint_used": endpoint_used}, "quality": quality}, "diagnostics": diagnostics}
@@ -1471,6 +1479,9 @@ def _draft_debug(draft: ContentArticleDraft, slug_source: str = "title") -> dict
     _, removed = _strip_h1_tags(body)
     link_debug = getattr(draft, "link_match_debug", {})
     topic_profile = classify_topic(draft.topic_title or "", draft.focus_keyword or "", draft.target_intent or "")
+    validation_debug = validate_article_relevance(draft.title or draft.topic_title or "", draft.focus_keyword or "", body, topic_profile)
+    if isinstance(link_debug, dict) and "regenerated_due_to_validation" in link_debug:
+        validation_debug["regenerated_due_to_validation"] = bool(link_debug.get("regenerated_due_to_validation"))
     forbidden_terms = topic_profile.get("forbidden_terms", [])
     removed_terms = [term for term in forbidden_terms if term and term not in body]
     return {
@@ -1486,6 +1497,7 @@ def _draft_debug(draft: ContentArticleDraft, slug_source: str = "title") -> dict
         "topic_keywords_detected": _topic_keywords_detected(body),
         "article_template_used": "wood_chips_specialized" if "hickory" in body.lower() else "topic_specific_default",
         "h1_cleanup_was_needed": removed,
+        **validation_debug,
         **(link_debug if isinstance(link_debug, dict) else {}),
     }
 
@@ -1519,6 +1531,7 @@ def _article_quality_summary(draft: ContentArticleDraft) -> dict[str, float | st
         wrong_prompt_penalty = 25
     generic_prompt_penalty = 15 if len(prompt_blob.strip()) < 25 else 0
     topic_profile = classify_topic(draft.topic_title or "", draft.focus_keyword or "", draft.target_intent or "")
+    relevance_validation = validate_article_relevance(draft.title or draft.topic_title or "", draft.focus_keyword or "", body, topic_profile)
     technical_bonus = 26 if len(_topic_keywords_detected(body)) >= 7 else 0
     if wing_topic and all(t in body for t in ["74", "גלייז", "קריספ"]):
         technical_bonus += 18
@@ -1528,14 +1541,23 @@ def _article_quality_summary(draft: ContentArticleDraft) -> dict[str, float | st
     required_miss_penalty = 7 * sum(1 for term in topic_profile.get("required_terms", []) if term and term not in body)
     faq_penalty = 12 if "שאלות נפוצות" not in body and "FAQ" not in body else 0
     keyword_bonus = 10 if (draft.focus_keyword or "") in (draft.title or "") and (draft.focus_keyword or "") in (draft.meta_title or "") and (draft.focus_keyword or "") in body[:280] else 0
-    article_quality = min(100.0, round((seo * 0.18) + (semantic * 0.22) + (suggestion * 0.22) + (structure * 0.38) + technical_bonus + keyword_bonus - filler_penalty - forbidden_penalty - required_miss_penalty - faq_penalty, 1))
-    readiness = "READY_FOR_REVIEW" if article_quality >= 75 else "NEEDS_IMPROVEMENT"
+    relevance_penalty = max(0.0, (80.0 - float(relevance_validation["title_body_relevance_score"])) * 1.3)
+    if not relevance_validation["validation_passed"]:
+        relevance_penalty += 20
+    article_quality = min(100.0, round((seo * 0.18) + (semantic * 0.22) + (suggestion * 0.22) + (structure * 0.38) + technical_bonus + keyword_bonus - filler_penalty - forbidden_penalty - required_miss_penalty - faq_penalty - relevance_penalty, 1))
+    if not relevance_validation["validation_passed"]:
+        article_quality = min(article_quality, 60.0)
+    readiness = "READY_FOR_REVIEW" if article_quality >= 75 and relevance_validation["validation_passed"] else ("NEEDS_REWRITE" if not relevance_validation["validation_passed"] else "NEEDS_IMPROVEMENT")
     return {
         "seo_quality_score": seo,
         "semantic_relevance_score": semantic,
         "suggested_link_relevance": suggestion,
         "article_quality_score": article_quality,
         "publish_readiness": readiness,
+        "title_body_relevance_score": relevance_validation["title_body_relevance_score"],
+        "validation_passed": relevance_validation["validation_passed"],
+        "missing_required_terms": relevance_validation["missing_required_terms"],
+        "forbidden_terms_found": relevance_validation["forbidden_terms_found"],
     }
 
 
