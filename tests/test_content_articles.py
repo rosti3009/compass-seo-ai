@@ -186,6 +186,51 @@ def test_topic_specific_generation_regression(
     assert draft["debug"]["generator_source"] == "specialized"
 
 
+
+
+def _generate_topic(client: TestClient, topic_title: str, focus_keyword: str, target_intent: str, slug: str) -> dict:
+    response = client.post(
+        "/content/articles/generate-topic-draft",
+        json={"topic_title": topic_title, "focus_keyword": focus_keyword, "target_intent": target_intent, "preferred_slug": slug},
+    )
+    assert response.status_code == 200
+    draft = response.json()["draft"]
+    return client.get(f"/content/articles/{draft['draft_id']}").json()["draft"]
+
+
+def test_charcoal_comparison_body_matches_title_intent_and_contract(client: TestClient) -> None:
+    draft = _generate_topic(client, "פחם / פחם קוקוס", "פחם / פחם קוקוס", "comparison", "coconut-charcoal-vs-wood-charcoal")
+    for term in ["פחם קוקוס", "פחם עץ", "זמן בעירה", "יציבות חום", "עשן", "אפר"]:
+        assert term in draft["article_body"]
+    for term in ["74°C", "גלייז", "מנוחה של סטייק"]:
+        assert term not in draft["article_body"]
+    assert draft["debug"]["detected_topic_type"] == "fuel_comparison"
+    assert draft["debug"]["generator_source"] == "specialized"
+    assert draft["debug"]["search_intent"] == "comparison"
+    assert draft["debug"]["validation_passed"] is True
+    assert draft["quality"]["publish_readiness"] == "READY_FOR_REVIEW"
+
+
+def test_picanha_body_does_not_leak_poultry_or_fuel_terms(client: TestClient) -> None:
+    draft = _generate_topic(client, "פיקניה", "פיקניה", "how-to", "picanha-on-grill")
+    for term in ["שכבת שומן", "מלח גס", "54–56°C", "חיתוך נגד הסיבים"]:
+        assert term in draft["article_body"]
+    for term in ["74°C", "פחם קוקוס", "גלייז כנפיים"]:
+        assert term not in draft["article_body"]
+    assert draft["debug"]["detected_topic_type"] == "meat_cut_guide"
+    assert draft["debug"]["validation_passed"] is True
+
+
+def test_basalt_accessory_body_does_not_leak_meat_recipe_terms(client: TestClient) -> None:
+    draft = _generate_topic(client, "אבני בזלת לגריל", "אבני בזלת לגריל", "commercial_informational", "basalt-stones-for-gas-grill")
+    for term in ["פיזור חום", "גריל גז", "התלקחויות", "ניקוי והחלפה"]:
+        assert term in draft["article_body"]
+    for term in ["טמפ' פנימית של בשר", "גלייז", "מדיום רייר"]:
+        assert term not in draft["article_body"]
+    assert draft["debug"]["detected_topic_type"] == "grill_accessory_guide"
+    assert draft["debug"]["validation_passed"] is True
+
+
 def test_generate_article_defaults_and_image_plan(client: TestClient) -> None:
     draft = client.post('/content/articles/generate-daily-draft').json()['draft']
     assert draft['target_site_section'] == 'blog'
