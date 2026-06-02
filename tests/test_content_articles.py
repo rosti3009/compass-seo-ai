@@ -8,8 +8,9 @@ from sqlalchemy.pool import StaticPool
 
 from app.api.routes import _blog_publish_adapter_ready
 from app.db.database import Base, get_db
-from app.db.models import IStoreProduct
+from app.db.models import ContentArticleDraft, IStoreProduct
 from app.main import app
+from app.services.istore_blog_publisher import IStoreBlogPublisher
 
 
 def _is_hebrew(text: str) -> bool:
@@ -979,3 +980,59 @@ def test_refresh_internal_links_endpoint(client: TestClient, monkeypatch: pytest
     payload = response.json()
     assert payload["success"] is True
     assert "sitemap_loaded_count" in payload
+
+
+def test_charcoal_specialized_output_reaches_response_workspace_and_publish_payload(
+    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    response = client.post(
+        "/content/articles/generate-topic-draft",
+        json={
+            "topic_title": "ההבדל בין פחם קוקוס לפחם עץ",
+            "focus_keyword": "פחם / פחם קוקוס",
+            "target_intent": "comparison",
+            "preferred_slug": "coconut-charcoal-vs-wood-charcoal",
+        },
+    )
+
+    assert response.status_code == 200
+    generated = response.json()
+    draft = generated["draft"]
+    specialized_terms = ["טבלת השוואה", "זמן בעירה", "יציבות חום", "פחם קוקוס מול פחם עץ"]
+    generic_terms = ["טמפרטורה הפנימית של הנתח", "74°C לעוף", "גלייז נשרף"]
+
+    assert draft["debug"]["selected_generator"] == "charcoal_comparison_specialized"
+    assert draft["debug"]["detected_topic_type"] == "fuel_comparison"
+    for term in specialized_terms:
+        assert term in draft["article_body"]
+    for term in generic_terms:
+        assert term not in draft["article_body"]
+
+    full = client.get(f"/content/articles/{draft['draft_id']}").json()["draft"]
+    for term in specialized_terms:
+        assert term in full["article_body"]
+    for term in generic_terms:
+        assert term not in full["article_body"]
+
+    workspace = client.get("/seo/simple-workspace").text
+    assert "העתקה לאתר לפי החלונות ב־ISTORE" in workspace
+    assert "תצוגה מקדימה" in workspace
+    for term in specialized_terms:
+        assert term in workspace
+    for term in generic_terms:
+        assert term not in workspace
+
+    monkeypatch.setattr("app.services.istore_blog_publisher.settings.istore_create_minimal_payload", False)
+    publisher = IStoreBlogPublisher(
+        base_url="https://admin.example.com",
+        admin_cookie="session=fake",
+        xsrf_token="fake-xsrf",
+        language_id=2,
+        blog_is_blog=1,
+    )
+    dry_run = publisher.publish(db_session.get(ContentArticleDraft, draft["draft_id"]), dry_run=True)
+    description = dry_run["payload"]["descriptions"]["2"]["description"]
+    for term in specialized_terms:
+        assert term in description
+    for term in generic_terms:
+        assert term not in description
