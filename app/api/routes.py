@@ -1804,19 +1804,17 @@ def generate_topic_content_article(payload: ManualTopicArticleRequest, db: Datab
         draft.slug,
         draft.id,
     )
+    full_draft = {
+        **response["draft"],
+        "draft_id": draft.id,
+        "quality": quality,
+        "manual_upload_url": manual_upload_url,
+        "debug": {**response["draft"]["debug"], "endpoint_used": "/content/articles/generate-topic-draft"},
+    }
     return {
         **response,
         "auto_publish": False,
-        "draft": {
-            "draft_id": draft.id,
-            "title": draft.title,
-            "slug": draft.slug,
-            "meta_title": draft.meta_title,
-            "meta_description": draft.meta_description,
-            "quality": quality,
-            "manual_upload_url": manual_upload_url,
-            "debug": {**response["draft"]["debug"], "endpoint_used": "/content/articles/generate-topic-draft"},
-        },
+        "draft": full_draft,
     }
 
 
