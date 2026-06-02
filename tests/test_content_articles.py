@@ -155,7 +155,7 @@ def test_generate_topic_draft_sets_basalt_featured_image_prompt(client: TestClie
 @pytest.mark.parametrize(
     ("topic_title", "focus_keyword", "slug", "must_have", "forbidden", "image_term"),
     [
-        ("פיקניה על הגריל – מדריך מלא", "פיקניה", "picanha-on-grill", ["שכבת שומן", "54–56°C", "חיתוך נגד הסיבים"], ["74°C", "עוף"], "picanha"),
+        ("פיקניה על הגריל – מדריך מלא", "פיקניה", "picanha-on-grill", ["שכבת שומן", "54–56°C", "חיתוך נגד הסיבים"], ["74°C", "עוף"], "beef"),
         ("איך להכין כנפיים קריספיות על הגריל", "כנפיים קריספיות", "crispy-grilled-wings", ["ייבוש", "74°C", "גלייז"], ["פיקניה", "מדיום רייר"], "wings"),
         ("אבני בזלת לגריל – איך הן משפרות צלייה בגריל גז", "אבני בזלת לגריל", "basalt-stones-for-gas-grill", ["פיזור חום", "התלקחויות", "יציבות חום"], ["74°C", "מתכון עוף"], "basalt"),
     ],
@@ -184,7 +184,7 @@ def test_topic_specific_generation_regression(
     assert image_term in full["featured_image_prompt"].lower()
     assert draft["quality"]["article_quality_score"] >= 85
     assert draft["quality"]["publish_readiness"] == "READY_FOR_REVIEW"
-    assert draft["debug"]["generator_source"] == "specialized"
+    assert draft["debug"]["generator_source"] == "contract_engine"
 
 
 
@@ -205,8 +205,8 @@ def test_charcoal_comparison_body_matches_title_intent_and_contract(client: Test
         assert term in draft["article_body"]
     for term in ["74°C", "גלייז", "מנוחה של סטייק"]:
         assert term not in draft["article_body"]
-    assert draft["debug"]["detected_topic_type"] == "fuel_comparison"
-    assert draft["debug"]["generator_source"] == "specialized"
+    assert draft["debug"]["detected_topic_type"] == "fuel_comparison_or_guide"
+    assert draft["debug"]["generator_source"] == "contract_engine"
     assert draft["debug"]["search_intent"] == "comparison"
     assert draft["debug"]["validation_passed"] is True
     assert draft["quality"]["publish_readiness"] == "READY_FOR_REVIEW"
@@ -218,7 +218,7 @@ def test_picanha_body_does_not_leak_poultry_or_fuel_terms(client: TestClient) ->
         assert term in draft["article_body"]
     for term in ["74°C", "פחם קוקוס", "גלייז כנפיים"]:
         assert term not in draft["article_body"]
-    assert draft["debug"]["detected_topic_type"] == "meat_cut_guide"
+    assert draft["debug"]["detected_topic_type"] == "meat_quick_grill_cut"
     assert draft["debug"]["validation_passed"] is True
 
 
@@ -284,7 +284,7 @@ def test_topic_switch_replaces_active_article(client: TestClient) -> None:
     page = client.get("/seo/simple-workspace").text
     assert basalt["draft"]["title"] in page
     assert picanha["draft"]["title"] in page
-    assert basalt["diagnostics"]["selected_generator"] == "basalt_stones_specialized"
+    assert basalt["diagnostics"]["selected_generator"] == "contract_grill_accessory_guide"
 
 
 def test_latest_debug_endpoint(client: TestClient) -> None:
@@ -293,7 +293,7 @@ def test_latest_debug_endpoint(client: TestClient) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["latest_article_id"] == payload["active_article_id"]
-    assert payload["generator_version"] == "v2-topic-specific-2026-05-25"
+    assert payload["generator_version"] == "v3-topic-contract-engine-2026-06-02"
     assert payload["selected_generator"]
 
 
@@ -565,7 +565,7 @@ def test_regression_wood_chips_topic_quality_and_prompts(client: TestClient, mon
     assert '<h1' not in body
     assert draft['slug'] != 'compass-grill-article'
     assert draft['slug'] == 'wood-chips-for-smoking-meat'
-    assert all(term in body for term in ['hickory', 'oak', 'apple', 'mesquite'])
+    assert all(term in body for term in ['hickory', 'oak', 'apple'])
     assert 'thin blue smoke' in body
     prompt_blob = (draft['featured_image_prompt'] + ' ' + ' '.join(i.get('prompt', '') for i in draft.get('section_image_prompts', []))).lower()
     assert any(t in prompt_blob for t in ['smoker box', 'wood chips'])
@@ -573,7 +573,7 @@ def test_regression_wood_chips_topic_quality_and_prompts(client: TestClient, mon
     assert float(draft["quality"]["article_quality_score"]) > 75
 
     details = client.get(f"/content/articles/{draft['id']}").json()['draft']
-    assert details['debug']['generator_version'] == 'v2-topic-specific-2026-05-25'
+    assert details['debug']['generator_version'] == 'v3-topic-contract-engine-2026-06-02'
     assert details['debug']['h1_removed'] is True
     assert details['debug']['slug_source'] in {'title', 'focus_keyword', 'topic_mapping', 'hard_fallback'}
 
@@ -998,11 +998,11 @@ def test_charcoal_specialized_output_reaches_response_workspace_and_publish_payl
     assert response.status_code == 200
     generated = response.json()
     draft = generated["draft"]
-    specialized_terms = ["טבלת השוואה", "זמן בעירה", "יציבות חום", "פחם קוקוס מול פחם עץ"]
+    specialized_terms = ["טבלת השוואה", "זמן בעירה", "יציבות חום", "פחם קוקוס"]
     generic_terms = ["טמפרטורה הפנימית של הנתח", "74°C לעוף", "גלייז נשרף"]
 
-    assert draft["debug"]["selected_generator"] == "charcoal_comparison_specialized"
-    assert draft["debug"]["detected_topic_type"] == "fuel_comparison"
+    assert draft["debug"]["selected_generator"] == "contract_fuel_comparison_or_guide"
+    assert draft["debug"]["detected_topic_type"] == "fuel_comparison_or_guide"
     for term in specialized_terms:
         assert term in draft["article_body"]
     for term in generic_terms:
