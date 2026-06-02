@@ -1449,6 +1449,11 @@ def _article_generation_response(draft: ContentArticleDraft, endpoint_used: str)
         "generator_version": debug.get("generator_version"),
         "selected_generator": debug.get("selected_generator"),
         "generator_source": debug.get("generator_source"),
+        "article_brief": debug.get("article_brief"),
+        "main_entity": debug.get("main_entity"),
+        "entity_type": debug.get("entity_type"),
+        "topic_type": debug.get("topic_type"),
+        "content_format": debug.get("content_format"),
         "detected_topic_type": debug.get("detected_topic_type"),
         "selected_contract": debug.get("selected_contract"),
         "search_intent": debug.get("search_intent"),
@@ -1457,6 +1462,8 @@ def _article_generation_response(draft: ContentArticleDraft, endpoint_used: str)
         "missing_required_terms": debug.get("missing_required_terms"),
         "forbidden_terms_found": debug.get("forbidden_terms_found"),
         "regenerated_due_to_validation": debug.get("regenerated_due_to_validation"),
+        "regeneration_count": debug.get("regeneration_count"),
+        "final_body_source": debug.get("final_body_source"),
         "endpoint_used": endpoint_used,
     }
     return {"success": True, "draft": {**draft.to_dict(), "debug": {**debug, "endpoint_used": endpoint_used}, "quality": quality}, "diagnostics": diagnostics}
@@ -1479,15 +1486,31 @@ def _draft_debug(draft: ContentArticleDraft, slug_source: str = "title") -> dict
     _, removed = _strip_h1_tags(body)
     link_debug = getattr(draft, "link_match_debug", {})
     topic_profile = classify_topic(draft.topic_title or "", draft.focus_keyword or "", draft.target_intent or "")
-    validation_debug = validate_article_relevance(draft.title or draft.topic_title or "", draft.focus_keyword or "", body, topic_profile)
-    if isinstance(link_debug, dict) and "regenerated_due_to_validation" in link_debug:
-        validation_debug["regenerated_due_to_validation"] = bool(link_debug.get("regenerated_due_to_validation"))
+    internal_links = json.loads(draft.internal_links_json or "[]") if draft.internal_links_json else []
+    validation_debug = validate_article_relevance(
+        draft.title or draft.topic_title or "",
+        draft.focus_keyword or "",
+        body,
+        topic_profile,
+        image_prompt=draft.featured_image_prompt or "",
+        internal_links=internal_links,
+    )
+    if isinstance(link_debug, dict):
+        for key in ("regenerated_due_to_validation", "regeneration_count", "final_body_source"):
+            if key in link_debug:
+                validation_debug[key] = link_debug[key]
     forbidden_terms = topic_profile.get("forbidden_terms", [])
     removed_terms = [term for term in forbidden_terms if term and term not in body]
     return {
-        "generator_version": "v2-topic-specific-2026-05-25",
+        "generator_version": "v3-topic-contract-engine-2026-06-02",
         "slug_source": slug_source,
+        "article_brief": topic_profile.get("article_brief"),
+        "main_entity": topic_profile.get("main_entity"),
+        "entity_type": topic_profile.get("entity_type"),
+        "topic_type": topic_profile.get("topic_type"),
+        "content_format": topic_profile.get("content_format"),
         "detected_topic_type": topic_profile.get("topic_type"),
+        "selected_contract": topic_profile.get("selected_contract"),
         "selected_generator": topic_profile.get("selected_generator"),
         "search_intent": topic_profile.get("search_intent"),
         "generator_source": topic_profile.get("generator_source"),
@@ -1495,12 +1518,13 @@ def _draft_debug(draft: ContentArticleDraft, slug_source: str = "title") -> dict
         "forbidden_terms_removed": removed_terms,
         "h1_removed": "<h1" not in body.lower(),
         "topic_keywords_detected": _topic_keywords_detected(body),
-        "article_template_used": "wood_chips_specialized" if "hickory" in body.lower() else "topic_specific_default",
+        "article_template_used": "fallback_generic" if topic_profile.get("topic_type") == "fallback_generic" else "topic_type_contract",
         "h1_cleanup_was_needed": removed,
+        "final_body_source": validation_debug.get("final_body_source", "contract_engine" if topic_profile.get("topic_type") != "fallback_generic" else "fallback_generic"),
+        "regeneration_count": validation_debug.get("regeneration_count", 0),
         **validation_debug,
         **(link_debug if isinstance(link_debug, dict) else {}),
     }
-
 
 def _article_quality_summary(draft: ContentArticleDraft) -> dict[str, float | str]:
     links = json.loads(draft.internal_links_json or "[]") if draft.internal_links_json else []
