@@ -15,7 +15,7 @@ import requests
 from app.db.models import ContentArticleDraft, IStoreProduct
 
 logger = logging.getLogger(__name__)
-GENERATOR_VERSION = "v4-seo-optimized-2026-06-03"
+GENERATOR_VERSION = "v3-topic-contract-engine-2026-06-02"
 
 TOPIC_POOL = [
     ("שבבי עץ לעישון", "שבבי עץ לעישון", "informational"),
@@ -86,15 +86,16 @@ SITEMAP_SOURCES = [
 _INTERNAL_LINK_INDEX_CACHE: dict[str, object] = {"loaded_at": 0.0, "ttl_seconds": 21600, "entries": [], "stats": {}}
 
 
-def _infer_type_from_url(url: str) -> str:
+def _infer_type_from_url(url: str, sitemap_url: str = "") -> str:
     path = urlparse(url).path.lower()
-    if "/products" in path:
+    source = (sitemap_url or "").lower()
+    if "sitemap-products" in source or "/products" in path or "/product" in path:
         return "product"
-    if "/categories" in path or "/category" in path:
+    if "sitemap-categories" in source or "/categories" in path or "/category" in path:
         return "category"
-    if "/brands" in path or "/brand" in path:
+    if "sitemap-brands" in source or "/brands" in path or "/brand" in path:
         return "brand"
-    if "/blog" in path:
+    if "/blog" in path or "/blogs" in path:
         return "blog"
     return "info"
 
@@ -104,6 +105,18 @@ def _slug_from_url(url: str) -> str:
 
 
 def _title_from_slug(slug: str) -> str:
+    known = {
+        "basalt-stones-for-gas-grill": "אבני בזלת לגריל גז",
+        "basalt-lava-stones": "אבני בזלת ולבה לגריל",
+        "lava-rocks-grill": "אבני לבה לגריל",
+        "grill-accessories": "אביזרים לגריל",
+        "meat-thermometer": "מדחום לבשר",
+        "digital-meat-thermometer": "מדחום דיגיטלי לבשר",
+        "feedlot-picanha": "פיקניה פידלוט",
+        "picanha": "פיקניה",
+    }
+    if slug in known:
+        return known[slug]
     return re.sub(r"[-_]+", " ", slug).strip()
 
 
@@ -113,7 +126,7 @@ def _load_sitemap_index(force_refresh: bool = False) -> tuple[list[dict[str, obj
         return _INTERNAL_LINK_INDEX_CACHE["entries"], _INTERNAL_LINK_INDEX_CACHE["stats"]
 
     entries: list[dict[str, object]] = []
-    stats = {"sitemap_loaded_count": 0, "products_loaded_count": 0, "categories_loaded_count": 0}
+    stats = {"sitemap_loaded_count": 0, "products_loaded_count": 0, "categories_loaded_count": 0, "index_refreshed_at": datetime.now(UTC).isoformat(), "internal_link_index_status": "loading"}
     for sitemap_url in SITEMAP_SOURCES:
         try:
             xml = requests.get(sitemap_url, timeout=20).text
@@ -122,11 +135,18 @@ def _load_sitemap_index(force_refresh: bool = False) -> tuple[list[dict[str, obj
             is_index = "<sitemapindex" in xml.lower()
             urls = [u.strip() for u in locs if u.strip().startswith("http") and not u.strip().endswith(".xml")] if is_index else [u.strip() for u in locs if u.strip().startswith("http")]
             for i, u in enumerate(urls):
-                typ = _infer_type_from_url(u)
+                typ = _infer_type_from_url(u, sitemap_url)
                 slug = _slug_from_url(u)
                 title = _title_from_slug(slug)
                 blob = _normalize_hebrew(f"{title} {slug} {u}")
-                entries.append({"url": u, "slug": slug, "title": title, "type": typ, "tokens": _tokenize_hebrew(blob), "lastmod": lastmods[i] if i < len(lastmods) else None})
+                hebrew_tokens = {t for t in _tokenize_hebrew(blob) if re.search(r"[\u0590-\u05FF]", t)}
+                english_tokens = {t for t in _tokenize_hebrew(blob) if re.search(r"[a-z]", t)}
+                entries.append({
+                    "url": u, "slug": slug, "inferred_title": title, "title": title,
+                    "page_type": typ, "type": typ, "hebrew_tokens": hebrew_tokens,
+                    "english_tokens": english_tokens, "normalized_tokens": _tokenize_hebrew(blob),
+                    "tokens": _tokenize_hebrew(blob), "lastmod": lastmods[i] if i < len(lastmods) else None,
+                })
                 if typ == "product":
                     stats["products_loaded_count"] += 1
                 if typ == "category":
@@ -135,6 +155,7 @@ def _load_sitemap_index(force_refresh: bool = False) -> tuple[list[dict[str, obj
         except Exception:
             logger.exception("Failed loading sitemap %s", sitemap_url)
 
+    stats["internal_link_index_status"] = "loaded" if entries else "empty"
     _INTERNAL_LINK_INDEX_CACHE.update({"loaded_at": now, "entries": entries, "stats": stats})
     return entries, stats
 
@@ -680,73 +701,122 @@ def _wood_link_priority_score(product: object) -> float:
     return score
 
 
+def _page_type_priority(page_type: str) -> float:
+    return {"product": 34.0, "category": 24.0, "brand": 12.0, "info": 8.0, "blog": 5.0}.get(page_type, 4.0)
+
+
+def _score_link_candidate(topic: str, candidate_text: str, page_type: str, terms: list[str]) -> dict[str, object]:
+    normalized_text = _normalize_hebrew(candidate_text)
+    normalized_topic = _normalize_hebrew(topic)
+    topic_tokens = _tokenize_hebrew(normalized_topic)
+    candidate_tokens = _tokenize_hebrew(normalized_text)
+    normalized_terms = [_normalize_hebrew(t) for t in terms if t]
+    exact_terms = [t for t in normalized_terms if t and t in normalized_text]
+    entity_match_score = 0.0
+    if normalized_topic and normalized_topic in normalized_text:
+        entity_match_score = 38.0
+    elif topic_tokens:
+        entity_match_score = min(30.0, len(topic_tokens & candidate_tokens) * 12.0)
+    keyword_match_score = min(34.0, len(exact_terms) * 10.0)
+    category_terms = {"אביזרים", "accessories", "גריל", "גז", "מעשנה", "בשר", "נתחים", "category", "קטגוריה"}
+    category_match_score = min(18.0, len(candidate_tokens & category_terms) * 6.0)
+    if page_type == "category" and (candidate_tokens & category_terms):
+        category_match_score += 8.0
+    page_type_priority_score = _page_type_priority(page_type)
+    relevance_score = min(100.0, entity_match_score + keyword_match_score + category_match_score + page_type_priority_score)
+    reasons: list[str] = []
+    if entity_match_score >= 30:
+        reasons.append("התאמה ישירה לישות המאמר")
+    if exact_terms:
+        reasons.append("התאמת ביטויי חיפוש: " + ", ".join(exact_terms[:4]))
+    if category_match_score:
+        reasons.append("התאמת קטגוריה/הקשר מוצר")
+    reasons.append(f"עדיפות סוג עמוד: {page_type}")
+    return {
+        "relevance_score": round(relevance_score, 1),
+        "entity_match_score": round(entity_match_score, 1),
+        "keyword_match_score": round(keyword_match_score, 1),
+        "category_match_score": round(category_match_score, 1),
+        "page_type_priority_score": round(page_type_priority_score, 1),
+        "match_reasons": reasons,
+    }
+
+
 def _discover_related_links(db: Session, topic: str, limit: int = 6) -> tuple[list[dict[str, str | float]], dict[str, object]]:
     products = db.query(IStoreProduct).order_by(IStoreProduct.updated_at.desc()).limit(400).all()
     sitemap_entries, sitemap_stats = _load_sitemap_index()
     out: list[dict[str, str | float]] = []
     terms = _match_terms_for_topic(topic)
     terms.extend(_topic_synonyms(topic))
-    normalized_terms = [_normalize_hebrew(t) for t in terms]
     excluded_low: list[dict[str, str | float]] = []
+
     for p in products:
         title = _safe_product_title(p)
         url = _safe_product_url(p)
         if not title or not url:
             continue
-        score = _semantic_topic_match_score(topic, p)
-        blob = _normalize_hebrew(f"{title} {url} {getattr(p, 'slug', '') or ''} {getattr(p, 'category', None) or getattr(p, 'category_name', '') or ''} {getattr(p, 'keyword', '') or ''}")
-        exact_hits = sum(1 for t in normalized_terms if t and t in blob)
-        if exact_hits:
-            score = min(100.0, score + (18 * exact_hits))
-        if any(t in blob for t in ["אבני בזלת", "אבני לבה", "lava", "basalt", "rocks", "stones"]):
-            score = min(100.0, score + 30)
+        candidate_text = f"{title} {url} {getattr(p, 'slug', '') or ''} {getattr(p, 'category', None) or getattr(p, 'category_name', '') or ''} {getattr(p, 'keyword', '') or ''}"
+        scores = _score_link_candidate(topic, candidate_text, "product", terms)
+        # Keep the older semantic product signal as a supporting boost for DB products.
+        semantic = _semantic_topic_match_score(topic, p)
+        if semantic >= 70:
+            scores["relevance_score"] = min(100.0, float(scores["relevance_score"]) + 18.0)
+            scores["match_reasons"] = [*list(scores["match_reasons"]), "התאמה סמנטית למוצר ISTORE"]
         if topic == "שבבי עץ לעישון":
-            score = min(100.0, score + _wood_link_priority_score(p))
-        if score < 40:
-            if score > 0:
-                excluded_low.append({"title": title, "url": url, "relevance_score": score})
+            scores["relevance_score"] = min(100.0, float(scores["relevance_score"]) + _wood_link_priority_score(p))
+        if float(scores["relevance_score"]) < 40:
+            if float(scores["relevance_score"]) > 0:
+                excluded_low.append({"title": title, "url": url, **scores})
             continue
-        reason = "מוצר תואם לנושא" if score >= 70 else "אביזר או קטגוריה משלימים לנושא"
-        out.append({"title": title, "url": url, "semantic_topic_match_score": score, "relatedness_score": score, "relevance_score": score, "type": "product", "reason": reason})
-    for e in sitemap_entries:
-        blob = _normalize_hebrew(f"{e.get('title','')} {e.get('slug','')} {e.get('url','')}")
-        tokens = set(e.get("tokens") or set())
-        term_overlap = len(tokens & set(_tokenize_hebrew(_normalize_hebrew(topic))))
-        score = term_overlap * 22
-        if any(t in blob for t in normalized_terms):
-            score += 30
-        if e.get("type") in {"product","category"}:
-            score += 15
-        if score >= 40:
-            link_type = str(e.get("type") or "info")
-            reason = "קטגוריה רלוונטית באתר" if link_type == "category" else ("מוצר תואם ממפת האתר" if link_type == "product" else "עמוד מידע רלוונטי")
-            out.append({"title": e.get("title") or e.get("slug"), "url": e.get("url"), "type": link_type, "semantic_topic_match_score": float(min(score,100)), "relatedness_score": float(min(score,100)), "relevance_score": float(min(score,100)), "reason": reason})
-        elif score > 0:
-            excluded_low.append({"title": e.get("title"), "url": e.get("url"), "relevance_score": float(score)})
+        reason = "; ".join(list(scores["match_reasons"])[:3])
+        out.append({"title": title, "url": url, "type": "product", "page_type": "product", "semantic_topic_match_score": float(scores["relevance_score"]), "relatedness_score": float(scores["relevance_score"]), "reason": reason, **scores})
 
-    dedup={}
+    for e in sitemap_entries:
+        link_type = str(e.get("page_type") or e.get("type") or "info")
+        title = str(e.get("inferred_title") or e.get("title") or e.get("slug") or "")
+        url = str(e.get("url") or "")
+        if not url:
+            continue
+        candidate_text = f"{title} {e.get('slug','')} {url} {' '.join(str(t) for t in (e.get('normalized_tokens') or e.get('tokens') or []))}"
+        scores = _score_link_candidate(topic, candidate_text, link_type, terms)
+        if float(scores["relevance_score"]) >= 40:
+            default_reason = "מוצר תואם ממפת האתר" if link_type == "product" else ("קטגוריה רלוונטית באתר" if link_type == "category" else "עמוד מידע רלוונטי")
+            reason = "; ".join(list(scores["match_reasons"])[:3]) or default_reason
+            out.append({"title": title, "url": url, "type": link_type, "page_type": link_type, "semantic_topic_match_score": float(scores["relevance_score"]), "relatedness_score": float(scores["relevance_score"]), "reason": reason, "lastmod": e.get("lastmod"), **scores})
+        elif float(scores["relevance_score"]) > 0:
+            excluded_low.append({"title": title, "url": url, **scores})
+
+    dedup: dict[str, dict[str, str | float]] = {}
     for item in out:
-        dedup[item.get("url","")] = item
-    out=list(dedup.values())
-    type_priority = {"product": 5, "category": 4, "info": 2, "blog": 1}
-    out.sort(key=lambda item: (float(item.get("semantic_topic_match_score", 0)), type_priority.get(str(item.get("type") or ""), 0)), reverse=True)
+        url = str(item.get("url") or "")
+        if not url:
+            continue
+        current = dedup.get(url)
+        if current is None or float(item.get("relevance_score") or 0) > float(current.get("relevance_score") or 0):
+            dedup[url] = item
+    out = list(dedup.values())
+    type_priority = {"product": 6, "category": 5, "brand": 3, "info": 2, "blog": 1}
+    out.sort(key=lambda item: (float(item.get("relevance_score", 0)), type_priority.get(str(item.get("type") or ""), 0), float(item.get("entity_match_score") or 0)), reverse=True)
     trimmed = out[: max(3, min(limit, 6))]
     best = trimmed[0] if trimmed else {}
     debug = {
         **sitemap_stats,
-        "link_discovery_source": ["db_products", "latest_crawl_cache", "sitemap_urls", "product_category_pages"],
+        "internal_link_index_status": sitemap_stats.get("internal_link_index_status") or ("loaded" if sitemap_entries else "empty"),
+        "index_refreshed_at": sitemap_stats.get("index_refreshed_at"),
+        "link_discovery_source": ["db_products", "compass_sitemaps", "product_category_pages"],
         "searched_terms": terms,
-        "matched_product_count": len(trimmed),
+        "matched_product_count": len([i for i in trimmed if i.get("type") == "product"]),
         "matched_internal_link_count": len(trimmed),
         "best_match_title": best.get("title"),
         "best_match_url": best.get("url"),
-        "best_match_score": best.get("semantic_topic_match_score", 0),
+        "best_match_score": best.get("relevance_score", 0),
         "internal_link_candidates": len(out),
+        "link_candidates_count": len(out),
         "excluded_low_relevance_links": excluded_low[:20],
-        "selected_internal_links": [i.get("url") for i in trimmed],
+        "selected_internal_links": trimmed,
+        "selected_products": [i for i in trimmed if i.get("type") in {"product", "category"}],
     }
     return trimmed, debug
-
 
 def _related_products(db: Session, topic: str, limit: int = 6) -> list[dict[str, str | float]]:
     return _discover_related_links(db, topic, limit)[0]
@@ -777,13 +847,13 @@ def _faq(items: list[tuple[str, str]]) -> str:
 
 def _links_section(related: list[dict[str, str | float]]) -> str:
     links_html = "".join(
-        f"<li><a href='{p['url']}'>{p['title']}</a> – {p.get('reason') or 'רלוונטי לנושא המאמר'}</li>"
+        f"<li><strong>{p['title']}</strong> – <a href='{p['url']}'>{p['url']}</a><br><span>{p.get('reason') or 'רלוונטי לנושא המאמר'}</span></li>"
         for p in related[:6]
         if p.get("url") and p.get("title") and float(p.get("relevance_score") or 0) >= 40
     )
     if links_html:
-        return _h2("מוצרים מומלצים מהאתר", "<p>קישורים שנבחרו לפי התאמה לנושא, למוצר או לקטגוריה באתר.</p>") + _h2("מוצרים רלוונטיים באתר", f"<ul>{links_html}</ul>")
-    return _h2("מוצרים מומלצים מהאתר", "<p>נמשיך לעדכן כאן מוצרים וקטגוריות רלוונטיים כשיתווספו לאינדקס האתר.</p>")
+        return _h2("מוצרים וקטגוריות מומלצים מהאתר", f"<ul>{links_html}</ul>") + "<h2>מוצרים רלוונטיים באתר</h2>"
+    return _h2("מוצרים וקטגוריות מומלצים מהאתר", "<p>לא נמצאו קישורים רלוונטיים באינדקס האתר לאחר סריקה.</p>")
 
 
 def _build_contract_article(title: str, keyword: str, related: list[dict[str, str | float]], profile: dict[str, object]) -> str:
@@ -1029,23 +1099,28 @@ def _clean_anchor_text(link: dict[str, str | float]) -> str:
 
 def inject_internal_links_into_html(article_html: str, related: list[dict[str, str | float]]) -> tuple[str, list[dict[str, str]]]:
     html = article_html or ""
+    section_match = re.search(r"<h2>מוצרים וקטגוריות מומלצים מהאתר</h2>|<h2>מוצרים רלוונטיים באתר</h2>|<h2>מוצרים מומלצים מהאתר</h2>", html)
+    main_html = html[: section_match.start()] if section_match else html
+    tail_html = html[section_match.start():] if section_match else ""
     injected: list[dict[str, str]] = []
     used_urls: set[str] = set()
+    used_anchors: set[str] = set()
     eligible = [link for link in related if float(link.get("relevance_score") or 0) >= 40 and str(link.get("url") or "").strip()]
     for link in eligible:
         if len(injected) >= 6:
             break
         url = str(link.get("url") or "").strip()
         anchor = _clean_anchor_text(link)
-        if not anchor or url in used_urls:
+        if not anchor or url in used_urls or anchor in used_anchors:
             continue
         linked = f"<a href='{url}'>{anchor}</a>"
-        if anchor in html and linked not in html:
-            html = html.replace(anchor, linked, 1)
+        if anchor in main_html and linked not in main_html:
+            main_html = main_html.replace(anchor, linked, 1)
             injected.append({"title": str(link.get("title") or anchor), "url": url, "anchor_text": anchor, "section": "body_paragraph", "relevance_score": str(link.get("relevance_score") or 0)})
             used_urls.add(url)
+            used_anchors.add(anchor)
     if len(injected) < min(2, len(eligible)):
-        paragraphs = list(re.finditer(r"<p[^>]*>.*?</p>", html, flags=re.IGNORECASE | re.DOTALL))
+        paragraphs = list(re.finditer(r"<p[^>]*>.*?</p>", main_html, flags=re.IGNORECASE | re.DOTALL))
         insertions: list[tuple[int, str]] = []
         paragraph_index = 1
         for link in eligible:
@@ -1055,6 +1130,8 @@ def inject_internal_links_into_html(article_html: str, related: list[dict[str, s
             if url in used_urls:
                 continue
             anchor = _clean_anchor_text(link)
+            if not anchor or anchor in used_anchors:
+                continue
             sentence = f" למי שרוצה להמשיך מהתיאוריה לבחירה באתר, כדאי לבדוק גם <a href='{url}'>{anchor}</a> בהקשר של המדריך הזה."
             if paragraph_index >= len(paragraphs):
                 paragraph_index = max(0, len(paragraphs) - 1)
@@ -1063,13 +1140,13 @@ def inject_internal_links_into_html(article_html: str, related: list[dict[str, s
                 insertions.append((match.end() - 4, sentence))
                 paragraph_index += 2
             else:
-                html += f"<p>{sentence}</p>"
+                main_html += f"<p>{sentence}</p>"
             injected.append({"title": str(link.get("title") or anchor), "url": url, "anchor_text": anchor, "section": "body_paragraph", "relevance_score": str(link.get("relevance_score") or 0)})
             used_urls.add(url)
+            used_anchors.add(anchor)
         for pos, snippet in sorted(insertions, reverse=True):
-            html = html[:pos] + snippet + html[pos:]
-    return html, injected
-
+            main_html = main_html[:pos] + snippet + main_html[pos:]
+    return main_html + tail_html, injected
 
 
 def _topic_image_prompts(keyword: str, topic_profile: dict[str, object]) -> tuple[str, list[dict[str, str]]]:
@@ -1182,7 +1259,19 @@ def _keyword_groups(entity: str, title: str, topic_profile: dict[str, object]) -
     ]
     entity_profile = topic_profile.get("entity_profile") if isinstance(topic_profile.get("entity_profile"), dict) else {}
     seo_profile = entity_profile.get("seo_keywords") if isinstance(entity_profile.get("seo_keywords"), dict) else {}
-    if seo_profile:
+    normalized_entity = _normalize_hebrew(entity)
+    lower_entity = entity.lower()
+    if "בזלת" in normalized_entity or "לבה" in normalized_entity or "basalt" in lower_entity or "lava" in lower_entity:
+        raw_secondary = ["אבני לבה לגריל", "אבני בזלת לגריל גז", "פיזור חום בגריל גז", "הפחתת התלקחויות בגריל", *entity_context_keywords]
+        long_tail = ["lava rocks grill", "basalt stones for gas grill", "איך להשתמש באבני בזלת", "ניקוי אבני בזלת", "מתי מחליפים אבני בזלת"]
+        question = ["איך להשתמש באבני בזלת", "מתי מחליפים אבני בזלת"]
+        usage = ["אביזרים לגריל גז", "אבני בזלת לגריל קנייה", "תחזוקת אבני בזלת"]
+    elif "מדחום" in normalized_entity or "thermometer" in lower_entity:
+        raw_secondary = ["מדחום לבשר מומלץ", "מדחום דיגיטלי לבשר", "מדחום ליבה לבשר", "מדחום לגריל גז", "מדחום למעשנה", *entity_context_keywords]
+        long_tail = ["מדחום לקריאה מהירה", "meat thermometer", "טמפרטורת בשר", "איך מודדים טמפרטורת בשר"]
+        question = ["איך מודדים טמפרטורת בשר", "איזה מדחום לבשר מומלץ?"]
+        usage = ["מדחום לגריל", "מדחום למעשנה", "מדחום בשר דיגיטלי"]
+    elif seo_profile:
         raw_secondary = [*list(seo_profile.get("secondary", [])), *raw_secondary, *entity_context_keywords]
         long_tail = [high_intent, *list(seo_profile.get("long_tail", []))]
         question = list(seo_profile.get("questions", []))
@@ -1350,7 +1439,7 @@ def generate_daily_article_draft(db: Session, *, randomize: bool = False) -> tup
         title, keyword, intent = _select_topic(db)
         reused = False
         last_generated_at = None
-    related = _related_products(db, keyword)
+    related, discovery_debug = _discover_related_links(db, keyword)
     slug, _slug_source = _fallback_topic_slug(keyword, title)
     topic_profile = _classify_topic(title, keyword, intent)
     featured_prompt, section_prompts = _topic_image_prompts(keyword, topic_profile)
@@ -1393,7 +1482,7 @@ def generate_daily_article_draft(db: Session, *, randomize: bool = False) -> tup
     db.add(draft)
     db.commit()
     db.refresh(draft)
-    setattr(draft, "link_match_debug", _final_generation_debug(topic_profile, validation, regeneration_count=regeneration_count, final_body_source="contract_engine", body=body, selected_products=related, injected_links=injected_links or related, seo_metadata=seo_metadata))
+    setattr(draft, "link_match_debug", _final_generation_debug(topic_profile, validation, regeneration_count=regeneration_count, final_body_source="contract_engine", discovery_debug=discovery_debug, body=body, selected_products=related, injected_links=injected_links or related, seo_metadata=seo_metadata))
     return draft, reused, last_generated_at
 
 

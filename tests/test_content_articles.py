@@ -1196,3 +1196,56 @@ def test_internal_links_are_selected_injected_and_unrelated_excluded(db_session:
     assert "<a href='https://compassgrill.co.il/products/meat-thermometer'>" in injected_body
     assert all(float(link.get("relevance_score", 0)) >= 40 for link in links)
     assert debug["excluded_low_relevance_links"]
+
+def test_required_keyword_expansion_examples_cover_basalt_thermometer_and_picanha() -> None:
+    cases = [
+        ("אבני בזלת לגריל", "אבני בזלת לגריל", "commercial_informational", ["אבני לבה לגריל", "אבני בזלת לגריל גז", "פיזור חום בגריל גז", "ניקוי אבני בזלת"]),
+        ("מדחום לבשר", "מדחום לבשר", "commercial_informational", ["מדחום דיגיטלי לבשר", "מדחום ליבה לבשר", "מדחום לגריל גז"]),
+        ("פיקניה", "פיקניה", "how-to", ["פיקניה על הגריל", "טמפרטורת פיקניה", "Reverse Sear פיקניה"]),
+    ]
+    for title, keyword, intent, required in cases:
+        profile = _classify_topic(title, keyword, intent)
+        metadata = build_topic_seo_metadata(keyword, title, profile)
+        assert len(metadata["seo_keywords"]) >= 8
+        for phrase in required:
+            assert phrase in metadata["seo_keywords"]
+
+
+def test_internal_link_index_entity_matching_priority_and_fallback(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.services.content_articles as articles
+
+    entries = [
+        {"url": "https://compassgrill.co.il/basalt-stones-for-gas-grill", "slug": "basalt-stones-for-gas-grill", "title": "אבני בזלת לגריל גז", "type": "product", "page_type": "product", "tokens": articles._tokenize_hebrew("אבני בזלת לגריל גז lava rocks basalt stones")},
+        {"url": "https://compassgrill.co.il/category/grill-accessories", "slug": "grill-accessories", "title": "אביזרים לגריל", "type": "category", "page_type": "category", "tokens": articles._tokenize_hebrew("אביזרים לגריל גריל גז אבני לבה מדחום")},
+        {"url": "https://compassgrill.co.il/meat-thermometer", "slug": "meat-thermometer", "title": "מדחום לבשר", "type": "product", "page_type": "product", "tokens": articles._tokenize_hebrew("מדחום לבשר meat thermometer probe")},
+        {"url": "https://compassgrill.co.il/feedlot-picanha", "slug": "feedlot-picanha", "title": "פיקניה פידלוט", "type": "product", "page_type": "product", "tokens": articles._tokenize_hebrew("פיקניה picanha beef steak")},
+        {"url": "https://compassgrill.co.il/unrelated-fish-knife", "slug": "unrelated-fish-knife", "title": "סכין דגים", "type": "product", "page_type": "product", "tokens": articles._tokenize_hebrew("סכין דגים")},
+    ]
+    stats = {"sitemap_loaded_count": 1, "products_loaded_count": 3, "categories_loaded_count": 1, "internal_link_index_status": "loaded"}
+    monkeypatch.setattr("app.services.content_articles._load_sitemap_index", lambda force_refresh=False: (entries, stats))
+
+    basalt_links, basalt_debug = articles._discover_related_links(db_session, "אבני בזלת לגריל", limit=6)
+    assert basalt_links[0]["url"] == "https://compassgrill.co.il/basalt-stones-for-gas-grill"
+    assert any(link["url"] == "https://compassgrill.co.il/category/grill-accessories" for link in basalt_links)
+    assert basalt_debug["link_candidates_count"] >= 2
+
+    fallback_entries = [entry for entry in entries if "basalt-stones" not in entry["url"]]
+    monkeypatch.setattr("app.services.content_articles._load_sitemap_index", lambda force_refresh=False: (fallback_entries, stats))
+    fallback_links, _ = articles._discover_related_links(db_session, "אבני בזלת לגריל", limit=6)
+    assert fallback_links[0]["url"] == "https://compassgrill.co.il/category/grill-accessories"
+
+    thermometer_links, _ = articles._discover_related_links(db_session, "מדחום לבשר", limit=6)
+    assert thermometer_links[0]["url"] == "https://compassgrill.co.il/meat-thermometer"
+
+    picanha_links, _ = articles._discover_related_links(db_session, "פיקניה", limit=6)
+    assert picanha_links[0]["url"] == "https://compassgrill.co.il/feedlot-picanha"
+    assert not any("unrelated-fish-knife" in link["url"] for link in basalt_links + thermometer_links + picanha_links)
+
+
+def test_employee_workspace_keywords_field_uses_expanded_comma_separated_keywords(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.services.content_articles._load_sitemap_index", lambda force_refresh=False: ([], {"sitemap_loaded_count": 0, "products_loaded_count": 0, "categories_loaded_count": 0}))
+    client.post("/content/articles/generate-topic-draft", json={"topic_title": "אבני בזלת לגריל", "focus_keyword": "אבני בזלת לגריל", "target_intent": "commercial_informational"})
+    html = client.get("/seo/simple-workspace").text
+    assert "מילות מפתח לקידום במנועי חיפוש" in html
+    assert "אבני בזלת לגריל, אבני לבה לגריל" in html
+    assert "ניקוי אבני בזלת" in html

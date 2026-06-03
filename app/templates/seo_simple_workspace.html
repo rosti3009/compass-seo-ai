@@ -68,7 +68,7 @@
           <p><strong>Slug:</strong> {{ article.slug }}</p>
           <p><strong>Meta Title:</strong> {{ article.meta_title }}</p>
           <p><strong>Meta Description:</strong> {{ article.meta_description }}</p>
-          <p><strong>מילות מפתח לקידום במנועי חיפוש:</strong> {{ article.focus_keyword }}</p>
+          <p><strong>מילות מפתח לקידום במנועי חיפוש:</strong> {{ article.debug.seo_keywords | join(', ') if article.debug and article.debug.seo_keywords else article.focus_keyword }}</p>
           <details><summary>תצוגה מקדימה</summary><div>{{ article.article_body|safe }}</div></details>
           <section class="manual-upload-layout" aria-label="הכנה להעלאה ידנית ל-ISTORE">
             <p style="display:none">manual-upload-view · הכנה מהירה לעובד חנות</p>
