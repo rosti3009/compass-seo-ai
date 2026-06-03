@@ -11,6 +11,11 @@ from app.db.database import Base, get_db
 from app.db.models import ContentArticleDraft, IStoreProduct
 from app.main import app
 from app.services.istore_blog_publisher import IStoreBlogPublisher
+from app.services.content_articles import (
+    INTERNAL_SEO_CONTRACT_TERMS,
+    _classify_topic,
+    build_topic_seo_metadata,
+)
 
 
 def _is_hebrew(text: str) -> bool:
@@ -39,6 +44,56 @@ def client(db_session: Session) -> Generator[TestClient, None, None]:
         yield c
     app.dependency_overrides.clear()
 
+
+
+def test_topic_seo_metadata_expands_entity_specific_keywords() -> None:
+    topic_profile = _classify_topic("פיקניה", "פיקניה", "how-to")
+
+    metadata = build_topic_seo_metadata("פיקניה", "פיקניה", topic_profile)
+
+    assert metadata["meta_title"] == "איך לצלות פיקניה מושלמת על הגריל – מדריך מלא | Compass Grill"
+    assert not any(term in metadata["meta_title"] for term in INTERNAL_SEO_CONTRACT_TERMS)
+    assert 140 <= len(metadata["meta_description"]) <= 160
+    assert "פיקניה" in metadata["meta_description"]
+    assert "פיקניה על הגריל" in metadata["meta_description"]
+    assert len(metadata["seo_keywords"]) >= 8
+    assert all("פיקניה" in keyword for keyword in metadata["seo_keywords"])
+    for phrase in [
+        "פיקניה",
+        "פיקניה על הגריל",
+        "איך לצלות פיקניה",
+        "טמפרטורת פיקניה",
+        "פיקניה מדיום רייר",
+        "Reverse Sear פיקניה",
+        "חיתוך פיקניה",
+        "סטייק פיקניה",
+        "פיקניה גריל גז",
+        "פיקניה על פחמים",
+    ]:
+        assert phrase in metadata["seo_keywords"]
+    assert metadata["primary_keyword"] == "פיקניה"
+    assert "פיקניה מדיום רייר" in metadata["secondary_keywords"]
+    assert "Reverse Sear פיקניה" in metadata["long_tail_keywords"]
+    assert metadata["seo_score"] >= 90
+
+
+def test_topic_draft_diagnostics_show_expanded_seo_metadata(client: TestClient) -> None:
+    response = client.post(
+        "/content/articles/generate-topic-draft",
+        json={"topic_title": "פיקניה", "focus_keyword": "פיקניה", "target_intent": "how-to", "preferred_slug": "picanha-on-grill"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    diagnostics = payload["diagnostics"]
+    draft = payload["draft"]
+    assert diagnostics["primary_keyword"] == "פיקניה"
+    assert "פיקניה מדיום רייר" in diagnostics["secondary_keywords"]
+    assert "Reverse Sear פיקניה" in diagnostics["long_tail_keywords"]
+    assert diagnostics["seo_score"] >= 90
+    assert "how_to_grilling_guide" not in draft["meta_title"]
+    assert "פיקניה" in draft["meta_description"]
+    assert len(draft["debug"]["seo_keywords"]) >= 8
 
 def test_workspace_has_article_controls(client: TestClient) -> None:
     response = client.get('/seo/simple-workspace')

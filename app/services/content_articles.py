@@ -1041,35 +1041,40 @@ def _keyword_groups(entity: str, title: str, topic_profile: dict[str, object]) -
     raw_secondary = [
         f"{entity} על הגריל",
         f"טמפרטורת {entity}",
-        *[str(k) for k in topic_profile.get("internal_link_keywords", [])],
+    ]
+    internal_link_keywords = [str(k) for k in topic_profile.get("internal_link_keywords", [])]
+    entity_context_keywords = [
+        keyword if entity in keyword else f"{entity} עם {keyword}"
+        for keyword in internal_link_keywords
+        if keyword
     ]
     if topic_type == "meat_quick_grill_cut":
-        raw_secondary.extend([f"{entity} מדיום רייר", f"חיתוך {entity}", f"סטייק {entity}"])
+        raw_secondary.extend([f"{entity} מדיום רייר", f"חיתוך {entity}", f"סטייק {entity}", *entity_context_keywords])
         long_tail = [high_intent, f"Reverse Sear {entity}", f"{entity} גריל גז", f"{entity} על פחמים"]
         question = [f"איך לצלות {entity}?", f"מה טמפרטורת {entity} מדיום רייר?"]
         usage = [f"{entity} למנגל", f"{entity} על האש"]
     elif topic_type == "meat_low_slow_smoking":
-        raw_secondary.extend([f"טמפרטורת עישון {entity}", f"{entity} במעשנה", "נייר קצבים"])
+        raw_secondary.extend([f"טמפרטורת עישון {entity}", f"{entity} במעשנה", f"{entity} עם נייר קצבים", *entity_context_keywords])
         long_tail = [high_intent, f"כמה זמן לעשן {entity}", f"{entity} low and slow", f"{entity} עטיפה ומנוחה"]
         question = [f"איך לעשן {entity}?", f"מתי עוטפים {entity}?"]
         usage = [f"{entity} למעשנה", f"{entity} למתחילים"]
     elif topic_type == "fuel_comparison_or_guide":
-        raw_secondary.extend(["פחם קוקוס", "פחם עץ", "זמן בעירה", "יציבות חום"])
+        raw_secondary.extend([f"{entity} פחם קוקוס", f"{entity} פחם עץ", f"זמן בעירה של {entity}", f"יציבות חום של {entity}", *entity_context_keywords])
         long_tail = [high_intent, "פחם קוקוס מול פחם עץ", "פחם לגריל פחמים", "פחם עם פחות אפר"]
         question = ["איזה פחם מחזיק יותר זמן?", "מה ההבדל בין פחם קוקוס לפחם עץ?"]
         usage = ["פחם מומלץ למנגל", "פחם לגריל מקצועי"]
     elif topic_type == "smoking_wood_guide":
-        raw_secondary.extend(["שבבי עץ לעישון", "צ׳אנקים לעישון", "עצי עישון לבשר", "thin blue smoke"])
+        raw_secondary.extend([f"{entity} לעישון", f"{entity} מול צ׳אנקים", f"{entity} לבשר", f"{entity} thin blue smoke", *entity_context_keywords])
         long_tail = [high_intent, f"{entity} לבריסקט", f"{entity} למעשנה", "שבבים או צ׳אנקים לעישון"]
         question = [f"איך משתמשים ב{entity}?", "האם צריך להשרות שבבי עץ?"]
         usage = [f"{entity} לקנייה", f"{entity} לגריל גז"]
     elif topic_type in {"grill_accessory_guide", "equipment_buying_guide"}:
-        raw_secondary.extend([f"{entity} לגריל גז", f"התקנת {entity}", f"תחזוקת {entity}"])
+        raw_secondary.extend([f"{entity} לגריל גז", f"התקנת {entity}", f"תחזוקת {entity}", *entity_context_keywords])
         long_tail = [high_intent, f"{entity} מומלץ", f"{entity} לגריל ביתי", f"איך משתמשים ב{entity}"]
         question = [f"למה צריך {entity}?", f"מתי מחליפים {entity}?"]
         usage = [f"{entity} לקנייה", f"{entity} שימוש נכון"]
     else:
-        raw_secondary.extend([f"מדריך {entity}", f"טיפים ל{entity}"])
+        raw_secondary.extend([f"מדריך {entity}", f"טיפים ל{entity}", *entity_context_keywords])
         long_tail = [high_intent, f"{entity} מדריך למתחילים", f"{entity} טעויות נפוצות"]
         question = [f"איך משתמשים ב{entity}?", f"מה חשוב לדעת על {entity}?"]
         usage = [f"{entity} מומלץ", f"{entity} שימוש נכון"]
