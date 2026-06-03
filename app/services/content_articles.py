@@ -958,11 +958,201 @@ def _topic_image_prompts(keyword: str, topic_profile: dict[str, object]) -> tupl
     return featured, section_prompts
 
 
+INTERNAL_SEO_CONTRACT_TERMS = {
+    "how_to_grilling_guide",
+    "low_and_slow_smoking_guide",
+    "recipe_how_to",
+    "comparison_or_buying_guide",
+    "smoking_wood_buying_guide",
+    "accessory_buying_guide",
+    "equipment_buying_guide",
+    "fallback_generic",
+    *TOPIC_TYPE_CONTRACTS.keys(),
+    *TOPIC_TYPE_GENERATORS.values(),
+}
+
+
+def _dedupe_terms(terms: list[str], *, limit: int | None = None) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for term in terms:
+        clean = re.sub(r"\s+", " ", str(term or "").strip(" |,.;:"))
+        key = _normalize_text_for_matching(clean).lower()
+        if clean and key and key not in seen:
+            out.append(clean)
+            seen.add(key)
+        if limit and len(out) >= limit:
+            break
+    return out
+
+
+def _seo_entity(keyword: str, title: str, topic_profile: dict[str, object]) -> str:
+    entity = str(keyword or topic_profile.get("target_keyword") or topic_profile.get("main_entity") or title or "").strip()
+    if not entity:
+        entity = str(title or "מדריך גריל").strip()
+    if "/" in entity:
+        entity = entity.split("/")[0].strip()
+    return entity
+
+
+def _high_intent_phrase(entity: str, topic_type: str, search_intent: str, title: str) -> str:
+    normalized_title = _normalize_text_for_matching(title)
+    if "איך" in normalized_title and entity in title:
+        return title.strip()
+    if topic_type == "meat_quick_grill_cut":
+        return f"איך לצלות {entity}"
+    if topic_type == "meat_low_slow_smoking":
+        return f"איך לעשן {entity}"
+    if topic_type == "poultry_grill_recipe":
+        return f"איך להכין {entity} על הגריל"
+    if topic_type == "fuel_comparison_or_guide" or search_intent == "comparison":
+        return f"איזה {entity} עדיף לגריל"
+    if topic_type in {"grill_accessory_guide", "equipment_buying_guide"} or search_intent.startswith("commercial"):
+        return f"איך לבחור {entity}"
+    if topic_type == "smoking_wood_guide":
+        return f"איך לבחור {entity} לעישון"
+    return f"מדריך {entity}"
+
+
+def _build_meta_title(entity: str, high_intent_phrase: str, topic_type: str) -> str:
+    if topic_type == "meat_quick_grill_cut":
+        base = f"{high_intent_phrase} מושלמת על הגריל – מדריך מלא"
+    elif topic_type == "meat_low_slow_smoking":
+        base = f"{high_intent_phrase} נכון – מדריך עישון מלא"
+    elif topic_type == "poultry_grill_recipe":
+        base = f"{high_intent_phrase} – מתכון וטיפים"
+    elif topic_type == "fuel_comparison_or_guide":
+        base = f"{high_intent_phrase}: השוואה וטיפים לבחירה"
+    elif topic_type in {"grill_accessory_guide", "equipment_buying_guide", "smoking_wood_guide"}:
+        base = f"{high_intent_phrase} – מדריך קנייה ושימוש"
+    else:
+        base = f"{high_intent_phrase} – מדריך מעשי"
+    full = f"{base} | Compass Grill"
+    if len(full) <= 70:
+        return full
+    short = f"{high_intent_phrase} – מדריך מלא | Compass Grill"
+    return short if len(short) <= 70 else f"{entity} על הגריל – מדריך מלא | Compass Grill"
+
+
+def _keyword_groups(entity: str, title: str, topic_profile: dict[str, object]) -> dict[str, list[str] | str]:
+    topic_type = str(topic_profile.get("topic_type") or "fallback_generic")
+    search_intent = str(topic_profile.get("search_intent") or "informational")
+    high_intent = _high_intent_phrase(entity, topic_type, search_intent, title)
+    raw_secondary = [
+        f"{entity} על הגריל",
+        f"טמפרטורת {entity}",
+        *[str(k) for k in topic_profile.get("internal_link_keywords", [])],
+    ]
+    if topic_type == "meat_quick_grill_cut":
+        raw_secondary.extend([f"{entity} מדיום רייר", f"חיתוך {entity}", f"סטייק {entity}"])
+        long_tail = [high_intent, f"Reverse Sear {entity}", f"{entity} גריל גז", f"{entity} על פחמים"]
+        question = [f"איך לצלות {entity}?", f"מה טמפרטורת {entity} מדיום רייר?"]
+        usage = [f"{entity} למנגל", f"{entity} על האש"]
+    elif topic_type == "meat_low_slow_smoking":
+        raw_secondary.extend([f"טמפרטורת עישון {entity}", f"{entity} במעשנה", "נייר קצבים"])
+        long_tail = [high_intent, f"כמה זמן לעשן {entity}", f"{entity} low and slow", f"{entity} עטיפה ומנוחה"]
+        question = [f"איך לעשן {entity}?", f"מתי עוטפים {entity}?"]
+        usage = [f"{entity} למעשנה", f"{entity} למתחילים"]
+    elif topic_type == "fuel_comparison_or_guide":
+        raw_secondary.extend(["פחם קוקוס", "פחם עץ", "זמן בעירה", "יציבות חום"])
+        long_tail = [high_intent, "פחם קוקוס מול פחם עץ", "פחם לגריל פחמים", "פחם עם פחות אפר"]
+        question = ["איזה פחם מחזיק יותר זמן?", "מה ההבדל בין פחם קוקוס לפחם עץ?"]
+        usage = ["פחם מומלץ למנגל", "פחם לגריל מקצועי"]
+    elif topic_type == "smoking_wood_guide":
+        raw_secondary.extend(["שבבי עץ לעישון", "צ׳אנקים לעישון", "עצי עישון לבשר", "thin blue smoke"])
+        long_tail = [high_intent, f"{entity} לבריסקט", f"{entity} למעשנה", "שבבים או צ׳אנקים לעישון"]
+        question = [f"איך משתמשים ב{entity}?", "האם צריך להשרות שבבי עץ?"]
+        usage = [f"{entity} לקנייה", f"{entity} לגריל גז"]
+    elif topic_type in {"grill_accessory_guide", "equipment_buying_guide"}:
+        raw_secondary.extend([f"{entity} לגריל גז", f"התקנת {entity}", f"תחזוקת {entity}"])
+        long_tail = [high_intent, f"{entity} מומלץ", f"{entity} לגריל ביתי", f"איך משתמשים ב{entity}"]
+        question = [f"למה צריך {entity}?", f"מתי מחליפים {entity}?"]
+        usage = [f"{entity} לקנייה", f"{entity} שימוש נכון"]
+    else:
+        raw_secondary.extend([f"מדריך {entity}", f"טיפים ל{entity}"])
+        long_tail = [high_intent, f"{entity} מדריך למתחילים", f"{entity} טעויות נפוצות"]
+        question = [f"איך משתמשים ב{entity}?", f"מה חשוב לדעת על {entity}?"]
+        usage = [f"{entity} מומלץ", f"{entity} שימוש נכון"]
+    secondary = _dedupe_terms(raw_secondary, limit=5)
+    long_tail = _dedupe_terms(long_tail, limit=5)
+    question = _dedupe_terms(question, limit=3)
+    usage = _dedupe_terms(usage, limit=3)
+    all_keywords = _dedupe_terms([entity, *secondary, *long_tail, *question, *usage], limit=15)
+    return {
+        "primary_keyword": entity,
+        "high_intent_phrase": high_intent,
+        "secondary_keywords": secondary,
+        "long_tail_keywords": long_tail,
+        "question_keywords": question,
+        "usage_keywords": usage,
+        "seo_keywords": all_keywords,
+    }
+
+
+def _fit_meta_description(description: str, entity: str, secondary: str) -> str:
+    clean = re.sub(r"\s+", " ", description).strip()
+    fallback = f"מדריך {entity} מעשי עם {secondary}, טיפים לגריל, טמפרטורות, שלבי הכנה וטעויות נפוצות כדי לקבל תוצאה עסיסית ומדויקת בבית."
+    if len(clean) < 140:
+        clean = f"{clean} כולל טיפים לגריל גז ופחמים ושאלות נפוצות."
+    if len(clean) > 160:
+        clean = clean[:157].rstrip(" ,.-–") + "..."
+    if len(clean) < 140:
+        clean = fallback
+    if len(clean) > 160:
+        clean = clean[:157].rstrip(" ,.-–") + "..."
+    return clean
+
+
+def _build_meta_description(entity: str, topic_profile: dict[str, object], groups: dict[str, list[str] | str]) -> str:
+    topic_type = str(topic_profile.get("topic_type") or "fallback_generic")
+    secondary_keywords = groups.get("secondary_keywords") if isinstance(groups.get("secondary_keywords"), list) else []
+    secondary = str((secondary_keywords or [f"{entity} על הגריל"])[0])
+    if topic_type == "meat_quick_grill_cut":
+        raw = f"מדריך {entity} על הגריל עם המלחה, צריבה, {secondary}, מנוחה וחיתוך נכון כדי להגיע לנתח עסיסי ומדיום רייר בכל פעם."
+    elif topic_type == "meat_low_slow_smoking":
+        raw = f"מדריך {entity} במעשנה עם טמפרטורות, עצי עישון, עטיפה, נייר קצבים ומנוחה ארוכה לקבלת Bark עסיסי ותוצאה יציבה."
+    elif topic_type == "poultry_grill_recipe":
+        raw = f"מתכון {entity} על הגריל עם ייבוש, מרינדה, גלייז, בטיחות מזון וטיפים לקריספיות בלי לשרוף את העוף."
+    elif topic_type == "fuel_comparison_or_guide":
+        raw = f"השוואת {entity} לגריל: זמן בעירה, יציבות חום, עשן, אפר ועלות מול ביצועים כדי לבחור פחם מתאים למנגל."
+    elif topic_type == "smoking_wood_guide":
+        raw = f"מדריך {entity} לעישון עם התאמת עץ לבשר, שבבים מול צ׳אנקים, שליטה בעשן וטיפים לקנייה ושימוש נכון."
+    elif topic_type in {"grill_accessory_guide", "equipment_buying_guide"}:
+        raw = f"מדריך {entity} עם שיקולי קנייה, התקנה, תחזוקה ושימוש נכון כדי לשפר את ביצועי הגריל ולבחור מוצר מתאים."
+    else:
+        raw = f"מדריך {entity} מעשי עם טיפים, שלבים, טעויות נפוצות ותשובות לשאלות כדי להבין מה חשוב לפני שמתחילים."
+    return _fit_meta_description(raw, entity, secondary)
+
+
+def build_topic_seo_metadata(keyword: str, title: str, topic_profile: dict[str, object]) -> dict[str, object]:
+    entity = _seo_entity(keyword, title, topic_profile)
+    groups = _keyword_groups(entity, title, topic_profile)
+    meta_title = _build_meta_title(entity, str(groups["high_intent_phrase"]), str(topic_profile.get("topic_type") or "fallback_generic"))
+    meta_description = _build_meta_description(entity, topic_profile, groups)
+    internal_leaks = [term for term in INTERNAL_SEO_CONTRACT_TERMS if term and (term in meta_title or term in meta_description)]
+    seo_score = 100
+    if entity not in meta_title:
+        seo_score -= 20
+    if entity not in meta_description:
+        seo_score -= 20
+    if not 140 <= len(meta_description) <= 160:
+        seo_score -= 15
+    if len(groups["seo_keywords"]) < 8:
+        seo_score -= 15
+    if internal_leaks:
+        seo_score -= 30
+    return {
+        "meta_title": meta_title,
+        "meta_description": meta_description,
+        **groups,
+        "internal_contract_terms_found": internal_leaks,
+        "seo_score": max(0, seo_score),
+    }
+
+
 def _topic_meta(keyword: str, title: str, topic_profile: dict[str, object]) -> tuple[str, str]:
-    contract = topic_profile.get("contract") if isinstance(topic_profile.get("contract"), dict) else {}
-    meta_pattern = str(contract.get("meta_pattern") or "{keyword}: מדריך מעשי בעברית עם טיפים, שלבים ו-FAQ.")
-    meta_title = f"{keyword}: {str(topic_profile.get('content_format') or 'מדריך')} | Compass Grill"[:65]
-    return meta_title, meta_pattern.format(keyword=keyword)[:160]
+    metadata = build_topic_seo_metadata(keyword, title, topic_profile)
+    return str(metadata["meta_title"]), str(metadata["meta_description"])
 
 
 def _final_generation_debug(topic_profile: dict[str, object], validation: dict[str, object], *, regeneration_count: int, final_body_source: str, discovery_debug: dict[str, object] | None = None) -> dict[str, object]:
