@@ -349,7 +349,7 @@ def test_latest_debug_endpoint(client: TestClient) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["latest_article_id"] == payload["active_article_id"]
-    assert payload["generator_version"] == "v3-topic-contract-engine-2026-06-02"
+    assert payload["generator_version"] == "v4-production-quality-links-expansions-2026-06-03"
     assert payload["selected_generator"]
 
 
@@ -629,7 +629,7 @@ def test_regression_wood_chips_topic_quality_and_prompts(client: TestClient, mon
     assert float(draft["quality"]["article_quality_score"]) > 75
 
     details = client.get(f"/content/articles/{draft['id']}").json()['draft']
-    assert details['debug']['generator_version'] == 'v3-topic-contract-engine-2026-06-02'
+    assert details['debug']['generator_version'] == 'v4-production-quality-links-expansions-2026-06-03'
     assert details['debug']['h1_removed'] is True
     assert details['debug']['slug_source'] in {'title', 'focus_keyword', 'topic_mapping', 'hard_fallback'}
 
