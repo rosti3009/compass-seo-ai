@@ -211,12 +211,12 @@ TOPIC_TYPE_CONTRACTS: dict[str, dict[str, object]] = {
     "grill_accessory_guide": {
         "entity_type": "grill_accessory",
         "content_format": "accessory_use_and_buying_guide",
-        "required_sections": ["מה זה", "איך זה עובד", "יתרונות", "התקנה ושימוש", "ניקוי ותחזוקה", "מתי להחליף", "שיקולי קנייה", "שאלות נפוצות"],
-        "required_terms": ["מה זה", "איך זה עובד", "יתרונות", "התקנה", "שימוש", "ניקוי", "תחזוקה", "מתי להחליף", "שיקולי קנייה"],
+        "required_sections": ["מה זה", "איך זה עובד", "יתרונות", "התקנה ושימוש", "ניקוי ותחזוקה", "מתי להחליף", "שיקולי קנייה", "טעויות נפוצות", "שאלות נפוצות"],
+        "required_terms": ["מה זה", "איך זה עובד", "יתרונות", "התקנה", "שימוש", "ניקוי", "תחזוקה", "מתי להחליף", "שיקולי קנייה", "טעויות נפוצות"],
         "forbidden_terms": ["74°C", "54–57°C", "מדיום רייר", "גלייז", "סטול", "Bark", "זמן בעירה", "אפר"],
         "temperature_policy": {"allowed": [], "meaning": "accessory topics should not include meat temperatures"},
         "meta_pattern": "{keyword}: מדריך אביזר לגריל עם הסבר, התקנה, שימוש, ניקוי, תחזוקה ושיקולי קנייה.",
-        "image_prompt_pattern": "black basalt lava stones realistic grill accessory guide for {keyword}, product installed or used on a grill, clean maintenance context, no meat temperature thermometer reading, no text",
+        "image_prompt_pattern": "realistic grill accessory guide for {keyword}, product installed or used on a grill, clean maintenance context, no unrelated accessory, no text",
         "internal_link_keywords": ["אביזרים לגריל", "גריל גז", "כפפות", "מלקחיים", "מברשת"],
     },
     "equipment_buying_guide": {
@@ -260,11 +260,28 @@ TOPIC_CLASSIFIER_RULES: list[tuple[str, list[str], str, str]] = [
     ("meat_quick_grill_cut", ["פיקניה", "אנטריקוט", "סינטה", "דנוור", "פלאט איירון", "סטייק", "סטייקים"], "beef_cut", "how-to"),
     ("meat_low_slow_smoking", ["בריסקט", "אסאדו", "שורט ריבס", "צלעות בקר", "נתחים לעישון", "עישון בריסקט"], "low_slow_beef_cut", "how-to"),
     ("poultry_grill_recipe", ["כנפיים", "פרגית", "עוף", "שיפודי פרגית"], "poultry", "how-to"),
-    ("fuel_comparison_or_guide", ["פחם", "פחם קוקוס", "פחמי עץ", "גחלים"], "fuel", "comparison"),
-    ("smoking_wood_guide", ["שבבי עץ", "צ׳אנקים", "צ'אנקים", "צאנקים", "עצי עישון"], "smoking_wood", "commercial_informational"),
-    ("grill_accessory_guide", ["אבני בזלת", "בזלת", "מדחום", "נייר קצבים", "כפפות", "מלקחיים", "מברשת"], "accessory", "commercial_informational"),
-    ("equipment_buying_guide", ["גריל גז", "גריל פחמים", "מעשנה", "טאבון", "מטבח חוץ"], "equipment", "commercial"),
+    ("fuel_comparison_or_guide", ["פחם", "פחם קוקוס", "פחמי עץ", "גחלים", "charcoal", "fuel"], "fuel", "comparison"),
+    ("smoking_wood_guide", ["שבבי עץ", "צ׳אנקים", "צ'אנקים", "צאנקים", "עצי עישון", "wood chips", "smoking wood"], "smoking_wood", "commercial_informational"),
+    ("grill_accessory_guide", ["אבני בזלת", "בזלת", "אבני לבה", "מדחום", "נייר קצבים", "כפפות", "מלקחיים", "מברשת", "basalt", "lava rocks", "lava stones", "thermometer", "accessory"], "accessory", "commercial_informational"),
+    ("equipment_buying_guide", ["גריל גז", "גריל פחמים", "מעשנה", "טאבון", "מטבח חוץ", "gas grill"], "equipment", "commercial"),
 ]
+
+ACCESSORY_ENTITY_PROFILES: dict[str, dict[str, object]] = {
+    "basalt_stones": {
+        "canonical_entity": "אבני בזלת / אבני לבה",
+        "match_terms": ["אבני בזלת", "בזלת", "אבני לבה", "lava rocks", "lava stones", "basalt stones", "basalt"],
+        "required_terms": ["אבני לבה", "אבני בזלת", "lava rocks", "פיזור חום", "הפחתת התלקחויות", "מבערים", "אידוי שומן", "יציבות טמפרטורה", "מרווחי החלפה", "טעויות נפוצות"],
+        "internal_link_keywords": ["אבני בזלת", "אבני לבה", "גריל גז", "מבערים", "אביזרים לגריל"],
+        "image_prompt_pattern": "black basalt lava stones and lava rocks / basalt stones arranged above gas grill burners, realistic grill accessory guide, heat distribution and grease vaporization context, no thermometer, no meat temperature reading, no text",
+    },
+    "thermometer": {
+        "canonical_entity": "מדחום לבשר",
+        "match_terms": ["מדחום לבשר", "מדחום", "thermometer", "meat thermometer", "probe"],
+        "required_terms": ["מדחום", "probe", "קריאה מהירה", "כיול", "טמפרטורה פנימית", "זמן תגובה", "ניקוי", "טעויות נפוצות"],
+        "internal_link_keywords": ["מדחום לבשר", "אביזרים לגריל", "גריל גז"],
+        "image_prompt_pattern": "digital meat thermometer probe used as a grill accessory beside a gas grill, instant-read display visible without numbers, clean food-safe maintenance context, no unrelated heat-distribution stones, no text",
+    },
+}
 
 TOPIC_TYPE_GENERATORS = {
     "meat_quick_grill_cut": "contract_meat_quick_grill_cut",
@@ -281,6 +298,15 @@ TOPIC_TYPE_GENERATORS = {
 
 def _contract_for(topic_type: str) -> dict[str, object]:
     return TOPIC_TYPE_CONTRACTS.get(topic_type, TOPIC_TYPE_CONTRACTS["fallback_generic"])
+
+
+def _resolve_accessory_entity_profile(topic_title: str, focus_keyword: str) -> tuple[str, dict[str, object]] | None:
+    blob = _normalize_text_for_matching(f"{topic_title} {focus_keyword}")
+    for entity_key, entity_profile in ACCESSORY_ENTITY_PROFILES.items():
+        match_terms = [str(term) for term in entity_profile.get("match_terms", [])]
+        if any(_normalize_text_for_matching(term) in blob for term in match_terms):
+            return entity_key, entity_profile
+    return None
 
 
 def _normalize_text_for_matching(value: str) -> str:
@@ -315,18 +341,29 @@ def _classify_topic(topic_title: str, focus_keyword: str, target_intent: str) ->
 
     contract = _contract_for(topic_type)
     main_entity = _extract_main_entity(topic_title, focus_keyword)
+    entity_key = "generic"
+    entity_profile: dict[str, object] = {}
+    if topic_type == "grill_accessory_guide":
+        resolved = _resolve_accessory_entity_profile(topic_title, focus_keyword)
+        if resolved:
+            entity_key, entity_profile = resolved
+            main_entity = str(entity_profile.get("canonical_entity") or main_entity)
+    required_terms = [*list(contract.get("required_terms", [])), *list(entity_profile.get("required_terms", []))]
+    internal_link_keywords = [*list(contract.get("internal_link_keywords", [])), *list(entity_profile.get("internal_link_keywords", []))]
     article_brief = {
         "main_entity": main_entity,
+        "entity_key": entity_key,
+        "entity_profile": entity_profile,
         "entity_type": contract.get("entity_type", entity_type),
         "topic_type": topic_type,
         "content_format": contract.get("content_format", "guide"),
         "search_intent": intent,
         "required_sections": list(contract.get("required_sections", [])),
-        "required_terms": list(contract.get("required_terms", [])),
+        "required_terms": list(dict.fromkeys(str(term) for term in required_terms if str(term).strip())),
         "forbidden_terms": list(contract.get("forbidden_terms", [])),
         "temperature_policy": dict(contract.get("temperature_policy", {})),
-        "image_policy": {"featured_prompt_pattern": contract.get("image_prompt_pattern", ""), "must_include_entity": True},
-        "internal_link_keywords": list(contract.get("internal_link_keywords", [])),
+        "image_policy": {"featured_prompt_pattern": entity_profile.get("image_prompt_pattern") or contract.get("image_prompt_pattern", ""), "must_include_entity": True},
+        "internal_link_keywords": list(dict.fromkeys(str(term) for term in internal_link_keywords if str(term).strip())),
     }
     return {
         **article_brief,
@@ -354,7 +391,7 @@ def _first_paragraph_text(html: str) -> str:
 
 
 def _meaningful_title_terms(title: str, keyword: str) -> list[str]:
-    stop = {"איך", "או", "על", "עם", "של", "מול", "מדריך", "מלא", "לגריל", "גריל", "ההבדל", "בין", "את", "זה"}
+    stop = {"איך", "או", "על", "עם", "של", "מול", "מדריך", "מלא", "לגריל", "גריל", "ההבדל", "בין", "את", "זה", "for", "the", "a", "an", "guide", "gas", "grill"}
     terms: list[str] = []
     for term in re.split(r"[\s/–-]+", f"{title} {keyword}"):
         clean = term.strip(" :|,.")
@@ -793,15 +830,47 @@ def _build_contract_article(title: str, keyword: str, related: list[dict[str, st
         )
 
     if topic_type == "grill_accessory_guide":
+        entity_key = str(profile.get("entity_key") or "generic")
+        if entity_key == "basalt_stones":
+            return (
+                f"<p><strong>{title}</strong> הוא מדריך אביזר לגריל גז שמתמקד ב-{entity}: אבני בזלת, אבני לבה, basalt stones for gas grill ו-lava rocks שמונחות באזור החום כדי לשפר פיזור חום, להפחית התלקחויות ולייצב את העבודה סביב המבערים.</p>\n"
+                + _h2("מה זה", "<p>אבני לבה / אבני בזלת הן אבנים וולקניות עמידות לחום המשמשות כגוף פיזור בין להבת גריל גז לבין רשת הצלייה. במקום לדבר על אביזרים כלליים, כאן המוקד הוא תפקיד האבנים: ספיגת חום, שחרור הדרגתי שלו והפרדה חלקית בין טפטופי שומן לבין להבה פתוחה.</p>")
+                + _h2("איך זה עובד", "<p>איך זה עובד: המבערים מחממים את אבני הבזלת, האבנים מפזרות חום לרוחב האזור ומקטינות נקודות חמות חדות. כאשר שומן מטפטף, חלקו עובר אידוי שומן על פני האבן החמה, מה שתורם ארומה עדינה ומפחית מגע ישיר של שומן בלהבה.</p>")
+                + _h2("יתרונות", "<p>יתרונות מרכזיים של basalt stones הם פיזור חום אחיד יותר, יציבות חום ויציבות טמפרטורה כאשר פותחים וסוגרים מכסה, הפחתת התלקחויות בזמן צלייה שומנית, והגנה מסוימת על מבערים מפני טפטופים ישירים.</p>")
+                + _h2("התקנה ושימוש", "<p>התקנה נכונה נעשית רק בגריל גז שמתוכנן לעבוד עם אבנים או מגש מתאים. מסדרים שכבה אחת מרווחת מעל המבערים, לא דוחסים ערימה עבה, משאירים נתיב זרימת אוויר, ומחממים בהדרגה לפני שמעמיסים מזון שומני.</p>")
+                + _h2("ניקוי ותחזוקה", "<p>ניקוי והחלפה מתחילים בקירור מלא. מסירים חתיכות מזון יבשות, הופכים אבנים לפי צורך כדי לשרוף שאריות בעדינות, ומחליפים אבנים שספגו הרבה שומן או מתפוררות. תחזוקה טובה כוללת בדיקה שגם מגש האבנים והמבערים נשארים פתוחים ולא חסומים.</p>")
+                + _h2("מתי להחליף", "<p>מתי להחליף? מרווחי החלפה תלויים בתדירות הצלייה ובכמות השומן: בשימוש ביתי רגיל בודקים כל כמה חודשים, ובשימוש כבד מחליפים מוקדם יותר כאשר יש ריח שרוף קבוע, התפוררות, סדקים רבים או ירידה בפיזור החום.</p>")
+                + _h2("שיקולי קנייה", "<p>שיקולי קנייה כוללים התאמה לדגם גריל הגז, גודל האבן, עמידות לחום, כמות שמכסה את אזור המבערים בשכבה אחת, והאם היצרן ממליץ על אבני בזלת או על מפזרי חום מתכתיים במקום.</p>")
+                + _h2("טעויות נפוצות", "<ul><li>להוסיף אבני לבה לגריל שלא מיועד לכך ולחסום אוורור.</li><li>ליצור שכבה עבה מדי שמעמיסה חום על המבערים.</li><li>להשאיר אבנים ספוגות שומן לאורך זמן ולצפות שהפחתת התלקחויות תמשיך לעבוד.</li><li>לשטוף אבנים נקבוביות בהרבה מים במקום ניקוי יבש והחלפה כשצריך.</li></ul>")
+                + links
+                + _faq([("האם אבני בזלת מתאימות לכל גריל גז?", "לא, רק אם מבנה הגריל והמגש מאפשרים שימוש בטוח בלי חסימת אוויר."), ("האם lava rocks מפחיתות התלקחויות?", "כן כאשר הן מסודרות נכון ונקיות יחסית; אבנים ספוגות שומן עלולות לעשות ההפך."), ("כל כמה זמן מחליפים?", "בודקים כל כמה חודשים ומחליפים לפי התפוררות, ריח ושינוי בביצועים.")])
+                + "<hr><p><strong>CTA:</strong> אם בוחרים אבני בזלת, התאימו אותן לגריל הגז שלכם ותחזקו אותן כמו רכיב חום — לא כמו קישוט.</p>"
+            )
+        if entity_key == "thermometer":
+            return (
+                f"<p><strong>{title}</strong> הוא מדריך אביזר לגריל שמתמקד ב-{entity}: מדחום לבשר עם meat thermometer probe, קריאה מהירה וניקוי נכון.</p>\n"
+                + _h2("מה זה", "<p>מדחום לבשר הוא אביזר מדידה שמכניסים למרכז חומר הגלם כדי לדעת טמפרטורה פנימית בזמן אמת. יש מדחומי קריאה מהירה לבדיקות נקודתיות ויש פרובים שנשארים בבשר ומתחברים למסך או לאפליקציה.</p>")
+                + _h2("איך זה עובד", "<p>איך זה עובד: חיישן בקצה ה-probe מודד את החום בנקודת המגע. זמן תגובה קצר עוזר לקבל החלטה לפני שהמנה ממשיכה להתבשל, וכיול תקופתי מוודא שהמספרים לא סוטים.</p>")
+                + _h2("יתרונות", "<p>יתרונות המדחום הם פחות ניחושים, פחות פתיחת מכסה, שליטה טובה יותר במידת עשייה, וזיהוי מוקדם של אזורים חמים או קרים על הגריל בלי להסתמך על צבע חיצוני בלבד.</p>")
+                + _h2("התקנה ושימוש", "<p>התקנה ושימוש תלויים בסוג: במדחום קריאה מהירה מכניסים את הקצה למרכז ולא נוגעים בעצם או ברשת; בפרוב קבוע מעבירים כבל במסלול שלא נלחץ במכסה ולא נוגע בלהבה ישירה.</p>")
+                + _h2("ניקוי ותחזוקה", "<p>ניקוי נעשה במטלית לחה וחיטוי עדין לקצה המדידה, בלי להטביע יחידה אלקטרונית במים. תחזוקה כוללת שמירת כבל לא מקופל חזק, בדיקת סוללה וכיול לפי הוראות היצרן.</p>")
+                + _h2("מתי להחליף", "<p>מתי להחליף? כאשר הקריאה איטית מאוד, יש סטייה קבועה גם אחרי כיול, הכבל נסדק, המסך לא יציב או ה-probe קיבל מכה שמייצרת מדידות לא אמינות.</p>")
+                + _h2("שיקולי קנייה", "<p>שיקולי קנייה כוללים זמן תגובה, טווח מדידה, עמידות הכבל, נוחות קריאה בתאורה חזקה, אפשרות כיול, מספר פרובים ואחריות.</p>")
+                + _h2("טעויות נפוצות", "<ul><li>למדוד קרוב לעצם או לשומן עבה במקום במרכז.</li><li>להשאיר מדחום קריאה מהירה בתוך גריל סגור למרות שאינו מיועד לכך.</li><li>לא לנקות probe בין מדידות.</li><li>להתעלם מכיול ולבנות על תחושת יד בלבד.</li></ul>")
+                + links
+                + _faq([("מה עדיף, קריאה מהירה או פרוב קבוע?", "קריאה מהירה מתאימה לבדיקה זריזה; פרוב קבוע מתאים לצלייה ארוכה ומעקב רציף."), ("האם חייבים כיול?", "כן, כיול תקופתי או בדיקת דיוק עוזרים למנוע החלטות שגויות."), ("איך מנקים מדחום?", "מנקים את קצה המדידה אחרי כל שימוש ומרחיקים מים מהיחידה האלקטרונית.")])
+                + "<hr><p><strong>CTA:</strong> בחרו מדחום לפי צורת הבישול שלכם: בדיקות מהירות, מעקב ארוך או כמה נתחים במקביל.</p>"
+            )
         return (
-            f"<p><strong>{title}</strong> הוא מדריך אביזר לגריל: מה זה, איך זה עובד, אילו יתרונות מקבלים, איך מבצעים התקנה ושימוש, ומה חשוב בניקוי ותחזוקה.</p>\n"
+            f"<p><strong>{title}</strong> הוא מדריך אביזר לגריל עבור {keyword}: מה זה, איך זה עובד, אילו יתרונות מקבלים, איך מבצעים התקנה ושימוש, ומה חשוב בניקוי ותחזוקה.</p>\n"
             + _h2("מה זה", f"<p>{keyword} הוא אביזר שנועד לפתור צורך נקודתי בעבודה עם גריל גז או גריל אחר: שליטה טובה יותר, בטיחות, ניקוי נוח או תוצאה עקבית.</p>")
-            + _h2("איך זה עובד", "<p>איך זה עובד תלוי באביזר: חלקם משפרים פיזור חום, יציבות חום ומפחיתים התלקחויות, חלקם מגנים על הידיים, וחלקם משפרים אחיזה, ניקוי או מדידה.</p>")
-            + _h2("יתרונות", "<p>יתרונות מרכזיים הם עבודה בטוחה יותר, פחות טעויות, חיסכון בזמן ותוצאה צפויה יותר לאורך שימושים חוזרים.</p>")
+            + _h2("איך זה עובד", f"<p>איך זה עובד תלוי ב-{keyword}: בודקים מה הבעיה המדויקת שהאביזר פותר, איפה הוא יושב ביחס לרשת או למבערים, ואיך הוא משפיע על בטיחות ותפעול.</p>")
+            + _h2("יתרונות", f"<p>יתרונות מרכזיים של {keyword} צריכים להיות מדידים: פחות טעויות, חיסכון בזמן, שליטה טובה יותר או תחזוקה פשוטה יותר לאורך שימושים חוזרים.</p>")
             + _h2("התקנה ושימוש", "<p>התקנה ושימוש צריכים להתאים להוראות היצרן ולמבנה הגריל. לא חוסמים פתחי אוויר, לא מעמיסים חלקים ולא משתמשים באביזר שחוק.</p>")
-            + _h2("ניקוי ותחזוקה", "<p>ניקוי והחלפה לצד תחזוקה מאריכים חיים: מקררים לפני ניקוי, מסירים שומן יבש, מייבשים היטב ושומרים במקום שלא יפגע בחומר.</p>")
+            + _h2("ניקוי ותחזוקה", f"<p>ניקוי ותחזוקה של {keyword} מתחילים בקירור מלא, הסרת שומן יבש או לכלוך, ייבוש ושמירה במקום שלא יפגע בחומר או במנגנון.</p>")
             + _h2("מתי להחליף", "<p>מתי להחליף? כאשר יש סדקים, שחיקה, חלודה, התפוררות או ירידה מורגשת בביצועים ובבטיחות.</p>")
             + _h2("שיקולי קנייה", "<p>שיקולי קנייה כוללים התאמה לדגם הגריל, איכות חומר, אחריות, קלות ניקוי וגודל שמתאים לשטח העבודה.</p>")
+            + _h2("טעויות נפוצות", "<ul><li>לקנות לפי שם כללי ולא לפי התאמה לגריל.</li><li>להתעלם מהוראות יצרן.</li><li>לא לנקות אחרי שימושים שומניים.</li></ul>")
             + links
             + _faq([("האם כל אביזר מתאים לכל גריל?", "לא, בודקים התאמה למידות ולמבנה."), ("איך לשמור לאורך זמן?", "ניקוי עדין וייבוש אחרי שימוש."), ("מה חשוב לפני קנייה?", "התאמה, חומר ואחריות.")])
             + "<hr><p><strong>CTA:</strong> בחרו אביזר לפי הבעיה שהוא פותר בפועל בגריל שלכם.</p>"
@@ -878,7 +947,8 @@ def inject_internal_links_into_html(article_html: str, related: list[dict[str, s
 
 def _topic_image_prompts(keyword: str, topic_profile: dict[str, object]) -> tuple[str, list[dict[str, str]]]:
     contract = topic_profile.get("contract") if isinstance(topic_profile.get("contract"), dict) else {}
-    pattern = str(contract.get("image_prompt_pattern") or "realistic outdoor BBQ guide photo focused on {keyword}, no text")
+    image_policy = topic_profile.get("image_policy") if isinstance(topic_profile.get("image_policy"), dict) else {}
+    pattern = str(image_policy.get("featured_prompt_pattern") or contract.get("image_prompt_pattern") or "realistic outdoor BBQ guide photo focused on {keyword}, no text")
     featured = pattern.format(keyword=keyword)
     topic_type = str(topic_profile.get("topic_type") or "fallback_generic")
     section_prompts = [
