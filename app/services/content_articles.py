@@ -636,16 +636,129 @@ def _normalize_hebrew(value: str) -> str:
 
 
 
+
+def _semantic_key(value: str) -> str:
+    normalized = _normalize_hebrew(_plain_text(value or ""))
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized
+
+
+def _dedupe_json_list(items: list[object], *, key_fields: tuple[str, ...]) -> list[object]:
+    seen: set[str] = set()
+    deduped: list[object] = []
+    for item in items:
+        if isinstance(item, dict):
+            key_parts = [str(item.get(field) or "") for field in key_fields]
+            key = _semantic_key(" ".join(key_parts) or json.dumps(item, ensure_ascii=False, sort_keys=True))
+        else:
+            key = _semantic_key(str(item))
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def _dedupe_faq_schema(faq_schema: dict[str, object]) -> dict[str, object]:
+    if not isinstance(faq_schema, dict):
+        return faq_schema
+    main_entity = faq_schema.get("mainEntity")
+    if isinstance(main_entity, list):
+        faq_schema = dict(faq_schema)
+        faq_schema["mainEntity"] = _dedupe_json_list(main_entity, key_fields=("name", "question"))
+    return faq_schema
+
+
+def _dedupe_article_html(html: str) -> str:
+    """Remove duplicate headings, paragraphs and repeated FAQ/list blocks before saving."""
+    cleaned = html or ""
+    seen_headings: set[tuple[str, str]] = set()
+
+    def heading_repl(match: re.Match[str]) -> str:
+        level = match.group(1).lower()
+        attrs = match.group(2) or ""
+        inner = match.group(3) or ""
+        key = (level, _semantic_key(inner))
+        if not key[1] or key in seen_headings:
+            return ""
+        seen_headings.add(key)
+        return f"<{level}{attrs}>{inner}</{level}>"
+
+    cleaned = re.sub(r"<(h[2-4])([^>]*)>(.*?)</\1>", heading_repl, cleaned, flags=re.IGNORECASE | re.DOTALL)
+
+    seen_paragraphs: set[str] = set()
+
+    def paragraph_repl(match: re.Match[str]) -> str:
+        attrs = match.group(1) or ""
+        inner = match.group(2) or ""
+        key = _semantic_key(inner)
+        if not key or key in seen_paragraphs:
+            return ""
+        seen_paragraphs.add(key)
+        return f"<p{attrs}>{inner}</p>"
+
+    cleaned = re.sub(r"<p([^>]*)>(.*?)</p>", paragraph_repl, cleaned, flags=re.IGNORECASE | re.DOTALL)
+
+    seen_faq_blocks: set[str] = set()
+
+    def faq_list_repl(match: re.Match[str]) -> str:
+        tag = match.group(1).lower()
+        attrs = match.group(2) or ""
+        inner = match.group(3) or ""
+        if "שאל" not in _semantic_key(inner):
+            return match.group(0)
+        key = _semantic_key(inner)
+        if not key or key in seen_faq_blocks:
+            return ""
+        seen_faq_blocks.add(key)
+        return f"<{tag}{attrs}>{inner}</{tag}>"
+
+    cleaned = re.sub(r"<(ul|ol)([^>]*)>(.*?)</\1>", faq_list_repl, cleaned, flags=re.IGNORECASE | re.DOTALL)
+    return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+
+
+def _normalize_meta_title(title: str) -> str:
+    cleaned = re.sub(r"\s+", " ", (title or "")).strip()
+    tokens = cleaned.split()
+    for size in range(min(5, len(tokens) // 2), 0, -1):
+        collapsed: list[str] = []
+        i = 0
+        while i < len(tokens):
+            phrase = tokens[i : i + size]
+            if phrase and tokens[i + size : i + 2 * size] == phrase:
+                collapsed.extend(phrase)
+                i += size * 2
+                while tokens[i : i + size] == phrase:
+                    i += size
+            else:
+                collapsed.append(tokens[i])
+                i += 1
+        tokens = collapsed
+    cleaned = " ".join(tokens)
+    cleaned = re.sub(r"(.{2,}?)(?:\s+\1)+", r"\1", cleaned)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _postprocess_article_assets(
+    body: str,
+    meta_title: str,
+    faq_schema: dict[str, object] | None = None,
+) -> tuple[str, str, dict[str, object] | None]:
+    return _dedupe_article_html(body), _normalize_meta_title(meta_title), (_dedupe_faq_schema(faq_schema) if faq_schema is not None else None)
+
+
 def _topic_synonyms(topic: str) -> list[str]:
     normalized = _normalize_hebrew(topic)
     lower = (topic or "").lower()
     syn = [topic]
+    if any(term in normalized for term in ["כנפ", "עוף", "עופות", "פרגית"]):
+        syn += ["כנפיים", "כנפי עוף", "עוף", "chicken", "wings", "poultry", "רוטב bbq", "גלייז", "מדחום לבשר", "מלקחיים"]
     if "פיקניה" in normalized or "picanha" in lower:
         syn += ["picanha", "picanha steak", "סטייק פיקניה", "נתח פיקניה", "beef steak", "meat", "גריל גז", "גריל פחמים"]
     if "בזלת" in normalized or "לבה" in normalized or "lava" in lower or "basalt" in lower:
         syn += ["אבני בזלת", "אבני לבה", "אבני לבה לגריל", "אבני בזלת לגריל גז", "basalt", "basalt stones", "lava stones", "lava rocks", "grill accessories", "gas grill accessories", "פיזור חום", "התלקחויות"]
     if "שבבי" in normalized or "עישון" in normalized:
-        syn += ["wood chips", "smoker", "smoking wood", "עישון", "מעשנה"]
+        syn += ["wood chips", "smoker", "smoking", "smoking wood", "עישון", "מעשנה"]
     if "מדחום" in normalized or "thermometer" in lower:
         syn += ["מדחום לבשר", "מדחום דיגיטלי לבשר", "מדחום ליבה לבשר", "מדחום לגריל גז", "מדחום למעשנה", "מדחום פרוב", "thermometer", "meat thermometer", "probe", "instant read", "accessories", "אביזרים לגריל"]
     if "גריל" in normalized or "accessor" in lower:
@@ -666,7 +779,36 @@ def _match_terms_for_topic(topic: str) -> list[str]:
         terms.extend(["מדחום לבשר", "מדחום דיגיטלי לבשר", "מדחום ליבה לבשר", "מדחום לגריל גז", "מדחום למעשנה", "מדחום פרוב", "thermometer", "meat thermometer", "probe", "instant read"] )
     if "פיקניה" in normalized or "picanha" in lower:
         terms.extend(["פיקניה", "פיקניה על הגריל", "סטייק פיקניה", "נתח פיקניה", "picanha", "picanha steak", "גריל גז", "גריל פחמים"])
+    if any(word in normalized for word in ["כנפ", "עוף", "עופות", "פרגית"]):
+        terms.extend(["כנפיים", "כנפי עוף", "עוף", "עופות", "chicken", "wings", "poultry", "רוטב bbq", "גלייז", "מדחום לבשר", "מלקחיים"])
     return list(dict.fromkeys([t.strip() for t in terms if t.strip()]))
+
+
+def _topic_link_policy(topic: str) -> dict[str, set[str]]:
+    normalized = _normalize_hebrew(topic)
+    lower = (topic or "").lower()
+    if any(term in normalized for term in ["כנפ", "עוף", "עופות", "פרגית"]):
+        return {
+            "must": {"כנפ", "עוף", "עופות", "chicken", "wings", "poultry", "מדחום", "thermometer", "רוטב", "bbq", "גלייז", "מלקחיים", "tongs"},
+            "blocked": {"קבב", "kebab", "קינמון", "cinnamon", "bear", "claws", "טופר", "מבער", "burner", "מחזיק", "holder", "יצוק", "cast iron"},
+        }
+    return {"must": set(), "blocked": set()}
+
+
+def _passes_link_semantic_gate(topic: str, candidate_text: str, page_type: str, scores: dict[str, object]) -> bool:
+    normalized_text = _normalize_hebrew(candidate_text)
+    lower_text = (candidate_text or "").lower()
+    policy = _topic_link_policy(topic)
+    blocked = policy["blocked"]
+    if any(term and (term in normalized_text or term in lower_text) for term in blocked):
+        return False
+    exact_or_entity = float(scores.get("entity_match_score") or 0) >= 24 or float(scores.get("keyword_match_score") or 0) >= 10
+    must = policy["must"]
+    if must and page_type in {"product", "category"}:
+        return any(term and (term in normalized_text or term in lower_text) for term in must) and exact_or_entity
+    if page_type == "product":
+        return exact_or_entity or float(scores.get("relevance_score") or 0) >= 50
+    return exact_or_entity or float(scores.get("relevance_score") or 0) >= 50
 
 
 def _semantic_topic_match_score(topic: str, product: object) -> float:
@@ -764,7 +906,10 @@ def _discover_related_links(db: Session, topic: str, limit: int = 6) -> tuple[li
             scores["match_reasons"] = [*list(scores["match_reasons"]), "התאמה סמנטית למוצר ISTORE"]
         if topic == "שבבי עץ לעישון":
             scores["relevance_score"] = min(100.0, float(scores["relevance_score"]) + _wood_link_priority_score(p))
-        if float(scores["relevance_score"]) < 40:
+        if not _passes_link_semantic_gate(topic, candidate_text, "product", scores):
+            excluded_low.append({"title": title, "url": url, "excluded_reason": "semantic_gate", **scores})
+            continue
+        if float(scores["relevance_score"]) < 50:
             if float(scores["relevance_score"]) > 0:
                 excluded_low.append({"title": title, "url": url, **scores})
             continue
@@ -779,7 +924,7 @@ def _discover_related_links(db: Session, topic: str, limit: int = 6) -> tuple[li
             continue
         candidate_text = f"{title} {e.get('slug','')} {url} {' '.join(str(t) for t in (e.get('normalized_tokens') or e.get('tokens') or []))}"
         scores = _score_link_candidate(topic, candidate_text, link_type, terms)
-        if float(scores["relevance_score"]) >= 40:
+        if float(scores["relevance_score"]) >= 50 and _passes_link_semantic_gate(topic, candidate_text, link_type, scores):
             default_reason = "מוצר תואם ממפת האתר" if link_type == "product" else ("קטגוריה רלוונטית באתר" if link_type == "category" else "עמוד מידע רלוונטי")
             reason = "; ".join(list(scores["match_reasons"])[:3]) or default_reason
             out.append({"title": title, "url": url, "type": link_type, "page_type": link_type, "semantic_topic_match_score": float(scores["relevance_score"]), "relatedness_score": float(scores["relevance_score"]), "reason": reason, "lastmod": e.get("lastmod"), **scores})
@@ -795,6 +940,15 @@ def _discover_related_links(db: Session, topic: str, limit: int = 6) -> tuple[li
         if current is None or float(item.get("relevance_score") or 0) > float(current.get("relevance_score") or 0):
             dedup[url] = item
     out = list(dedup.values())
+    if not out and not _topic_link_policy(topic)["must"]:
+        fallback_by_url: dict[str, dict[str, str | float]] = {}
+        for item in excluded_low:
+            if float(item.get("relevance_score") or 0) < 40:
+                continue
+            url = str(item.get("url") or "")
+            if url and url not in fallback_by_url:
+                fallback_by_url[url] = {**item, "reason": "Fallback כללי אחרי סינון סמנטי ללא התאמות חזקות"}
+        out = list(fallback_by_url.values())[:limit]
     type_priority = {"product": 6, "category": 5, "brand": 3, "info": 2, "blog": 1}
     out.sort(key=lambda item: (float(item.get("relevance_score", 0)), type_priority.get(str(item.get("type") or ""), 0), float(item.get("entity_match_score") or 0)), reverse=True)
     trimmed = out[: max(3, min(limit, 6))]
@@ -1105,7 +1259,7 @@ def inject_internal_links_into_html(article_html: str, related: list[dict[str, s
     injected: list[dict[str, str]] = []
     used_urls: set[str] = set()
     used_anchors: set[str] = set()
-    eligible = [link for link in related if float(link.get("relevance_score") or 0) >= 40 and str(link.get("url") or "").strip()]
+    eligible = [link for link in related if float(link.get("relevance_score") or 0) >= 50 and str(link.get("url") or "").strip()]
     for link in eligible:
         if len(injected) >= 6:
             break
@@ -1236,11 +1390,12 @@ def _build_meta_title(entity: str, high_intent_phrase: str, topic_type: str) -> 
         base = f"{high_intent_phrase} – מדריך קנייה ושימוש"
     else:
         base = f"{high_intent_phrase} – מדריך מעשי"
-    full = f"{base} | Compass Grill"
+    full = _normalize_meta_title(f"{base} | Compass Grill")
     if len(full) <= 70:
         return full
-    short = f"{high_intent_phrase} – מדריך מלא | Compass Grill"
-    return short if len(short) <= 70 else f"{entity} על הגריל – מדריך מלא | Compass Grill"
+    short = _normalize_meta_title(f"{high_intent_phrase} – מדריך מלא | Compass Grill")
+    fallback = _normalize_meta_title(f"{entity} על הגריל – מדריך מלא | Compass Grill")
+    return short if len(short) <= 70 else fallback
 
 
 def _keyword_groups(entity: str, title: str, topic_profile: dict[str, object]) -> dict[str, list[str] | str]:
@@ -1445,11 +1600,13 @@ def generate_daily_article_draft(db: Session, *, randomize: bool = False) -> tup
     featured_prompt, section_prompts = _topic_image_prompts(keyword, topic_profile)
     body, _ = _remove_h1_tags(_build_article_html(title, keyword, related, topic_profile=topic_profile))
     body, injected_links = inject_internal_links_into_html(body, related)
+    body, _, _ = _postprocess_article_assets(body, "")
     validation = validate_article_relevance(title, keyword, body, topic_profile, image_prompt=featured_prompt, internal_links=injected_links or related)
     regeneration_count = 0
     if not validation["validation_passed"]:
         regenerated_body, _ = _remove_h1_tags(_build_article_html(title, keyword, related, topic_profile=topic_profile))
         body, injected_links = inject_internal_links_into_html(regenerated_body, related)
+        body, _, _ = _postprocess_article_assets(body, "")
         regeneration_count = 1
         validation = validate_article_relevance(title, keyword, body, topic_profile, image_prompt=featured_prompt, internal_links=injected_links or related)
     faq_schema = {
@@ -1463,6 +1620,7 @@ def generate_daily_article_draft(db: Session, *, randomize: bool = False) -> tup
     }
     seo_metadata = build_topic_seo_metadata(keyword, title, topic_profile)
     meta_title, meta_description = str(seo_metadata["meta_title"]), str(seo_metadata["meta_description"])
+    body, meta_title, faq_schema = _postprocess_article_assets(body, meta_title, faq_schema)
     draft = ContentArticleDraft(
         status="READY_FOR_REVIEW" if validation["validation_passed"] else "CONTENT_DRAFT", topic_title=title, title=title, slug=slug,
         meta_title=meta_title,
@@ -1500,15 +1658,18 @@ def generate_topic_article_draft(
     featured_prompt, section_prompts = _topic_image_prompts(focus_keyword, topic_profile)
     body, _ = _remove_h1_tags(_build_article_html(topic_title, focus_keyword, related, topic_profile=topic_profile))
     body, injected_links = inject_internal_links_into_html(body, related)
+    body, _, _ = _postprocess_article_assets(body, "")
     validation = validate_article_relevance(topic_title, focus_keyword, body, topic_profile, image_prompt=featured_prompt, internal_links=injected_links or related)
     regeneration_count = 0
     if not validation["validation_passed"]:
         regenerated_body, _ = _remove_h1_tags(_build_article_html(topic_title, focus_keyword, related, topic_profile=topic_profile))
         body, injected_links = inject_internal_links_into_html(regenerated_body, related)
+        body, _, _ = _postprocess_article_assets(body, "")
         regeneration_count = 1
         validation = validate_article_relevance(topic_title, focus_keyword, body, topic_profile, image_prompt=featured_prompt, internal_links=injected_links or related)
     seo_metadata = build_topic_seo_metadata(focus_keyword, topic_title, topic_profile)
     meta_title, meta_description = str(seo_metadata["meta_title"]), str(seo_metadata["meta_description"])
+    body, meta_title, _ = _postprocess_article_assets(body, meta_title)
     draft = ContentArticleDraft(
         status="READY_FOR_REVIEW" if validation["validation_passed"] else "CONTENT_DRAFT", topic_title=topic_title, title=topic_title, slug=slug,
         meta_title=meta_title,

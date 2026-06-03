@@ -454,6 +454,10 @@ def preview_generated_content(approval: IStoreSEOApproval, db: Session | None = 
         product_name,
         pages,
     )
+    keywords = stored_preview.get("seo_keywords") or stored_preview.get("expanded_keywords") or stored_preview.get("keywords")
+    if not isinstance(keywords, list):
+        keywords = [stored_preview.get("focus_keyword") or product_name]
+    keywords = [str(keyword).strip() for keyword in keywords if str(keyword).strip()]
     schema = stored_preview.get("schema_suggestions") or _schema_suggestions(
         approval.target_type,
         product_name,
@@ -467,6 +471,7 @@ def preview_generated_content(approval: IStoreSEOApproval, db: Session | None = 
         "suggested_title": content_title,
         "suggested_meta_title": meta_title,
         "suggested_meta_description": meta_description,
+        "keywords": keywords,
         "html": preview_html,
         "faq": faq,
         "internal_links": internal_links,
