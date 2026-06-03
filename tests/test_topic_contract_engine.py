@@ -85,3 +85,51 @@ def test_end_to_end_random_contract_articles_are_distinct(db_session: Session, m
         assert _article_quality_summary(drafts[i])["publish_readiness"] == "READY_FOR_REVIEW"
         for other in bodies[i + 1 :]:
             assert SequenceMatcher(None, body, other).ratio() < 0.72
+
+
+def test_accessory_topic_uses_basalt_entity_contract(db_session: Session) -> None:
+    draft = service.generate_topic_article_draft(
+        db_session,
+        topic_title="Basalt stones for gas grill",
+        focus_keyword="Basalt stones for gas grill",
+        target_intent="commercial_informational",
+    )
+    profile = service._classify_topic(draft.topic_title, draft.focus_keyword, draft.target_intent)
+
+    assert profile["topic_type"] == "grill_accessory_guide"
+    assert profile["entity_key"] == "basalt_stones"
+    for term in [
+        "אבני לבה",
+        "אבני בזלת",
+        "lava rocks",
+        "פיזור חום",
+        "הפחתת התלקחויות",
+        "מבערים",
+        "אידוי שומן",
+        "יציבות טמפרטורה",
+        "מרווחי החלפה",
+        "טעויות נפוצות",
+    ]:
+        assert term in draft.article_body
+    assert "probe" not in draft.article_body
+    assert "basalt" in draft.featured_image_prompt.lower()
+    assert "lava rocks" in draft.featured_image_prompt.lower()
+
+
+def test_accessory_topic_uses_thermometer_entity_contract(db_session: Session) -> None:
+    draft = service.generate_topic_article_draft(
+        db_session,
+        topic_title="איך לבחור מדחום לבשר",
+        focus_keyword="מדחום לבשר",
+        target_intent="commercial_informational",
+    )
+    profile = service._classify_topic(draft.topic_title, draft.focus_keyword, draft.target_intent)
+
+    assert profile["topic_type"] == "grill_accessory_guide"
+    assert profile["entity_key"] == "thermometer"
+    for term in ["מדחום", "probe", "קריאה מהירה", "כיול", "טמפרטורה פנימית", "זמן תגובה", "ניקוי", "טעויות נפוצות"]:
+        assert term in draft.article_body
+    for basalt_term in ["lava rocks", "אידוי שומן", "הפחתת התלקחויות", "אבני לבה"]:
+        assert basalt_term not in draft.article_body
+    assert "thermometer" in draft.featured_image_prompt.lower()
+    assert "basalt" not in draft.featured_image_prompt.lower()
