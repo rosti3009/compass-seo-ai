@@ -1466,8 +1466,20 @@ def _article_generation_response(draft: ContentArticleDraft, endpoint_used: str)
         "primary_keyword": seo_metadata.get("primary_keyword"),
         "secondary_keywords": seo_metadata.get("secondary_keywords"),
         "long_tail_keywords": seo_metadata.get("long_tail_keywords"),
+        "question_keywords": seo_metadata.get("question_keywords"),
+        "commercial_keywords": seo_metadata.get("commercial_keywords") or seo_metadata.get("usage_keywords"),
         "seo_keywords": seo_metadata.get("seo_keywords"),
         "seo_score": seo_metadata.get("seo_score"),
+        "meta_title_score": seo_metadata.get("meta_title_score"),
+        "meta_description_score": seo_metadata.get("meta_description_score"),
+        "selected_internal_links": debug.get("selected_internal_links"),
+        "selected_products": debug.get("selected_products"),
+        "excluded_low_relevance_links": debug.get("excluded_low_relevance_links"),
+        "link_relevance_score": debug.get("link_relevance_score"),
+        "sitemap_loaded_count": debug.get("sitemap_loaded_count"),
+        "products_loaded_count": debug.get("products_loaded_count"),
+        "categories_loaded_count": debug.get("categories_loaded_count"),
+        "final_word_count": debug.get("final_word_count"),
         "title_body_relevance_score": debug.get("title_body_relevance_score"),
         "validation_passed": debug.get("validation_passed"),
         "missing_required_terms": debug.get("missing_required_terms"),
@@ -1498,6 +1510,8 @@ def _draft_debug(draft: ContentArticleDraft, slug_source: str = "title") -> dict
     link_debug = getattr(draft, "link_match_debug", {})
     topic_profile = classify_topic(draft.topic_title or "", draft.focus_keyword or "", draft.target_intent or "")
     internal_links = json.loads(draft.internal_links_json or "[]") if draft.internal_links_json else []
+    selected_products = json.loads(draft.suggested_related_products_json or "[]") if draft.suggested_related_products_json else []
+    link_scores = [float(item.get("relevance_score") or item.get("semantic_topic_match_score") or 0) for item in selected_products if isinstance(item, dict)]
     validation_debug = validate_article_relevance(
         draft.title or draft.topic_title or "",
         draft.focus_keyword or "",
@@ -1529,6 +1543,10 @@ def _draft_debug(draft: ContentArticleDraft, slug_source: str = "title") -> dict
         "forbidden_terms_removed": removed_terms,
         "h1_removed": "<h1" not in body.lower(),
         "topic_keywords_detected": _topic_keywords_detected(body),
+        "selected_internal_links": internal_links,
+        "selected_products": selected_products,
+        "link_relevance_score": round(sum(link_scores) / len(link_scores), 1) if link_scores else 0.0,
+        "final_word_count": len(re.findall(r"[\w\u0590-\u05FF]+", re.sub(r"<[^>]+>", " ", body or ""))),
         **{
             key: value
             for key, value in build_topic_seo_metadata(
@@ -1543,6 +1561,8 @@ def _draft_debug(draft: ContentArticleDraft, slug_source: str = "title") -> dict
                 "usage_keywords",
                 "seo_keywords",
                 "seo_score",
+                "meta_title_score",
+                "meta_description_score",
             }
         },
         "article_template_used": "fallback_generic" if topic_profile.get("topic_type") == "fallback_generic" else "topic_type_contract",

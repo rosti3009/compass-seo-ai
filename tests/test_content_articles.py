@@ -15,6 +15,7 @@ from app.services.content_articles import (
     INTERNAL_SEO_CONTRACT_TERMS,
     _classify_topic,
     build_topic_seo_metadata,
+    generate_topic_article_draft,
 )
 
 
@@ -1091,3 +1092,107 @@ def test_charcoal_specialized_output_reaches_response_workspace_and_publish_payl
         assert term in description
     for term in generic_terms:
         assert term not in description
+
+
+def _word_count_from_html(html: str) -> int:
+    import re
+
+    return len(re.findall(r"[\w\u0590-\u05FF]+", re.sub(r"<[^>]+>", " ", html or "")))
+
+
+def test_thermometer_seo_keywords_meta_and_depth(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.services.content_articles._load_sitemap_index", lambda force_refresh=False: ([], {"sitemap_loaded_count": 0, "products_loaded_count": 0, "categories_loaded_count": 0}))
+
+    draft = generate_topic_article_draft(
+        db_session,
+        topic_title="איך לבחור מדחום לבשר",
+        focus_keyword="מדחום לבשר",
+        target_intent="commercial_informational",
+    )
+    profile = _classify_topic(draft.topic_title, draft.focus_keyword, draft.target_intent)
+    metadata = build_topic_seo_metadata(draft.focus_keyword, draft.title, profile)
+
+    assert len(metadata["seo_keywords"]) >= 8
+    for phrase in ["מדחום דיגיטלי לבשר", "מדחום ליבה לבשר", "מדחום לגריל גז"]:
+        assert phrase in metadata["seo_keywords"]
+    assert not any(term in draft.meta_title for term in INTERNAL_SEO_CONTRACT_TERMS)
+    assert "מדחום לבשר" in draft.meta_description
+    assert "זמן תגובה" in draft.meta_description or "כיול" in draft.meta_description
+    assert _word_count_from_html(draft.article_body) >= 700
+
+
+def test_basalt_seo_metadata_and_category_fallback(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.services.content_articles as articles
+
+    category_url = "https://compassgrill.co.il/categories/grill-accessories"
+    entries = [
+        {
+            "url": category_url,
+            "slug": "grill-accessories-basalt-lava-stones",
+            "title": "אביזרים לגריל גז אבני לבה",
+            "type": "category",
+            "tokens": articles._tokenize_hebrew("אביזרים לגריל גז אבני לבה בזלת פיזור חום"),
+        }
+    ]
+    monkeypatch.setattr("app.services.content_articles._load_sitemap_index", lambda force_refresh=False: (entries, {"sitemap_loaded_count": 1, "products_loaded_count": 0, "categories_loaded_count": 1}))
+
+    draft = articles.generate_topic_article_draft(
+        db_session,
+        topic_title="אבני בזלת לגריל",
+        focus_keyword="אבני בזלת לגריל",
+        target_intent="commercial_informational",
+    )
+    profile = _classify_topic(draft.topic_title, draft.focus_keyword, draft.target_intent)
+    metadata = build_topic_seo_metadata(draft.focus_keyword, draft.title, profile)
+    links = __import__("json").loads(draft.suggested_related_products_json)
+
+    assert len(metadata["seo_keywords"]) >= 8
+    for phrase in ["אבני לבה לגריל", "פיזור חום בגריל גז", "ניקוי אבני בזלת"]:
+        assert phrase in metadata["seo_keywords"]
+    assert "how_to" not in draft.meta_title
+    assert "accessory" not in draft.meta_title
+    assert "פיזור חום" in draft.meta_description
+    assert "התלקחויות" in draft.meta_description
+    assert any(link["url"] == category_url and link.get("type") == "category" for link in links)
+
+
+def test_picanha_seo_keywords_and_natural_title() -> None:
+    profile = _classify_topic("פיקניה", "פיקניה", "how-to")
+    metadata = build_topic_seo_metadata("פיקניה", "פיקניה", profile)
+
+    assert len(metadata["seo_keywords"]) >= 8
+    for phrase in ["פיקניה על הגריל", "טמפרטורת פיקניה", "Reverse Sear פיקניה"]:
+        assert phrase in metadata["seo_keywords"]
+    assert metadata["meta_title"].startswith("איך לצלות פיקניה")
+    assert not any(term in metadata["meta_title"] for term in INTERNAL_SEO_CONTRACT_TERMS)
+
+
+def test_internal_links_are_selected_injected_and_unrelated_excluded(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.services.content_articles as articles
+
+    db_session.add_all(
+        [
+            IStoreProduct(istore_product_id="thermo", product_name="מדחום דיגיטלי לבשר", slug="digital-meat-thermometer", product_url="https://compassgrill.co.il/products/meat-thermometer", category="אביזרים לגריל"),
+            IStoreProduct(istore_product_id="basalt", product_name="אבני בזלת לגריל גז", slug="basalt-lava-stones", product_url="https://compassgrill.co.il/products/basalt-stones", category="אביזרים לגריל"),
+            IStoreProduct(istore_product_id="picanha", product_name="פיקניה מובחרת", slug="picanha-steak", product_url="https://compassgrill.co.il/products/picanha", category="בשר לגריל"),
+            IStoreProduct(istore_product_id="sofa", product_name="ספה לגינה", slug="garden-sofa", product_url="https://compassgrill.co.il/products/garden-sofa", category="ריהוט גן"),
+        ]
+    )
+    db_session.commit()
+    entries = [
+        {"url": "https://compassgrill.co.il/categories/grill-accessories", "slug": "grill-accessories", "title": "אביזרים לגריל", "type": "category", "tokens": articles._tokenize_hebrew("אביזרים לגריל מדחום לבשר אבני בזלת")},
+        {"url": "https://compassgrill.co.il/products/picanha", "slug": "picanha", "title": "פיקניה", "type": "product", "tokens": articles._tokenize_hebrew("פיקניה על הגריל")},
+    ]
+    monkeypatch.setattr("app.services.content_articles._load_sitemap_index", lambda force_refresh=False: (entries, {"sitemap_loaded_count": 1, "products_loaded_count": 1, "categories_loaded_count": 1}))
+
+    links, debug = articles._discover_related_links(db_session, "מדחום לבשר", limit=6)
+    body = "<p>מדחום לבשר מאפשר מדידה מדויקת בגריל.</p><p>בחירת אביזרים נכונה משפרת את התוצאה.</p>"
+    injected_body, injected = articles.inject_internal_links_into_html(body, links)
+
+    assert any("thermometer" in link["url"] for link in links)
+    assert any("grill-accessories" in link["url"] for link in links)
+    assert "garden-sofa" not in {link["url"].split("/")[-1] for link in links}
+    assert injected
+    assert "<a href='https://compassgrill.co.il/products/meat-thermometer'>" in injected_body
+    assert all(float(link.get("relevance_score", 0)) >= 40 for link in links)
+    assert debug["excluded_low_relevance_links"]
