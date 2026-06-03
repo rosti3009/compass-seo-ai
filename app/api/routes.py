@@ -40,6 +40,7 @@ from app.integrations.istore import IStoreAPIError, IStoreClient, MissingIStoreS
 from app.integrations.openai_client import OpenAIClient
 from app.services.content_articles import (
     GENERIC_FILLER_PHRASES,
+    GENERATOR_VERSION,
     _classify_topic as classify_topic,
     build_topic_seo_metadata,
     validate_article_relevance,
@@ -1469,6 +1470,7 @@ def _article_generation_response(draft: ContentArticleDraft, endpoint_used: str)
         "question_keywords": seo_metadata.get("question_keywords"),
         "commercial_keywords": seo_metadata.get("commercial_keywords") or seo_metadata.get("usage_keywords"),
         "seo_keywords": seo_metadata.get("seo_keywords"),
+        "expanded_keywords": seo_metadata.get("seo_keywords"),
         "seo_score": seo_metadata.get("seo_score"),
         "meta_title_score": seo_metadata.get("meta_title_score"),
         "meta_description_score": seo_metadata.get("meta_description_score"),
@@ -1476,9 +1478,13 @@ def _article_generation_response(draft: ContentArticleDraft, endpoint_used: str)
         "selected_products": debug.get("selected_products"),
         "excluded_low_relevance_links": debug.get("excluded_low_relevance_links"),
         "link_relevance_score": debug.get("link_relevance_score"),
+        "internal_link_index_status": debug.get("internal_link_index_status"),
         "sitemap_loaded_count": debug.get("sitemap_loaded_count"),
         "products_loaded_count": debug.get("products_loaded_count"),
         "categories_loaded_count": debug.get("categories_loaded_count"),
+        "link_candidates_count": debug.get("link_candidates_count") or debug.get("internal_link_candidates"),
+        "internal_link_candidates": debug.get("internal_link_candidates"),
+        "index_refreshed_at": debug.get("index_refreshed_at"),
         "final_word_count": debug.get("final_word_count"),
         "title_body_relevance_score": debug.get("title_body_relevance_score"),
         "validation_passed": debug.get("validation_passed"),
@@ -1527,7 +1533,7 @@ def _draft_debug(draft: ContentArticleDraft, slug_source: str = "title") -> dict
     forbidden_terms = topic_profile.get("forbidden_terms", [])
     removed_terms = [term for term in forbidden_terms if term and term not in body]
     return {
-        "generator_version": "v3-topic-contract-engine-2026-06-02",
+        "generator_version": GENERATOR_VERSION,
         "slug_source": slug_source,
         "article_brief": topic_profile.get("article_brief"),
         "main_entity": topic_profile.get("main_entity"),
