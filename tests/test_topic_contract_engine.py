@@ -234,3 +234,107 @@ def test_poultry_semantic_gate_rejects_unrelated_products() -> None:
         assert not service._passes_link_semantic_gate(topic, candidate, "product", scores)
     related_scores = service._score_link_candidate(topic, related, "product", terms)
     assert service._passes_link_semantic_gate(topic, related, "product", related_scores)
+
+
+def _mock_link(title: str, url_slug: str, role: str, score: float = 86.0, page_type: str = "product") -> dict[str, object]:
+    return {
+        "title": title,
+        "url": f"https://compassgrill.co.il/{url_slug}",
+        "type": page_type,
+        "page_type": page_type,
+        "link_role": role,
+        "relevance_score": score,
+        "relatedness_score": score,
+        "entity_match_score": 38.0 if role == "exact_entity" else 0.0,
+        "keyword_match_score": 20.0,
+        "reason": f"{role}; בדיקת רלוונטיות לנושא",
+    }
+
+
+def test_brisket_final_quality_contextual_links_and_alt(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    links = [
+        _mock_link("בריסקט פרימיום לעישון", "products/brisket", "exact_entity"),
+        _mock_link("נייר קצבים לעישון", "products/butcher-paper", "complementary"),
+        _mock_link("מדחום לבשר", "products/meat-thermometer", "complementary"),
+        _mock_link("שבבי עץ לעישון", "products/wood-chips", "complementary"),
+        _mock_link("קטגוריית מעשנות", "category/smokers", "related_category", page_type="category"),
+    ]
+    monkeypatch.setattr(service, "_discover_related_links", lambda _db, _topic, limit=6: (links, {"selected_complementary_links": links[1:4], "rejected_links_with_reason": []}))
+
+    draft = service.generate_topic_article_draft(db_session, topic_title="בריסקט", focus_keyword="בריסקט", target_intent="how-to")
+    internal_links = service.json.loads(draft.internal_links_json)
+
+    for term in ["נייר קצבים", "עצי עישון", "סטול", "105–120°C", "90–96°C"]:
+        assert term in draft.article_body
+    for generic in ["מתי כדאי לשדרג ציוד", "איך נמנעים מקנייה לא נכונה"]:
+        assert generic not in draft.article_body
+    assert any("בריסקט" in link["title"] for link in internal_links)
+    assert any("נייר קצבים" in link["title"] for link in internal_links)
+    assert any("מדחום" in link["title"] for link in internal_links)
+    assert any("שבבי עץ" in link["title"] for link in internal_links)
+    assert "בריסקט" in draft.image_alt_text and ("Bark" in draft.image_alt_text or "מעשנה" in draft.image_alt_text)
+    assert draft.status == "READY_FOR_REVIEW"
+
+
+def test_wings_final_quality_blocks_unrelated_links_and_keeps_recipe_specifics(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    links = [
+        _mock_link("מדחום לבשר", "products/meat-thermometer", "complementary"),
+        _mock_link("רוטב BBQ גלייז", "products/bbq-glaze", "complementary"),
+        _mock_link("מברשת לגריל", "products/grill-brush", "complementary"),
+    ]
+    monkeypatch.setattr(service, "_discover_related_links", lambda _db, _topic, limit=6: (links, {"selected_complementary_links": links, "rejected_links_with_reason": []}))
+
+    draft = service.generate_topic_article_draft(db_session, topic_title="כנפיים קריספיות על הגריל", focus_keyword="כנפיים קריספיות על הגריל", target_intent="how-to")
+    selected_text = draft.internal_links_json + draft.article_body
+
+    for forbidden in ["קבב", "טופרי דוב", "gas burner", "נייר קצבים"]:
+        assert forbidden not in selected_text
+    for required in ["74°C", "ייבוש", "קריספיות", "גלייז"]:
+        assert required in draft.article_body
+    assert "הערת עומק נוספת" not in draft.article_body
+    assert "על הגריל על הגריל" not in draft.meta_title
+    metadata = service.build_topic_seo_metadata(draft.focus_keyword, draft.title, service._classify_topic(draft.title, draft.focus_keyword, draft.target_intent))
+    assert len(metadata["seo_keywords"]) >= 8
+    assert draft.status == "READY_FOR_REVIEW"
+
+
+def test_basalt_final_quality_links_and_alt(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    links = [
+        _mock_link("אבני בזלת לגריל גז", "products/basalt-stones", "exact_entity"),
+        _mock_link("אביזרים לגריל", "category/grill-accessories", "related_category", page_type="category"),
+        _mock_link("גרילי גז", "category/gas-grills", "related_category", page_type="category"),
+    ]
+    monkeypatch.setattr(service, "_discover_related_links", lambda _db, _topic, limit=6: (links, {"selected_complementary_links": links[1:], "rejected_links_with_reason": []}))
+
+    draft = service.generate_topic_article_draft(db_session, topic_title="אבני בזלת לגריל", focus_keyword="אבני בזלת לגריל", target_intent="commercial_informational")
+    assert any(term in draft.internal_links_json for term in ["אבני בזלת", "אביזרים לגריל", "גרילי גז"])
+    assert "אבני בזלת" in draft.image_alt_text and "גריל גז" in draft.image_alt_text
+    assert "מה הדבר הראשון לבדוק" not in draft.article_body
+    assert "איך נמנעים מקנייה לא נכונה" not in draft.article_body
+    assert draft.status == "READY_FOR_REVIEW"
+
+
+def test_final_html_public_quality_validator_and_link_filters(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    links = [
+        _mock_link("מדחום לבשר", "products/meat-thermometer", "complementary"),
+        _mock_link("רוטב BBQ גלייז", "products/bbq-glaze", "complementary"),
+    ]
+    monkeypatch.setattr(service, "_discover_related_links", lambda _db, _topic, limit=6: (links, {"selected_complementary_links": links, "rejected_links_with_reason": []}))
+    draft = service.generate_topic_article_draft(db_session, topic_title="כנפיים קריספיות", focus_keyword="כנפיים קריספיות", target_intent="how-to")
+    h2_titles = [_normalized_html_text(match) for match in re.findall(r"<h2[^>]*>(.*?)</h2>", draft.article_body)]
+    paragraphs = [_normalized_html_text(match) for match in re.findall(r"<p[^>]*>(.*?)</p>", draft.article_body)]
+    profile = service._classify_topic(draft.title, draft.focus_keyword, draft.target_intent)
+
+    assert len(h2_titles) == len(set(h2_titles))
+    assert len(paragraphs) == len(set(paragraphs))
+    assert "poultry_grill_recipe" not in draft.article_body
+    assert "meat_low_slow_smoking" not in draft.article_body
+    assert "נמשיך לעדכן כאן" not in draft.article_body
+    for link in service.json.loads(draft.suggested_related_products_json):
+        assert link.get("reason")
+        scores = {
+            "entity_match_score": link.get("entity_match_score", 0),
+            "keyword_match_score": link.get("keyword_match_score", 0),
+            "relevance_score": link.get("relevance_score", 0),
+        }
+        assert service._passes_link_semantic_gate(draft.focus_keyword, f"{link['title']} {link['url']}", str(link.get("page_type") or "product"), scores, profile)

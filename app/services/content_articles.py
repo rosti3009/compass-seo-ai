@@ -15,7 +15,7 @@ import requests
 from app.db.models import ContentArticleDraft, IStoreProduct
 
 logger = logging.getLogger(__name__)
-GENERATOR_VERSION = "v3-topic-contract-engine-2026-06-02"
+GENERATOR_VERSION = "v4-production-quality-links-expansions-2026-06-03"
 
 TOPIC_POOL = [
     ("שבבי עץ לעישון", "שבבי עץ לעישון", "informational"),
@@ -169,6 +169,12 @@ GENERIC_FILLER_PHRASES = [
     "הנושא הזה מכריע אם תקבלו תוצאה בינונית",
     "ציוד ומוצרים שכדאי להכין מראש",
     "חימום מוקדם 15–20 דקות",
+    "צ׳קליסט מעשי",
+    "מה הדבר הראשון לבדוק",
+    "איך נמנעים מקנייה לא נכונה",
+    "מתי כדאי לשדרג ציוד",
+    "התאמה לשימוש האמיתי שלכם",
+    "נמשיך לעדכן כאן",
 ]
 
 GENERIC_TEMPLATE_INTRO = "נושא שמכריע אם תקבלו תוצאה בינונית או מנה שמרגישה כמו מסעדת בשרים מקצועית"
@@ -759,6 +765,8 @@ def _topic_synonyms(topic: str) -> list[str]:
         syn += ["אבני בזלת", "אבני לבה", "אבני לבה לגריל", "אבני בזלת לגריל גז", "basalt", "basalt stones", "lava stones", "lava rocks", "grill accessories", "gas grill accessories", "פיזור חום", "התלקחויות"]
     if "שבבי" in normalized or "עישון" in normalized:
         syn += ["wood chips", "smoker", "smoking", "smoking wood", "עישון", "מעשנה"]
+    if any(term in normalized for term in ["בריסקט", "אסאדו", "שורט", "ריבס"]):
+        syn += ["brisket", "butcher paper", "נייר קצבים", "מדחום לבשר", "meat thermometer", "שבבי עץ", "wood chips", "wood chunks", "צ׳אנקים", "מעשנה", "smoker", "smoker accessories"]
     if "מדחום" in normalized or "thermometer" in lower:
         syn += ["מדחום לבשר", "מדחום דיגיטלי לבשר", "מדחום ליבה לבשר", "מדחום לגריל גז", "מדחום למעשנה", "מדחום פרוב", "thermometer", "meat thermometer", "probe", "instant read", "accessories", "אביזרים לגריל"]
     if "גריל" in normalized or "accessor" in lower:
@@ -781,35 +789,115 @@ def _match_terms_for_topic(topic: str) -> list[str]:
         terms.extend(["פיקניה", "פיקניה על הגריל", "סטייק פיקניה", "נתח פיקניה", "picanha", "picanha steak", "גריל גז", "גריל פחמים"])
     if any(word in normalized for word in ["כנפ", "עוף", "עופות", "פרגית"]):
         terms.extend(["כנפיים", "כנפי עוף", "עוף", "עופות", "chicken", "wings", "poultry", "רוטב bbq", "גלייז", "מדחום לבשר", "מלקחיים"])
+    if any(word in normalized for word in ["בריסקט", "אסאדו", "שורט", "ריבס"]):
+        terms.extend(["בריסקט", "brisket", "נייר קצבים", "butcher paper", "מדחום לבשר", "meat thermometer", "שבבי עץ", "wood chips", "צ׳אנקים", "chunks", "מעשנה", "smoker", "עישון"])
     return list(dict.fromkeys([t.strip() for t in terms if t.strip()]))
 
 
-def _topic_link_policy(topic: str) -> dict[str, set[str]]:
+
+def _link_topic_profile(topic: str, topic_profile: dict[str, object] | None = None) -> dict[str, object]:
+    if isinstance(topic_profile, dict) and topic_profile.get("topic_type"):
+        return topic_profile
+    return _classify_topic(topic, topic, "informational")
+
+
+def _link_policy_for_profile(topic: str, topic_profile: dict[str, object] | None = None) -> dict[str, object]:
+    profile = _link_topic_profile(topic, topic_profile)
+    topic_type = str(profile.get("topic_type") or "fallback_generic")
+    entity_key = str(profile.get("entity_key") or "")
     normalized = _normalize_hebrew(topic)
     lower = (topic or "").lower()
-    if any(term in normalized for term in ["כנפ", "עוף", "עופות", "פרגית"]):
-        return {
-            "must": {"כנפ", "עוף", "עופות", "chicken", "wings", "poultry", "מדחום", "thermometer", "רוטב", "bbq", "גלייז", "מלקחיים", "tongs"},
-            "blocked": {"קבב", "kebab", "קינמון", "cinnamon", "bear", "claws", "טופר", "מבער", "burner", "מחזיק", "holder", "יצוק", "cast iron"},
-        }
-    return {"must": set(), "blocked": set()}
+    policy: dict[str, object] = {
+        "topic_type": topic_type,
+        "allowed": set(),
+        "blocked": set(),
+        "exact": set(_tokenize_hebrew(topic)) | {normalized, lower},
+        "complementary": set(),
+        "category": set(),
+        "priority": [],
+    }
+    if topic_type == "meat_low_slow_smoking":
+        policy.update({
+            "allowed": {"בריסקט", "אסאדו", "שורט", "ריבס", "נייר", "קצבים", "מדחום", "thermometer", "שבבי", "עץ", "wood", "chips", "chunks", "צאנקים", "צ׳אנקים", "מעשנה", "smoker", "עישון", "smoking", "גריל"},
+            "blocked": {"קבב", "kebab", "כנפיים", "עוף", "wings", "chicken", "מבער", "burner", "מחזיק", "holder"},
+            "complementary": {"נייר", "קצבים", "מדחום", "thermometer", "שבבי", "עץ", "wood", "chips", "chunks", "צאנקים", "צ׳אנקים", "מעשנה", "smoker", "עישון", "smoking"},
+            "category": {"מעשנה", "smoker", "גריל", "אביזרים", "accessories"},
+            "priority": ["בריסקט", "נייר קצבים", "מדחום", "שבבי עץ", "wood chips", "chunks", "מעשנה", "smoker"],
+        })
+    elif topic_type == "poultry_grill_recipe":
+        policy.update({
+            "allowed": {"כנפ", "עוף", "עופות", "chicken", "wings", "poultry", "מדחום", "thermometer", "רוטב", "bbq", "גלייז", "מלקחיים", "tongs", "מברשת", "brush", "גריל"},
+            "blocked": {"קבב", "kebab", "bear", "claws", "טופר", "טופרי", "נייר", "קצבים", "מבער", "burner", "מחזיק", "holder", "יצוק", "cast iron"},
+            "complementary": {"מדחום", "thermometer", "רוטב", "bbq", "גלייז", "מלקחיים", "tongs", "מברשת", "brush", "גריל"},
+            "category": {"גריל", "אביזרים", "accessories"},
+            "priority": ["כנפיים", "עוף", "chicken", "רוטב", "bbq", "גלייז", "מדחום", "thermometer", "מברשת", "גריל"],
+        })
+    elif topic_type == "grill_accessory_guide" and entity_key == "basalt_stones":
+        policy.update({
+            "allowed": {"בזלת", "לבה", "basalt", "lava", "stones", "rocks", "אביזרים", "accessories", "גריל", "גז", "מבער", "burner", "diffuser", "מפזר"},
+            "blocked": {"קבב", "כנפיים", "עוף", "brisket", "בריסקט", "טופרי"},
+            "complementary": {"אביזרים", "accessories", "גריל", "גז", "מבער", "burner", "diffuser", "מפזר"},
+            "category": {"אביזרים", "accessories", "גריל", "גז"},
+            "priority": ["בזלת", "לבה", "basalt", "lava", "אביזרים", "accessories", "גריל גז", "מבער"],
+        })
+    elif topic_type == "grill_accessory_guide" and entity_key == "thermometer":
+        policy.update({
+            "allowed": {"מדחום", "thermometer", "probe", "פרוב", "אביזרים", "accessories", "מעשנה", "smoker", "בשר", "meat", "גריל"},
+            "blocked": {"קבב", "כנפיים", "נייר", "קצבים", "מבער", "burner", "מחזיק", "holder", "טופרי"},
+            "complementary": {"אביזרים", "accessories", "מעשנה", "smoker", "בשר", "meat", "גריל"},
+            "category": {"אביזרים", "accessories", "מעשנה", "smoker", "גריל"},
+            "priority": ["מדחום", "thermometer", "probe", "אביזרים", "מעשנה", "smoker"],
+        })
+    return policy
 
 
-def _passes_link_semantic_gate(topic: str, candidate_text: str, page_type: str, scores: dict[str, object]) -> bool:
+def _candidate_role(topic: str, candidate_text: str, page_type: str, scores: dict[str, object], topic_profile: dict[str, object] | None = None) -> str:
+    policy = _link_policy_for_profile(topic, topic_profile)
     normalized_text = _normalize_hebrew(candidate_text)
     lower_text = (candidate_text or "").lower()
-    policy = _topic_link_policy(topic)
-    blocked = policy["blocked"]
-    if any(term and (term in normalized_text or term in lower_text) for term in blocked):
+    topic_norm = _normalize_hebrew(topic)
+    if topic_norm and topic_norm in normalized_text:
+        return "exact_entity"
+    if any(str(term) and (str(term).lower() in lower_text or _normalize_hebrew(str(term)) in normalized_text) for term in policy.get("complementary", set())):
+        return "complementary"
+    if page_type == "category" and any(str(term) and (str(term).lower() in lower_text or _normalize_hebrew(str(term)) in normalized_text) for term in policy.get("category", set())):
+        return "related_category"
+    return "generic"
+
+
+def _priority_rank_for_link(topic: str, item: dict[str, object], topic_profile: dict[str, object] | None = None) -> int:
+    text = f"{item.get('title','')} {item.get('url','')} {item.get('slug','')}".lower()
+    normalized = _normalize_hebrew(text)
+    priorities = list(_link_policy_for_profile(topic, topic_profile).get("priority", []))
+    for idx, term in enumerate(priorities):
+        if str(term).lower() in text or _normalize_hebrew(str(term)) in normalized:
+            return idx
+    return len(priorities) + 5
+
+def _topic_link_policy(topic: str, topic_profile: dict[str, object] | None = None) -> dict[str, set[str]]:
+    policy = _link_policy_for_profile(topic, topic_profile)
+    return {
+        "must": set(policy.get("allowed", set())) | set(policy.get("complementary", set())),
+        "blocked": set(policy.get("blocked", set())),
+    }
+
+
+def _passes_link_semantic_gate(topic: str, candidate_text: str, page_type: str, scores: dict[str, object], topic_profile: dict[str, object] | None = None) -> bool:
+    normalized_text = _normalize_hebrew(candidate_text)
+    lower_text = (candidate_text or "").lower()
+    policy = _link_policy_for_profile(topic, topic_profile)
+    blocked = set(policy.get("blocked", set()))
+    if any(term and (str(term).lower() in lower_text or _normalize_hebrew(str(term)) in normalized_text) for term in blocked):
         return False
     exact_or_entity = float(scores.get("entity_match_score") or 0) >= 24 or float(scores.get("keyword_match_score") or 0) >= 10
-    must = policy["must"]
-    if must and page_type in {"product", "category"}:
-        return any(term and (term in normalized_text or term in lower_text) for term in must) and exact_or_entity
+    allowed = set(policy.get("allowed", set()))
+    if allowed and page_type in {"product", "category"}:
+        has_allowed_context = any(term and (str(term).lower() in lower_text or _normalize_hebrew(str(term)) in normalized_text) for term in allowed)
+        role = _candidate_role(topic, candidate_text, page_type, scores, topic_profile)
+        return has_allowed_context and (exact_or_entity or role in {"complementary", "related_category"})
     if page_type == "product":
-        return exact_or_entity or float(scores.get("relevance_score") or 0) >= 50
+        return exact_or_entity
     return exact_or_entity or float(scores.get("relevance_score") or 0) >= 50
-
 
 def _semantic_topic_match_score(topic: str, product: object) -> float:
     title = _safe_product_title(product)
@@ -884,7 +972,8 @@ def _score_link_candidate(topic: str, candidate_text: str, page_type: str, terms
     }
 
 
-def _discover_related_links(db: Session, topic: str, limit: int = 6) -> tuple[list[dict[str, str | float]], dict[str, object]]:
+def _discover_related_links(db: Session, topic: str, limit: int = 6, topic_profile: dict[str, object] | None = None) -> tuple[list[dict[str, str | float]], dict[str, object]]:
+    profile = _link_topic_profile(topic, topic_profile)
     products = db.query(IStoreProduct).order_by(IStoreProduct.updated_at.desc()).limit(400).all()
     sitemap_entries, sitemap_stats = _load_sitemap_index()
     out: list[dict[str, str | float]] = []
@@ -906,15 +995,16 @@ def _discover_related_links(db: Session, topic: str, limit: int = 6) -> tuple[li
             scores["match_reasons"] = [*list(scores["match_reasons"]), "התאמה סמנטית למוצר ISTORE"]
         if topic == "שבבי עץ לעישון":
             scores["relevance_score"] = min(100.0, float(scores["relevance_score"]) + _wood_link_priority_score(p))
-        if not _passes_link_semantic_gate(topic, candidate_text, "product", scores):
+        if not _passes_link_semantic_gate(topic, candidate_text, "product", scores, profile):
             excluded_low.append({"title": title, "url": url, "excluded_reason": "semantic_gate", **scores})
             continue
         if float(scores["relevance_score"]) < 50:
             if float(scores["relevance_score"]) > 0:
                 excluded_low.append({"title": title, "url": url, **scores})
             continue
-        reason = "; ".join(list(scores["match_reasons"])[:3])
-        out.append({"title": title, "url": url, "type": "product", "page_type": "product", "semantic_topic_match_score": float(scores["relevance_score"]), "relatedness_score": float(scores["relevance_score"]), "reason": reason, **scores})
+        role = _candidate_role(topic, candidate_text, "product", scores, profile)
+        reason = "; ".join([role, *list(scores["match_reasons"])[:3]])
+        out.append({"title": title, "url": url, "type": "product", "page_type": "product", "link_role": role, "semantic_topic_match_score": float(scores["relevance_score"]), "relatedness_score": float(scores["relevance_score"]), "reason": reason, **scores})
 
     for e in sitemap_entries:
         link_type = str(e.get("page_type") or e.get("type") or "info")
@@ -924,10 +1014,11 @@ def _discover_related_links(db: Session, topic: str, limit: int = 6) -> tuple[li
             continue
         candidate_text = f"{title} {e.get('slug','')} {url} {' '.join(str(t) for t in (e.get('normalized_tokens') or e.get('tokens') or []))}"
         scores = _score_link_candidate(topic, candidate_text, link_type, terms)
-        if float(scores["relevance_score"]) >= 50 and _passes_link_semantic_gate(topic, candidate_text, link_type, scores):
+        if float(scores["relevance_score"]) >= 50 and _passes_link_semantic_gate(topic, candidate_text, link_type, scores, profile):
             default_reason = "מוצר תואם ממפת האתר" if link_type == "product" else ("קטגוריה רלוונטית באתר" if link_type == "category" else "עמוד מידע רלוונטי")
-            reason = "; ".join(list(scores["match_reasons"])[:3]) or default_reason
-            out.append({"title": title, "url": url, "type": link_type, "page_type": link_type, "semantic_topic_match_score": float(scores["relevance_score"]), "relatedness_score": float(scores["relevance_score"]), "reason": reason, "lastmod": e.get("lastmod"), **scores})
+            role = _candidate_role(topic, candidate_text, link_type, scores, profile)
+            reason = "; ".join([role, *list(scores["match_reasons"])[:3]]) or default_reason
+            out.append({"title": title, "url": url, "type": link_type, "page_type": link_type, "link_role": role, "semantic_topic_match_score": float(scores["relevance_score"]), "relatedness_score": float(scores["relevance_score"]), "reason": reason, "lastmod": e.get("lastmod"), **scores})
         elif float(scores["relevance_score"]) > 0:
             excluded_low.append({"title": title, "url": url, **scores})
 
@@ -940,7 +1031,7 @@ def _discover_related_links(db: Session, topic: str, limit: int = 6) -> tuple[li
         if current is None or float(item.get("relevance_score") or 0) > float(current.get("relevance_score") or 0):
             dedup[url] = item
     out = list(dedup.values())
-    if not out and not _topic_link_policy(topic)["must"]:
+    if not out and not _topic_link_policy(topic, profile)["must"]:
         fallback_by_url: dict[str, dict[str, str | float]] = {}
         for item in excluded_low:
             if float(item.get("relevance_score") or 0) < 40:
@@ -950,8 +1041,21 @@ def _discover_related_links(db: Session, topic: str, limit: int = 6) -> tuple[li
                 fallback_by_url[url] = {**item, "reason": "Fallback כללי אחרי סינון סמנטי ללא התאמות חזקות"}
         out = list(fallback_by_url.values())[:limit]
     type_priority = {"product": 6, "category": 5, "brand": 3, "info": 2, "blog": 1}
-    out.sort(key=lambda item: (float(item.get("relevance_score", 0)), type_priority.get(str(item.get("type") or ""), 0), float(item.get("entity_match_score") or 0)), reverse=True)
-    trimmed = out[: max(3, min(limit, 6))]
+    role_priority = {"exact_entity": 5, "complementary": 4, "related_category": 3, "generic": 0}
+    out.sort(key=lambda item: (-_priority_rank_for_link(topic, item, profile), role_priority.get(str(item.get("link_role") or "generic"), 0), float(item.get("relevance_score", 0)), type_priority.get(str(item.get("type") or ""), 0), float(item.get("entity_match_score") or 0)), reverse=True)
+    selected: list[dict[str, str | float]] = []
+    for desired in ("exact_entity", "complementary", "complementary", "complementary", "related_category"):
+        for item in out:
+            if item in selected or str(item.get("link_role") or "") != desired:
+                continue
+            selected.append(item)
+            break
+    for item in out:
+        if len(selected) >= max(3, min(limit, 6)):
+            break
+        if item not in selected:
+            selected.append(item)
+    trimmed = selected[: max(3, min(limit, 6))]
     best = trimmed[0] if trimmed else {}
     debug = {
         **sitemap_stats,
@@ -967,6 +1071,8 @@ def _discover_related_links(db: Session, topic: str, limit: int = 6) -> tuple[li
         "internal_link_candidates": len(out),
         "link_candidates_count": len(out),
         "excluded_low_relevance_links": excluded_low[:20],
+        "rejected_links_with_reason": excluded_low[:20],
+        "selected_complementary_links": [i for i in trimmed if i.get("link_role") == "complementary"],
         "selected_internal_links": trimmed,
         "selected_products": [i for i in trimmed if i.get("type") in {"product", "category"}],
     }
@@ -1181,6 +1287,53 @@ def _article_word_count(html: str) -> int:
     return len(re.findall(r"[\w\u0590-\u05FF]+", _plain_text(html or "")))
 
 
+def _topic_specific_expansion_html(topic_type: str, entity: str, keyword: str, entity_key: str) -> tuple[str, str]:
+    if topic_type == "meat_low_slow_smoking":
+        return (
+            _h2("איך לבחור נתח מתאים לעישון", f"<p>ל-{entity} בעישון מחפשים עובי אחיד, שכבת שומן שמגינה על הבשר וגמישות בסיסית שמעידה על נתח לא יבש. בבריסקט עדיף לבדוק שה-flat לא דק מדי ושה-point מכיל מספיק שומן פנימי לעישון ארוך.</p>")
+            + _h2("טרימינג נכון לפני עישון", "<p>טרימינג מסיר שומן קשה וקצוות דקים שיישרפו מוקדם, אבל לא מגלחים את הנתח לגמרי. משאירים שכבה שמסייעת בהגנה ובטעם, ומיישרים אזורים שיבלמו זרימת עשן.</p>")
+            + _h2("Fat Cap וניהול שומן", "<p>Fat Cap צריך להיות אחיד ולא עבה מדי. אם מקור החום מגיע מלמטה, מניחים את השומן לכיוון החום; אם החום היקפי, בוחרים צד לפי זרימת האוויר והגנה על החלק הדק.</p>")
+            + _h2("מתי לעטוף בנייר קצבים", "<p>עוטפים רק אחרי שיש צבע עמוק ו-Bark יציב, לרוב סביב שלב הסטול. נייר קצבים מאפשר נשימה טובה יותר מנייר כסף ולכן מתאים כאשר רוצים לקצר זמן בלי לרכך את הקליפה לגמרי.</p>")
+            + _h2("איך בודקים רכות עם פרוב", "<p>הטמפרטורה סביב 90–96°C היא סימן דרך, לא פקודה להוריד. מכניסים פרוב בכמה נקודות ומחפשים תחושה רכה, כמעט כמו חמאה, במיוחד בחלק העבה.</p>")
+            + _h2("מנוחה ארוכה וחיתוך נכון", "<p>מנוחה ארוכה מאפשרת לנוזלים להתייצב ולסיבים להירגע. חותכים רק אחרי ירידת חום מסוימת, מזהים את כיוון הסיבים ומשנים זווית בין flat ל-point אם צריך.</p>"),
+            "meat_low_slow_smoking_expansion",
+        )
+    if topic_type == "poultry_grill_recipe":
+        return (
+            _h2("ייבוש העור לפני הצלייה", "<p>כנפיים קריספיות מתחילות בעור יבש: מייבשים היטב, ואם יש זמן משאירים במקרר לא מכוסה לזמן קצר כדי להפחית לחות.</p>")
+            + _h2("תיבול יבש לעור קריספי", "<p>תיבול יבש נדבק טוב יותר לעור יבש. שכבה דקה של מלח ותבלינים נותנת טעם בלי להפוך את פני השטח לבוציים.</p>")
+            + _h2("חום עקיף ואז חום ישיר", "<p>מתחילים בחום עקיף כדי לבשל את העוף בצורה אחידה, ואז מסיימים בחום ישיר קצר לפתיחת צבע וקריספיות בלי לשרוף את העור.</p>")
+            + _h2("מתי מוסיפים גלייז", "<p>גלייז מוסיפים בסוף, כשהכנפיים כמעט מוכנות. כך הסוכר מספיק להתקרמל בעדינות ולא נשרף לפני שהעוף מגיע ל-74°C.</p>")
+            + _h2("הגשה ושמירה על קריספיות", "<p>מגישים על רשת או מגש פתוח ולא סוגרים מיד בקופסה אטומה. אדים כלואים מרככים את העור ומוחקים חלק מהקריספיות.</p>"),
+            "poultry_grill_recipe_expansion",
+        )
+    if topic_type == "grill_accessory_guide":
+        return (
+            _h2("התאמה לגריל", f"<p>לפני שימוש ב-{entity}, בודקים התאמה פיזית ובטיחותית לדגם הגריל, למקור החום ולמרחק מהרשת או מהמבערים.</p>")
+            + _h2("התקנה או שימוש נכון", "<p>עובדים לפי הוראות היצרן, מתחילים בחימום הדרגתי, ומוודאים שהאביזר לא חוסם אוויר, לא נוגע בלהבה ישירה שלא לצורך ולא מפריע לסגירת המכסה.</p>")
+            + _h2("ניקוי ותחזוקה", "<p>תחזוקה טובה מתחילה בקירור מלא, ניקוי שאריות והחזרה למקום יבש. באביזרי מדידה מקפידים גם על קצה נקי וכיול תקופתי.</p>")
+            + _h2("מתי להחליף", "<p>מחליפים כאשר יש סדקים, התפוררות, קריאה לא מדויקת, ריח שרוף קבוע או ירידה ברורה בביצועים לעומת שימוש קודם.</p>")
+            + _h2("צ׳קליסט קנייה", "<ul><li>התאמה לדגם הגריל.</li><li>חומר עמיד לחום.</li><li>ניקוי פשוט.</li><li>מידות נכונות לשטח העבודה.</li><li>אחריות או הוראות שימוש ברורות.</li></ul>"),
+            "grill_accessory_guide_expansion",
+        )
+    if topic_type == "fuel_comparison_or_guide":
+        return (
+            _h2("התאמה לגריל", "<p>בגריל פתוח בוחרים דלק שמגיב מהר ומייצר חום ישיר חזק. בגריל עם מכסה חשוב יותר לשמור על יציבות לאורך זמן.</p>")
+            + _h2("התאמה למעשנה", "<p>במעשנה מחפשים בעירה ארוכה, אפר נמוך ויכולת חיזוי. דלק לא יציב גורם לפתיחות מכסה מיותרות ולתנודות חום.</p>")
+            + _h2("טבלת השוואה מעשית", "<table><thead><tr><th>שימוש</th><th>עדיפות</th><th>הסבר</th></tr></thead><tbody><tr><td>צלייה קצרה</td><td>תגובה מהירה</td><td>חשוב להגיע לחום גבוה במהירות</td></tr><tr><td>אירוח ארוך</td><td>יציבות חום</td><td>פחות תוספות דלק באמצע</td></tr><tr><td>מעשנה</td><td>אפר נמוך</td><td>שמירה על זרימת אוויר נקייה</td></tr></tbody></table>"),
+            "fuel_comparison_or_guide_expansion",
+        )
+    if topic_type == "equipment_buying_guide":
+        return (
+            _h2("גודל ומשטח עבודה", "<p>בוחרים גודל לפי מספר סועדים, תדירות אירוח ומקום פנוי לעבודה בטוחה סביב הגריל או הטאבון.</p>")
+            + _h2("עוצמת חום ומבערים", "<p>לא מסתכלים רק על מספרים; בודקים פיזור חום, שליטה באזורים, איכות מבערים ויכולת לשמור חום עם מכסה סגור.</p>")
+            + _h2("חומרי בנייה ותחזוקה", "<p>נירוסטה, יציקה וציפויים שונים משפיעים על עמידות וניקוי. מוצר טוב הוא כזה שתוכלו לתחזק בקלות לאורך שנים.</p>")
+            + _h2("התאמה למשפחה או אירוח", "<p>למשפחה קטנה מספיק משטח קומפקטי ואמין; לאירוח קבוע צריך שטח עבודה, אזורי חום ואחסון לכלים.</p>"),
+            "equipment_buying_guide_expansion",
+        )
+    return ("", "no_extra_needed")
+
+
 def _depth_upgrade_html(title: str, keyword: str, html: str, profile: dict[str, object]) -> str:
     topic_type = str(profile.get("topic_type") or "fallback_generic")
     entity = str(profile.get("main_entity") or keyword or title)
@@ -1191,42 +1344,24 @@ def _depth_upgrade_html(title: str, keyword: str, html: str, profile: dict[str, 
     if _article_word_count(html) >= target:
         return html
 
-    if topic_type == "grill_accessory_guide" and entity_key == "thermometer":
+    extra, _source = _topic_specific_expansion_html(topic_type, entity, keyword, entity_key)
+    if not extra and topic_type == "meat_quick_grill_cut":
         extra = (
-            _h2("טבלת השוואה: סוגי מדחום לבשר", "<table><thead><tr><th>סוג</th><th>מתי מתאים</th><th>מה לבדוק</th></tr></thead><tbody><tr><td>מדחום דיגיטלי לבשר</td><td>צלייה יומיומית בגריל גז או פחמים</td><td>זמן תגובה, תצוגה ברורה ועמידות לחום</td></tr><tr><td>מדחום ליבה לבשר עם probe</td><td>נתחים עבים, מעשנה וצלייה ארוכה</td><td>כבל איכותי, טווח טמפרטורות ונוחות ניקוי</td></tr><tr><td>מדחום לקריאה מהירה</td><td>בדיקה נקודתית לפני הורדה מהאש</td><td>דיוק, כיול וכניסה דקה לנתח</td></tr></tbody></table>")
-            + _h2("צ׳קליסט קנייה", f"<ul><li>בחרו {keyword} שמציג תוצאה במהירות ולא מאלץ להשאיר את המכסה פתוח זמן רב.</li><li>בדקו האם המדחום מאפשר כיול או לפחות בדיקה במי קרח, כדי לשמור על דיוק לאורך זמן.</li><li>למעשנה או צלייה ארוכה העדיפו probe שנשאר בנתח ומאפשר מעקב בלי לפתוח את המכסה.</li><li>ודאו שהידית, הכבל והחיבור ניתנים לניקוי ללא חדירת מים למנגנון.</li></ul>")
-            + _h2("טעויות נפוצות במדידת טמפרטורה", "<p>הטעות הראשונה היא למדוד קרוב לעצם, לשומן עבה או לחלל אוויר במקום במרכז החלק העבה של הנתח. טעות שנייה היא להסתמך רק על צבע חיצוני: בגריל חם פני השטח יכולים להיראות מוכנים בזמן שהמרכז עדיין רחוק מטמפרטורת היעד. טעות שלישית היא לא לנקות את הקצה בין נתחים, במיוחד כשעוברים מעוף לבקר או להפך. מדידה נכונה מחברת בין בטיחות מזון, עסיסיות ושליטה בתוצאה.</p>")
-            + _h2("המלצה מעשית", f"<p>לרוב המשתמשים כדאי להחזיק שני פתרונות: {keyword} לקריאה מהירה לבדיקות נקודתיות, ומדחום ליבה לבשר עם probe לנתחים עבים או לעבודה במעשנה. מי שמכין סטייקים דקים ייהנה מזמן תגובה קצר; מי שמכין בריסקט, אסאדו או עוף שלם צריך מעקב יציב לאורך זמן. בשני המקרים ניקוי, כיול ואחסון יבש חשובים לא פחות מהמפרט.</p>")
-            + _faq([("איך מודדים טמפרטורת בשר נכון?", "מכניסים את קצה המדחום לחלק העבה ביותר, הרחק מעצם ומשומן עבה, וממתינים לקריאה יציבה."), ("מה עדיף: probe או קריאה מהירה?", "probe מתאים למעקב ארוך, וקריאה מהירה מתאימה לבדיקה רגעית לפני הורדה מהגריל."), ("כל כמה זמן מכיילים מדחום?", "מומלץ לבדוק דיוק מדי כמה חודשים או אחרי נפילה, באמצעות מי קרח או לפי הוראות היצרן."), ("איך מנקים מדחום לבשר?", "מנגבים את הקצה במים וסבון או חומר מתאים למזון, מייבשים ולא טובלים רכיבים אלקטרוניים במים."), ("האם מדחום מתאים גם למעשנה?", "כן, במיוחד מדחום ליבה עם probe וכבל מתאים לטמפרטורות עבודה של מעשנה.")])
+            _h2("טבלת טמפרטורות מומלצת", f"<table><thead><tr><th>מידת עשייה</th><th>טמפרטורה פנימית</th><th>הערה</th></tr></thead><tbody><tr><td>מדיום רייר</td><td>54–57°C</td><td>מומלץ ל-{entity} עסיסית לאחר מנוחה</td></tr><tr><td>מדיום</td><td>58–62°C</td><td>מתאים למי שמעדיף מרכז פחות אדום</td></tr><tr><td>עשוי יותר</td><td>63°C ומעלה</td><td>חשוב להקפיד על מנוחה כדי לצמצם ייבוש</td></tr></tbody></table>")
+            + _h2("צ׳קליסט לפני הצלייה", f"<ul><li>מזהים את כיוון הסיבים לפני ש-{entity} עולה על הגריל.</li><li>ממליחים מראש ומייבשים פני שטח לצריבה נקייה.</li><li>מכינים אזור חום עקיף ואזור חום ישיר כדי לשלוט בקצב.</li><li>בודקים טמפרטורה פנימית ולא עובדים לפי תחושה בלבד.</li></ul>")
         )
-    elif topic_type == "grill_accessory_guide" and entity_key == "basalt_stones":
-        extra = (
-            _h2("טבלת השוואה: אבני בזלת מול עבודה בלי אבנים", "<table><thead><tr><th>אפשרות</th><th>יתרון</th><th>חיסרון</th></tr></thead><tbody><tr><td>אבני בזלת לגריל גז</td><td>פיזור חום רחב יותר, אידוי שומן והפחתת התלקחויות</td><td>דורשות סידור, ניקוי והחלפה תקופתית</td></tr><tr><td>מגיני מבער בלבד</td><td>פשוטים לניקוי ומגנים על המבערים</td><td>פחות מסה תרמית ופחות אפקט של אבני לבה לגריל</td></tr><tr><td>צלייה ישירה ללא שכבה מפזרת</td><td>תגובה מהירה לחום גבוה</td><td>רגישות גבוהה לטפטופי שומן ולנקודות חמות</td></tr></tbody></table>")
-            + _h2("צ׳קליסט התקנה ושימוש", f"<ul><li>מסדרים {keyword} בשכבה אחידה ולא צפופה מדי, כדי לאפשר מעבר חום ואוויר.</li><li>לא מכסים פתחי אוורור ולא מניחים אבנים ישירות במקום שמפריע למבערים.</li><li>מחממים את הגריל בהדרגה ובודקים שהחום מתפזר לפני שמעמיסים בשר.</li><li>אחרי שימוש שומני נותנים לאבנים להתקרר לחלוטין לפני ניקוי או הזזה.</li></ul>")
-            + _h2("ניקוי, תחזוקה ומתי מחליפים", "<p>ניקוי אבני בזלת מתחיל בהסרת שאריות גדולות לאחר קירור מלא. אין צורך להפוך כל אבן למבריקה; המטרה היא למנוע הצטברות שומן שמייצרת עשן כבד והתלקחויות. אם האבנים מתפוררות, נסדקות, סופגות ריח חריף או כבר לא מפזרות חום בצורה אחידה, זה סימן שהגיע הזמן להחליף. בשימוש ביתי רגיל בודקים מצב אחת לכמה חודשים, ובשימוש תדיר יותר בודקים לעיתים קרובות.</p>")
-            + _h2("טעויות נפוצות", "<p>הטעות הנפוצה ביותר היא להעמיס יותר מדי אבנים ולחנוק את זרימת האוויר. טעות נוספת היא לצפות שאבני לבה לגריל יחליפו ניקוי שוטף של מגש השומן והמבערים. הן עוזרות בייצוב חום ובהפחתת התלקחויות, אבל אם הגריל מלא שומן ישן הן לא יפתרו את הבעיה. חשוב גם לוודא התאמה לדגם הגריל ולא להשתמש באבנים שאינן מיועדות לחום גבוה.</p>")
-            + _h2("המלצה מעשית", f"<p>{keyword} מתאימות למי שרוצה גריל גז עם תחושה יציבה יותר ופיזור חום סלחני יותר. הן שימושיות במיוחד בצלייה של נתחים שומניים, ירקות או עבודה שבה פתיחה וסגירה של המכסה משנות את הטמפרטורה. אם אתם מחפשים אביזרים לגריל גז שמוסיפים ערך אמיתי, התחילו בהתאמה לדגם, שכבה אחידה ותוכנית ניקוי קבועה.</p>")
-            + _faq([("איך משתמשים באבני בזלת?", "מסדרים שכבה אחידה באזור המיועד לכך, מחממים בהדרגה ובודקים שאין חסימת אוויר או מגע בעייתי עם המבערים."), ("האם אבני בזלת מפחיתות התלקחויות?", "כן, הן יכולות לעזור באידוי שומן ובפיזור חום, אך עדיין חייבים לנקות שומן מצטבר."), ("מתי מחליפים אבני בזלת?", "כאשר הן מתפוררות, נסדקות, סופגות ריח חריף או מפסיקות לשמור על חום יציב."), ("איך מנקים אבני בזלת?", "מקררים לחלוטין, מסירים שאריות גדולות ומנקים לפי הוראות היצרן בלי חומרים שאינם מתאימים לגריל."), ("האם אבני לבה מתאימות לכל גריל גז?", "לא תמיד; בודקים התאמה למבנה הגריל, למבערים ולהוראות היצרן.")])
-        )
-    elif topic_type == "meat_quick_grill_cut":
-        extra = (
-            _h2("טבלת דרגות עשייה לפיקניה", f"<table><thead><tr><th>דרגה</th><th>טווח יעד</th><th>הערה</th></tr></thead><tbody><tr><td>מדיום רייר</td><td>54–57°C</td><td>הטווח המומלץ ל-{entity} עסיסית לאחר מנוחה</td></tr><tr><td>מדיום</td><td>58–62°C</td><td>מתאים למי שמעדיף מרכז פחות אדום</td></tr><tr><td>עשוי יותר</td><td>63°C ומעלה</td><td>חשוב להקפיד על מנוחה כדי לצמצם ייבוש</td></tr></tbody></table>")
-            + _h2("צ׳קליסט לפני הצלייה", f"<ul><li>מזהים את כיוון הסיבים לפני ש-{entity} עולה על הגריל.</li><li>חורצים שומן בעדינות רק אם השכבה עבה מאוד ולא פוגעים בבשר.</li><li>ממליחים מראש ומייבשים פני שטח לצריבה נקייה.</li><li>מכינים אזור חום עקיף ואזור חום ישיר כדי לשלוט בקצב.</li><li>בודקים טמפרטורה פנימית ולא עובדים לפי תחושה בלבד.</li></ul>")
-            + _h2("Reverse Sear פיקניה", "<p>Reverse Sear מתאים במיוחד לנתח עבה: מתחילים בחום עקיף עד שהמרכז מתקרב ליעד, נותנים מנוחה קצרה ואז צורבים חזק משני הצדדים. השיטה נותנת שליטה טובה יותר בטמפרטורת פיקניה ומקטינה את הסיכון לטבעת עשייה רחבה מדי. בסיום חותכים נגד הסיבים ומגישים אחרי מנוחה, כדי שהמיצים יתייצבו ולא יברחו לקרש.</p>")
-            + _h2("טעויות נפוצות", "<p>הטעות הראשונה היא להסיר את כל שכבת השומן, למרות שהיא מגינה על הנתח ותורמת טעם. הטעות השנייה היא לצלות רק על אש חזקה עד שהחוץ חרוך והמרכז לא אחיד. טעות שלישית היא לחתוך עם הסיבים במקום נגדם. כדי לקבל פיקניה על הגריל במרקם רך, מתכננים חום, מודדים טמפרטורה ומכבדים את זמן המנוחה.</p>")
-            + _h2("המלצה מעשית", f"<p>אם זו הפעם הראשונה שלכם עם {entity}, התחילו בנתח שלם בעובי אחיד יחסית, צלו בחום עקיף ואז סיימו בצריבה קצרה. למי שאוהב פיקניה על פחמים, חשוב להמתין לגחלים יציבות; בגריל גז כדאי לחמם מראש ולשמור אזור בטוח ללא להבה ישירה. כך מקבלים סטייק פיקניה עם שומן פריך ומרכז עסיסי.</p>")
-            + _faq([("איך לצלות פיקניה על הגריל?", "מתחילים בחום עקיף לנתח עבה או בצריבה קצרה לסטייקים, מודדים טמפרטורה ומסיימים במנוחה."), ("מה טמפרטורת פיקניה מדיום רייר?", "היעד המקובל הוא 54–57°C לאחר מנוחה קצרה."), ("איך חותכים פיקניה?", "מזהים את כיוון הסיבים וחותכים נגד הסיבים בפרוסות אחידות."), ("האם כדאי Reverse Sear לפיקניה?", "כן, במיוחד בנתח עבה שבו רוצים שליטה טובה בטמפרטורה לפני צריבה."), ("פיקניה מתאימה לגריל גז?", "כן, כל עוד יוצרים אזור חום עקיף ואזור צריבה חזק לסיום.")])
-        )
-    else:
-        extra = (
-            _h2("צ׳קליסט מעשי", f"<ul><li>הגדירו מה רוצים להשיג עם {entity} לפני בחירת ציוד או שיטה.</li><li>בדקו התאמה לגריל, למקום ולתדירות השימוש.</li><li>עבדו בשלבים: הכנה, ביצוע, בדיקה, תחזוקה וסיכום לקראת הפעם הבאה.</li></ul>")
-            + _h2("טעויות נפוצות", f"<p>בכל מדריך על {entity}, הטעות המרכזית היא לדלג על התאמה לצורך האמיתי. מפרט מרשים, שם מוצר מוכר או שיטה פופולרית לא מספיקים בלי להבין את תנאי העבודה, רמת הניסיון והתחזוקה הנדרשת.</p>")
-            + _faq([("מה הדבר הראשון לבדוק?", "התאמה לשימוש האמיתי שלכם."), ("איך נמנעים מקנייה לא נכונה?", "משווים לפי צורך, מידות, חומר ותחזוקה."), ("מתי כדאי לשדרג ציוד?", "כאשר הציוד מגביל את התוצאה או הבטיחות.")])
-        )
+    if not extra:
+        extra = _h2("שיטת עבודה", f"<p>{keyword} דורש התאמה בין המטרה, מקור החום, חומר הגלם והתחזוקה. עובדים בשלבים, בודקים תוצאה ומתקנים בפעם הבאה לפי נתונים אמיתיים.</p>")
     html += extra
-    # Add one more neutral value section if the topic is still short after the focused expansion.
+    # If still short, repeat topic-specific value without internal labels or generic buying-guide filler.
     while _article_word_count(html) < target:
-        html += _h2(f"הערת עומק נוספת ל{entity}", f"<p>בהקשר של {entity} והנושא {topic_type}, התוצאה משתפרת כשמחברים בין בחירה נכונה, שימוש עקבי וניקיון אחרי כל עבודה. כדאי לרשום מה עבד טוב, מה דרש תיקון ואילו תנאים השפיעו על התוצאה: חום, זמן, עובי חומר הגלם, מצב הגריל והציוד שהיה זמין. כך המדריך הופך להרגל עבודה ולא רק לרשימת טיפים חד־פעמית.</p>")
+        filler, _ = _topic_specific_expansion_html(topic_type, entity, keyword, entity_key)
+        if not filler:
+            break
+        before = html
+        html = _dedupe_article_html(html + filler)
+        if html == before:
+            break
     return html
 
 def _build_article_html(
@@ -1251,7 +1386,36 @@ def _clean_anchor_text(link: dict[str, str | float]) -> str:
     return title or "מוצר רלוונטי"
 
 
-def inject_internal_links_into_html(article_html: str, related: list[dict[str, str | float]]) -> tuple[str, list[dict[str, str]]]:
+def _natural_link_sentence(link: dict[str, str | float], topic_profile: dict[str, object] | None = None) -> str:
+    url = str(link.get("url") or "").strip()
+    anchor = _clean_anchor_text(link)
+    text = _normalize_hebrew(f"{anchor} {link.get('title','')} {url}")
+    topic_type = str((topic_profile or {}).get("topic_type") or "")
+    if topic_type == "meat_low_slow_smoking":
+        if "נייר" in text or "קצבים" in text or "butcher" in text:
+            return f"לעישון ארוך של בריסקט, שימוש ב<a href='{url}'>{anchor}</a> יכול לעזור לעבור את שלב הסטול בלי לוותר לגמרי על Bark."
+        if "מדחום" in text or "thermometer" in text:
+            return f"בנתחים עבים או עישון ארוך, <a href='{url}'>{anchor}</a> מאפשר למדוד טמפרטורה פנימית בלי לנחש לפי צבע חיצוני."
+        if "שבבי" in text or "עץ" in text or "wood" in text or "צאנקים" in text:
+            return f"לבניית שכבת עשן נקייה, כדאי להתאים <a href='{url}'>{anchor}</a> לעוצמת הטעם של הנתח ולמשך העישון."
+        if "מעשנה" in text or "smoker" in text:
+            return f"מי שמעשן נתחים גדולים בקביעות ירוויח מבחירה נכונה של <a href='{url}'>{anchor}</a> ששומרת על חום יציב לאורך שעות."
+    if topic_type == "poultry_grill_recipe":
+        if "מדחום" in text or "thermometer" in text:
+            return f"בעוף על הגריל, <a href='{url}'>{anchor}</a> עוזר לוודא 74°C בחלק העבה בלי לייבש את העור."
+        if "רוטב" in text or "גלייז" in text or "bbq" in text:
+            return f"את <a href='{url}'>{anchor}</a> מוסיפים רק בדקות האחרונות, כדי לקבל ברק וטעם בלי סוכר שרוף."
+        return f"לעבודה נקייה עם כנפיים, <a href='{url}'>{anchor}</a> יכול לעזור בהפיכה, מריחה או שמירה על רשת מסודרת."
+    if topic_type == "grill_accessory_guide":
+        entity_key = str((topic_profile or {}).get("entity_key") or "")
+        if entity_key == "basalt_stones":
+            return f"<a href='{url}'>{anchor}</a> יכולות לשפר פיזור חום ולהפחית התלקחויות בגרילי גז שמתאימים לכך."
+        if entity_key == "thermometer":
+            return f"בנתחים עבים או עישון ארוך, <a href='{url}'>{anchor}</a> מאפשר למדוד טמפרטורה פנימית בלי לנחש לפי צבע חיצוני."
+    return f"בהמשך העבודה עם המדריך, <a href='{url}'>{anchor}</a> יכול להשתלב בצורה טבעית עם הציוד והשיטה שבחרתם."
+
+
+def inject_internal_links_into_html(article_html: str, related: list[dict[str, str | float]], topic_profile: dict[str, object] | None = None) -> tuple[str, list[dict[str, str]]]:
     html = article_html or ""
     section_match = re.search(r"<h2>מוצרים וקטגוריות מומלצים מהאתר</h2>|<h2>מוצרים רלוונטיים באתר</h2>|<h2>מוצרים מומלצים מהאתר</h2>", html)
     main_html = html[: section_match.start()] if section_match else html
@@ -1259,7 +1423,7 @@ def inject_internal_links_into_html(article_html: str, related: list[dict[str, s
     injected: list[dict[str, str]] = []
     used_urls: set[str] = set()
     used_anchors: set[str] = set()
-    eligible = [link for link in related if float(link.get("relevance_score") or 0) >= 50 and str(link.get("url") or "").strip()]
+    eligible = [link for link in related if float(link.get("relevance_score") or link.get("relatedness_score") or 0) >= 50 and str(link.get("url") or "").strip()]
     for link in eligible:
         if len(injected) >= 6:
             break
@@ -1270,7 +1434,7 @@ def inject_internal_links_into_html(article_html: str, related: list[dict[str, s
         linked = f"<a href='{url}'>{anchor}</a>"
         if anchor in main_html and linked not in main_html:
             main_html = main_html.replace(anchor, linked, 1)
-            injected.append({"title": str(link.get("title") or anchor), "url": url, "anchor_text": anchor, "section": "body_paragraph", "relevance_score": str(link.get("relevance_score") or 0)})
+            injected.append({"title": str(link.get("title") or anchor), "url": url, "anchor_text": anchor, "section": "body_paragraph", "relevance_score": str(link.get("relevance_score") or 0), "link_role": str(link.get("link_role") or ""), "reason": str(link.get("reason") or "")})
             used_urls.add(url)
             used_anchors.add(anchor)
     if len(injected) < min(2, len(eligible)):
@@ -1286,7 +1450,7 @@ def inject_internal_links_into_html(article_html: str, related: list[dict[str, s
             anchor = _clean_anchor_text(link)
             if not anchor or anchor in used_anchors:
                 continue
-            sentence = f" למי שרוצה להמשיך מהתיאוריה לבחירה באתר, כדאי לבדוק גם <a href='{url}'>{anchor}</a> בהקשר של המדריך הזה."
+            sentence = " " + _natural_link_sentence(link, topic_profile)
             if paragraph_index >= len(paragraphs):
                 paragraph_index = max(0, len(paragraphs) - 1)
             if paragraphs:
@@ -1295,7 +1459,7 @@ def inject_internal_links_into_html(article_html: str, related: list[dict[str, s
                 paragraph_index += 2
             else:
                 main_html += f"<p>{sentence}</p>"
-            injected.append({"title": str(link.get("title") or anchor), "url": url, "anchor_text": anchor, "section": "body_paragraph", "relevance_score": str(link.get("relevance_score") or 0)})
+            injected.append({"title": str(link.get("title") or anchor), "url": url, "anchor_text": anchor, "section": "body_paragraph", "relevance_score": str(link.get("relevance_score") or 0), "link_role": str(link.get("link_role") or ""), "reason": str(link.get("reason") or "")})
             used_urls.add(url)
             used_anchors.add(anchor)
         for pos, snippet in sorted(insertions, reverse=True):
@@ -1565,6 +1729,91 @@ def _topic_meta(keyword: str, title: str, topic_profile: dict[str, object]) -> t
     return str(metadata["meta_title"]), str(metadata["meta_description"])
 
 
+
+def _generate_image_alt_text(title: str, keyword: str, topic_profile: dict[str, object]) -> tuple[str, str]:
+    topic_type = str(topic_profile.get("topic_type") or "")
+    entity_key = str(topic_profile.get("entity_key") or "")
+    entity = str(topic_profile.get("main_entity") or keyword or title)
+    normalized = _normalize_hebrew(f"{title} {keyword} {entity}")
+    if topic_type == "meat_low_slow_smoking" and "בריסקט" in normalized:
+        return "בריסקט מעושן במעשנה עם Bark כהה ונייר קצבים", "topic_type_entity_template"
+    if topic_type == "meat_low_slow_smoking":
+        return f"{entity} מעושן במעשנה עם Bark כהה ונייר קצבים", "topic_type_template"
+    if topic_type == "poultry_grill_recipe":
+        return "כנפיים קריספיות על גריל עם עור זהוב וגלייז בצד", "topic_type_entity_template"
+    if topic_type == "grill_accessory_guide" and entity_key == "basalt_stones":
+        return "אבני בזלת לגריל גז מעל מבערים לפיזור חום", "topic_type_entity_template"
+    if topic_type == "grill_accessory_guide" and entity_key == "thermometer":
+        return "מדחום לבשר מודד טמפרטורה פנימית בנתח על הגריל", "topic_type_entity_template"
+    if topic_type == "fuel_comparison_or_guide":
+        return f"{entity} לגריל עם השוואת בעירה אפר ויציבות חום", "topic_type_template"
+    if topic_type == "equipment_buying_guide":
+        return f"{entity} בחצר עם משטח עבודה ומבערים מוכנים לצלייה", "topic_type_template"
+    return f"{entity} בהדגמת גריל מקצועית ונקייה", "fallback_entity_template"
+
+
+def _html_duplicate_issues(body: str) -> tuple[list[str], list[str]]:
+    issues: list[str] = []
+    removed: list[str] = []
+    h2s = [_semantic_key(h) for h in re.findall(r"<h2[^>]*>(.*?)</h2>", body or "", flags=re.IGNORECASE | re.DOTALL)]
+    dup_h2 = sorted({h for h in h2s if h and h2s.count(h) > 1})
+    if dup_h2:
+        issues.append("duplicate_h2_titles")
+        removed.extend(dup_h2)
+    paragraphs = [_semantic_key(p) for p in re.findall(r"<p[^>]*>(.*?)</p>", body or "", flags=re.IGNORECASE | re.DOTALL)]
+    dup_p = sorted({p for p in paragraphs if p and paragraphs.count(p) > 1})
+    if dup_p:
+        issues.append("repeated_paragraphs")
+        removed.extend(dup_p[:5])
+    faq_titles = [_semantic_key(h) for h in re.findall(r"<h[23][^>]*>(.*?)</h[23]>", body or "", flags=re.IGNORECASE | re.DOTALL) if "שאל" in _semantic_key(h)]
+    if len(faq_titles) != len(set(faq_titles)):
+        issues.append("duplicate_faq_blocks")
+    return issues, removed
+
+
+def validate_final_article_quality(body: str, meta_title: str, seo_metadata: dict[str, object], topic_profile: dict[str, object], selected_links: list[dict[str, object]], image_alt_text: str) -> dict[str, object]:
+    issues, duplicate_sections_removed = _html_duplicate_issues(body)
+    raw_body = body or ""
+    topic_type = str(topic_profile.get("topic_type") or "")
+    wrong_generic_by_topic = {
+        "meat_low_slow_smoking": ["מתי כדאי לשדרג ציוד", "איך נמנעים מקנייה לא נכונה", "התאמה לשימוש האמיתי שלכם"],
+        "poultry_grill_recipe": ["מתי כדאי לשדרג ציוד", "איך נמנעים מקנייה לא נכונה", "צ׳קליסט מעשי", "התאמה לשימוש האמיתי שלכם"],
+    }
+    if any(label in raw_body for label in TOPIC_TYPE_CONTRACTS.keys()) or any(label in raw_body for label in TOPIC_TYPE_GENERATORS.values()):
+        issues.append("internal_topic_type_label_visible")
+    leaked = [phrase for phrase in wrong_generic_by_topic.get(topic_type, []) if phrase in raw_body]
+    if leaked:
+        issues.append("wrong_generic_filler_sections:" + ",".join(leaked))
+    if any(phrase in raw_body for phrase in ["נמשיך לעדכן כאן", "למי שרוצה להמשיך מהתיאוריה לבחירה באתר"]):
+        issues.append("placeholder_or_generic_system_wording")
+    keywords = seo_metadata.get("seo_keywords") if isinstance(seo_metadata, dict) else []
+    if not isinstance(keywords, list) or len(keywords) < 8:
+        issues.append("keywords_count_below_8")
+    if any(term in meta_title for term in INTERNAL_SEO_CONTRACT_TERMS):
+        issues.append("meta_title_contains_internal_contract_name")
+    alt_norm = _normalize_hebrew(image_alt_text)
+    entity = _normalize_hebrew(str(topic_profile.get("main_entity") or ""))
+    if not image_alt_text or (entity and entity not in alt_norm and str(topic_profile.get("entity_key") or "") not in {"basalt_stones", "thermometer"} and not (topic_type == "poultry_grill_recipe" and "כנפ" in alt_norm)):
+        issues.append("alt_not_entity_specific")
+    if re.search(r"href=['\"](?!https://compassgrill\.co\.il/)[^'\"]+", raw_body):
+        issues.append("non_public_or_external_internal_link")
+    for link in selected_links or []:
+        if not str(link.get("reason") or "") and str(link.get("section") or "") != "body_paragraph":
+            issues.append("selected_link_missing_reason")
+        text = f"{link.get('title','')} {link.get('anchor_text','')} {link.get('url','')}"
+        scores = {
+            "entity_match_score": link.get("entity_match_score", 0),
+            "keyword_match_score": link.get("keyword_match_score", 10 if link.get("link_role") in {"exact_entity", "complementary", "related_category"} else 0),
+            "relevance_score": link.get("relevance_score", link.get("relatedness_score", 0)),
+        }
+        if not _passes_link_semantic_gate(str(topic_profile.get("main_entity") or ""), text, str(link.get("page_type") or link.get("type") or "product"), scores, topic_profile):
+            issues.append("irrelevant_selected_link:" + str(link.get("title") or link.get("url") or "unknown"))
+    return {
+        "final_quality_passed": not issues,
+        "final_quality_issues": issues,
+        "duplicate_sections_removed": duplicate_sections_removed,
+    }
+
 def _final_generation_debug(topic_profile: dict[str, object], validation: dict[str, object], *, regeneration_count: int, final_body_source: str, discovery_debug: dict[str, object] | None = None, body: str = "", selected_products: list[dict[str, object]] | None = None, injected_links: list[dict[str, object]] | None = None, seo_metadata: dict[str, object] | None = None) -> dict[str, object]:
     link_scores = [float(item.get("relevance_score") or item.get("semantic_topic_match_score") or 0) for item in (selected_products or [])]
     return {
@@ -1594,18 +1843,18 @@ def generate_daily_article_draft(db: Session, *, randomize: bool = False) -> tup
         title, keyword, intent = _select_topic(db)
         reused = False
         last_generated_at = None
-    related, discovery_debug = _discover_related_links(db, keyword)
     slug, _slug_source = _fallback_topic_slug(keyword, title)
     topic_profile = _classify_topic(title, keyword, intent)
+    related, discovery_debug = _discover_related_links(db, keyword)
     featured_prompt, section_prompts = _topic_image_prompts(keyword, topic_profile)
     body, _ = _remove_h1_tags(_build_article_html(title, keyword, related, topic_profile=topic_profile))
-    body, injected_links = inject_internal_links_into_html(body, related)
+    body, injected_links = inject_internal_links_into_html(body, related, topic_profile)
     body, _, _ = _postprocess_article_assets(body, "")
     validation = validate_article_relevance(title, keyword, body, topic_profile, image_prompt=featured_prompt, internal_links=injected_links or related)
     regeneration_count = 0
     if not validation["validation_passed"]:
         regenerated_body, _ = _remove_h1_tags(_build_article_html(title, keyword, related, topic_profile=topic_profile))
-        body, injected_links = inject_internal_links_into_html(regenerated_body, related)
+        body, injected_links = inject_internal_links_into_html(regenerated_body, related, topic_profile)
         body, _, _ = _postprocess_article_assets(body, "")
         regeneration_count = 1
         validation = validate_article_relevance(title, keyword, body, topic_profile, image_prompt=featured_prompt, internal_links=injected_links or related)
@@ -1621,8 +1870,11 @@ def generate_daily_article_draft(db: Session, *, randomize: bool = False) -> tup
     seo_metadata = build_topic_seo_metadata(keyword, title, topic_profile)
     meta_title, meta_description = str(seo_metadata["meta_title"]), str(seo_metadata["meta_description"])
     body, meta_title, faq_schema = _postprocess_article_assets(body, meta_title, faq_schema)
+    image_alt_text, alt_source = _generate_image_alt_text(title, keyword, topic_profile)
+    final_quality = validate_final_article_quality(body, meta_title, seo_metadata, topic_profile, injected_links or related, image_alt_text)
+    validation = {**validation, **final_quality, "alt_generation_source": alt_source, "topic_specific_expansion_source": _topic_specific_expansion_html(str(topic_profile.get("topic_type") or ""), str(topic_profile.get("main_entity") or keyword), keyword, str(topic_profile.get("entity_key") or ""))[1]}
     draft = ContentArticleDraft(
-        status="READY_FOR_REVIEW" if validation["validation_passed"] else "CONTENT_DRAFT", topic_title=title, title=title, slug=slug,
+        status="READY_FOR_REVIEW" if validation["validation_passed"] and validation.get("final_quality_passed", True) else "NEEDS_REWRITE", topic_title=title, title=title, slug=slug,
         meta_title=meta_title,
         meta_description=meta_description,
         focus_keyword=keyword, target_intent=intent, article_body=body,
@@ -1631,7 +1883,7 @@ def generate_daily_article_draft(db: Session, *, randomize: bool = False) -> tup
         faq_schema_json=json.dumps(faq_schema, ensure_ascii=False),
         section_image_prompts_json=json.dumps(section_prompts, ensure_ascii=False),
         featured_image_prompt=featured_prompt,
-        image_alt_text=f"{title} - הדגמה על גריל", image_title=f"תמונת שער: {title}", image_caption="הדגמה מעשית של השיטה במאמר.",
+        image_alt_text=image_alt_text, image_title=f"תמונת שער: {title}", image_caption="הדגמה מעשית של השיטה במאמר.",
         image_filename_slug=f"compass-grill-{slug}", image_style_rules="realistic outdoor BBQ photography",
         generated_image_url=None, uploaded_media_id=None, image_publish_status="NOT_PUBLISHED",
         target_site_section="blog", target_publish_type="article", target_blog_base_url="https://compassgrill.co.il/blog/",
@@ -1652,26 +1904,29 @@ def generate_topic_article_draft(
     target_intent: str,
     preferred_slug: str | None = None,
 ) -> ContentArticleDraft:
-    related, discovery_debug = _discover_related_links(db, focus_keyword)
     topic_profile = _classify_topic(topic_title, focus_keyword, target_intent)
+    related, discovery_debug = _discover_related_links(db, focus_keyword)
     slug = _slugify(preferred_slug or "") if preferred_slug else _fallback_topic_slug(focus_keyword, topic_title)[0]
     featured_prompt, section_prompts = _topic_image_prompts(focus_keyword, topic_profile)
     body, _ = _remove_h1_tags(_build_article_html(topic_title, focus_keyword, related, topic_profile=topic_profile))
-    body, injected_links = inject_internal_links_into_html(body, related)
+    body, injected_links = inject_internal_links_into_html(body, related, topic_profile)
     body, _, _ = _postprocess_article_assets(body, "")
     validation = validate_article_relevance(topic_title, focus_keyword, body, topic_profile, image_prompt=featured_prompt, internal_links=injected_links or related)
     regeneration_count = 0
     if not validation["validation_passed"]:
         regenerated_body, _ = _remove_h1_tags(_build_article_html(topic_title, focus_keyword, related, topic_profile=topic_profile))
-        body, injected_links = inject_internal_links_into_html(regenerated_body, related)
+        body, injected_links = inject_internal_links_into_html(regenerated_body, related, topic_profile)
         body, _, _ = _postprocess_article_assets(body, "")
         regeneration_count = 1
         validation = validate_article_relevance(topic_title, focus_keyword, body, topic_profile, image_prompt=featured_prompt, internal_links=injected_links or related)
     seo_metadata = build_topic_seo_metadata(focus_keyword, topic_title, topic_profile)
     meta_title, meta_description = str(seo_metadata["meta_title"]), str(seo_metadata["meta_description"])
     body, meta_title, _ = _postprocess_article_assets(body, meta_title)
+    image_alt_text, alt_source = _generate_image_alt_text(topic_title, focus_keyword, topic_profile)
+    final_quality = validate_final_article_quality(body, meta_title, seo_metadata, topic_profile, injected_links or related, image_alt_text)
+    validation = {**validation, **final_quality, "alt_generation_source": alt_source, "topic_specific_expansion_source": _topic_specific_expansion_html(str(topic_profile.get("topic_type") or ""), str(topic_profile.get("main_entity") or focus_keyword), focus_keyword, str(topic_profile.get("entity_key") or ""))[1]}
     draft = ContentArticleDraft(
-        status="READY_FOR_REVIEW" if validation["validation_passed"] else "CONTENT_DRAFT", topic_title=topic_title, title=topic_title, slug=slug,
+        status="READY_FOR_REVIEW" if validation["validation_passed"] and validation.get("final_quality_passed", True) else "NEEDS_REWRITE", topic_title=topic_title, title=topic_title, slug=slug,
         meta_title=meta_title,
         meta_description=meta_description,
         focus_keyword=focus_keyword, target_intent=target_intent, article_body=body,
@@ -1679,7 +1934,7 @@ def generate_topic_article_draft(
         internal_links_json=json.dumps(injected_links or related, ensure_ascii=False),
         section_image_prompts_json=json.dumps(section_prompts, ensure_ascii=False),
         featured_image_prompt=featured_prompt,
-        image_alt_text=f"{topic_title} - הדגמה על גריל", image_title=f"תמונת שער: {topic_title}", image_caption="הדגמה מעשית של השיטה במאמר.",
+        image_alt_text=image_alt_text, image_title=f"תמונת שער: {topic_title}", image_caption="הדגמה מעשית של השיטה במאמר.",
         image_filename_slug=f"compass-grill-{slug}", image_style_rules="realistic outdoor BBQ photography",
         generated_image_url=None, uploaded_media_id=None, image_publish_status="NOT_PUBLISHED",
         target_site_section="blog", target_publish_type="article", target_blog_base_url="https://compassgrill.co.il/blog/",
