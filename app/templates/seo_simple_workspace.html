@@ -68,7 +68,9 @@
           <p><strong>Slug:</strong> {{ article.slug }}</p>
           <p><strong>Meta Title:</strong> {{ article.meta_title }}</p>
           <p><strong>Meta Description:</strong> {{ article.meta_description }}</p>
-          <p><strong>מילות מפתח לקידום במנועי חיפוש:</strong> {{ article.debug.seo_keywords | join(', ') if article.debug and article.debug.seo_keywords else article.focus_keyword }}</p>
+          {% set expanded_keywords = article.debug.seo_keywords if article.debug and article.debug.seo_keywords else [article.focus_keyword] %}
+          {% set expanded_keywords_text = expanded_keywords | join(', ') %}
+          <p><strong>מילות מפתח לקידום במנועי חיפוש:</strong> {{ expanded_keywords_text }}</p>
           <details><summary>תצוגה מקדימה</summary><div>{{ article.article_body|safe }}</div></details>
           <section class="manual-upload-layout" aria-label="הכנה להעלאה ידנית ל-ISTORE">
             <p style="display:none">manual-upload-view · הכנה מהירה לעובד חנות</p>
@@ -94,7 +96,7 @@
               <h5>4. תוכן ראשי להדבקה</h5><textarea id="final-content-box-{{ article.id }}" readonly>{{ publish_ready_html|replace('[IMAGE_3_HERE]', '')|replace('[IMAGE_4_HERE]', '')|replace('[IMAGE_5_HERE]', '') }}</textarea><button type="button" class="secondary-button" data-action="copy-from-target" data-copy-target="final-content-box-{{ article.id }}">העתק</button><p>להדביק בשדה תוכן ראשי באתר</p>
               <h5>5. כותרת לקידום במנועי חיפוש (Meta Title)</h5><textarea readonly>{{ article.meta_title }}</textarea><button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ article.meta_title }}">העתק</button><p>להדביק בשדה Meta Title באתר</p>
               <h5>6. תיאור לקידום במנועי חיפוש (Meta Description)</h5><textarea readonly>{{ article.meta_description }}</textarea><button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ article.meta_description }}">העתק</button><p>להדביק בשדה Meta Description באתר</p>
-              <h5>7. מילות מפתח (Keywords)</h5><textarea readonly>{{ article.focus_keyword }}</textarea><button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ article.focus_keyword }}">העתק</button><p>להדביק בשדה Keywords באתר</p>
+              <h5>7. מילות מפתח (Keywords)</h5><textarea readonly>{{ expanded_keywords_text }}</textarea><button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ expanded_keywords_text }}">העתק</button><p>להדביק בשדה Keywords באתר</p>
               <h5>8. ALT לתמונה</h5><textarea readonly>{{ article.image_alt_text }}</textarea><button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ article.image_alt_text }}">העתק</button><p>להדביק בשדה ALT באתר</p>
             </div>
             <div class="manual-upload-grid">

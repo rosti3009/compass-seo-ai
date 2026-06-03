@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from difflib import SequenceMatcher
+from pathlib import Path
+import re
 
 import pytest
 from sqlalchemy import create_engine
@@ -156,3 +158,79 @@ def test_topic_seo_metadata_expands_entity_specific_keywords(db_session: Session
     assert metadata["seo_score"] >= 85
     for expected_phrase in ["איך לצלות פיקניה", "טמפרטורת פיקניה", "Reverse Sear פיקניה", "פיקניה גריל גז"]:
         assert expected_phrase in metadata["seo_keywords"]
+
+
+def _normalized_html_text(value: str) -> str:
+    return service._normalize_hebrew(service._plain_text(value))
+
+
+def test_postprocess_removes_repeated_section_titles_paragraphs_and_faq_blocks() -> None:
+    html = """
+    <h2>הערת עומק נוספת לכנפיים</h2><p>אותו טקסט חוזר על ייבוש הכנפיים לפני הצלייה.</p>
+    <h2>הערת עומק נוספת לכנפיים</h2><p>אותו טקסט חוזר על ייבוש הכנפיים לפני הצלייה.</p>
+    <h3>שאלות נפוצות</h3><ul><li>שאלת כנפיים נפוצה?</li></ul>
+    <h3>שאלות נפוצות</h3><ul><li>שאלת כנפיים נפוצה?</li></ul>
+    """
+    faq = {
+        "@type": "FAQPage",
+        "mainEntity": [
+            {"@type": "Question", "name": "כמה זמן צולים כנפיים?"},
+            {"@type": "Question", "name": "כמה זמן צולים כנפיים?"},
+        ],
+    }
+
+    body, _title, deduped_faq = service._postprocess_article_assets(html, "כנפיים קריספיות", faq)
+
+    assert body.count("<h2>הערת עומק נוספת לכנפיים</h2>") == 1
+    assert body.count("אותו טקסט חוזר על ייבוש הכנפיים לפני הצלייה") == 1
+    assert body.count("<h3>שאלות נפוצות</h3>") == 1
+    assert body.count("שאלת כנפיים נפוצה") == 1
+    assert isinstance(deduped_faq, dict)
+    assert len(deduped_faq["mainEntity"]) == 1
+
+
+def test_generated_article_has_no_repeated_section_titles_or_paragraphs(db_session: Session) -> None:
+    draft = service.generate_topic_article_draft(
+        db_session,
+        topic_title="כנפיים קריספיות על הגריל",
+        focus_keyword="כנפיים קריספיות על הגריל",
+        target_intent="how-to",
+    )
+    section_titles = [_normalized_html_text(match) for match in re.findall(r"<h2[^>]*>(.*?)</h2>", draft.article_body)]
+    paragraphs = [_normalized_html_text(match) for match in re.findall(r"<p[^>]*>(.*?)</p>", draft.article_body)]
+
+    assert len(section_titles) == len(set(section_titles))
+    assert len(paragraphs) == len(set(paragraphs))
+
+
+def test_meta_title_normalization_removes_duplicated_phrases() -> None:
+    normalized = service._normalize_meta_title("כנפיים קריספיות על הגריל על הגריל | Compass Grill")
+
+    assert "על הגריל על הגריל" not in normalized
+    assert normalized == "כנפיים קריספיות על הגריל | Compass Grill"
+
+
+def test_employee_copy_keyword_field_uses_expanded_keyword_list() -> None:
+    template = Path("app/templates/seo_simple_workspace.html").read_text()
+
+    assert "expanded_keywords_text = expanded_keywords | join(', ')" in template
+    assert '<h5>7. מילות מפתח (Keywords)</h5><textarea readonly>{{ expanded_keywords_text }}</textarea>' in template
+    assert 'data-copy-text="{{ expanded_keywords_text }}"' in template
+
+
+def test_poultry_semantic_gate_rejects_unrelated_products() -> None:
+    topic = "כנפיים קריספיות על הגריל"
+    terms = [*service._match_terms_for_topic(topic), *service._topic_synonyms(topic)]
+    unrelated = [
+        "cast iron meat holder מחזיק בשר יצוק אביזרים לגריל",
+        "cinnamon kebab קינמון קבב גריל",
+        "bear claws טופרי דוב לפירוק בשר",
+        "gas burner מבער גז לגריל",
+    ]
+    related = "מדחום לבשר כנפיים chicken wings thermometer"
+
+    for candidate in unrelated:
+        scores = service._score_link_candidate(topic, candidate, "product", terms)
+        assert not service._passes_link_semantic_gate(topic, candidate, "product", scores)
+    related_scores = service._score_link_candidate(topic, related, "product", terms)
+    assert service._passes_link_semantic_gate(topic, related, "product", related_scores)
