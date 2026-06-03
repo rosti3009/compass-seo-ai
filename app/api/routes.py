@@ -41,6 +41,7 @@ from app.integrations.openai_client import OpenAIClient
 from app.services.content_articles import (
     GENERIC_FILLER_PHRASES,
     _classify_topic as classify_topic,
+    build_topic_seo_metadata,
     validate_article_relevance,
     generate_daily_article_draft,
     generate_topic_article_draft,
@@ -1443,6 +1444,11 @@ def _latest_active_candidate(db: Session) -> ContentArticleDraft | None:
 def _article_generation_response(draft: ContentArticleDraft, endpoint_used: str) -> dict[str, object]:
     quality = _article_quality_summary(draft)
     debug = _draft_debug(draft, "title")
+    seo_metadata = build_topic_seo_metadata(
+        draft.focus_keyword or "",
+        draft.title or draft.topic_title or "",
+        classify_topic(draft.topic_title or "", draft.focus_keyword or "", draft.target_intent or ""),
+    )
     diagnostics = {
         "article_id": draft.id,
         "created_at": draft.created_at.isoformat() if draft.created_at else None,
@@ -1457,6 +1463,11 @@ def _article_generation_response(draft: ContentArticleDraft, endpoint_used: str)
         "detected_topic_type": debug.get("detected_topic_type"),
         "selected_contract": debug.get("selected_contract"),
         "search_intent": debug.get("search_intent"),
+        "primary_keyword": seo_metadata.get("primary_keyword"),
+        "secondary_keywords": seo_metadata.get("secondary_keywords"),
+        "long_tail_keywords": seo_metadata.get("long_tail_keywords"),
+        "seo_keywords": seo_metadata.get("seo_keywords"),
+        "seo_score": seo_metadata.get("seo_score"),
         "title_body_relevance_score": debug.get("title_body_relevance_score"),
         "validation_passed": debug.get("validation_passed"),
         "missing_required_terms": debug.get("missing_required_terms"),
@@ -1518,6 +1529,22 @@ def _draft_debug(draft: ContentArticleDraft, slug_source: str = "title") -> dict
         "forbidden_terms_removed": removed_terms,
         "h1_removed": "<h1" not in body.lower(),
         "topic_keywords_detected": _topic_keywords_detected(body),
+        **{
+            key: value
+            for key, value in build_topic_seo_metadata(
+                draft.focus_keyword or "", draft.title or draft.topic_title or "", topic_profile
+            ).items()
+            if key
+            in {
+                "primary_keyword",
+                "secondary_keywords",
+                "long_tail_keywords",
+                "question_keywords",
+                "usage_keywords",
+                "seo_keywords",
+                "seo_score",
+            }
+        },
         "article_template_used": "fallback_generic" if topic_profile.get("topic_type") == "fallback_generic" else "topic_type_contract",
         "h1_cleanup_was_needed": removed,
         "final_body_source": validation_debug.get("final_body_source", "contract_engine" if topic_profile.get("topic_type") != "fallback_generic" else "fallback_generic"),

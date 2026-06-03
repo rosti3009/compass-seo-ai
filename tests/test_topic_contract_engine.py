@@ -133,3 +133,26 @@ def test_accessory_topic_uses_thermometer_entity_contract(db_session: Session) -
         assert basalt_term not in draft.article_body
     assert "thermometer" in draft.featured_image_prompt.lower()
     assert "basalt" not in draft.featured_image_prompt.lower()
+
+
+def test_topic_seo_metadata_expands_entity_specific_keywords(db_session: Session) -> None:
+    draft = service.generate_topic_article_draft(
+        db_session,
+        topic_title="פיקניה",
+        focus_keyword="פיקניה",
+        target_intent="how-to",
+    )
+    profile = service._classify_topic(draft.topic_title, draft.focus_keyword, draft.target_intent)
+    metadata = service.build_topic_seo_metadata(draft.focus_keyword, draft.title, profile)
+    forbidden_internal_names = service.INTERNAL_SEO_CONTRACT_TERMS
+
+    assert not any(term in draft.meta_title for term in forbidden_internal_names)
+    assert metadata["primary_keyword"] == "פיקניה"
+    assert len(metadata["seo_keywords"]) >= 8
+    assert all("פיקניה" in keyword or keyword in {"מדחום לבשר", "גריל פחמים", "מלח גס"} for keyword in metadata["seo_keywords"])
+    assert "פיקניה" in draft.meta_description
+    assert "פיקניה על הגריל" in draft.meta_description
+    assert 140 <= len(draft.meta_description) <= 160
+    assert metadata["seo_score"] >= 85
+    for expected_phrase in ["איך לצלות פיקניה", "טמפרטורת פיקניה", "Reverse Sear פיקניה", "פיקניה גריל גז"]:
+        assert expected_phrase in metadata["seo_keywords"]
