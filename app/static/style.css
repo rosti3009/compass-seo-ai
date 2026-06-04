@@ -719,3 +719,53 @@ pre {
 .common-mistake { background: #fff0ee; border-color: #edb8b1; }
 .article-cta { background: #f4efe7; border-color: #d6b991; }
 .article-checklist li { margin-bottom: 0.35rem; }
+
+/* Phase 2 publishing workspace polish */
+.image-placement-guide,
+.image-package-list {
+  line-height: 1.65;
+}
+.image-package-actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  margin: 0.75rem 0 1rem;
+}
+.image-progress {
+  color: #146c43;
+  font-weight: 700;
+}
+.image-package-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+  padding: 0;
+  list-style: none;
+}
+.image-package-item {
+  background: #fffdf8;
+  border: 1px solid #eadbc2;
+  border-radius: 16px;
+  padding: 1rem;
+  box-shadow: 0 8px 24px rgba(43, 29, 14, 0.08);
+}
+.image-package-item textarea {
+  min-height: 120px;
+  margin: 0.5rem 0;
+  font-size: 0.92rem;
+}
+.image-package-preview {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin-top: 0.75rem;
+  border-radius: 12px;
+  border: 1px solid #eadbc2;
+}
+.article-preview h2,
+.manual-upload-card h5 {
+  letter-spacing: -0.01em;
+}
+.manual-upload-card {
+  padding: 1.25rem;
+}

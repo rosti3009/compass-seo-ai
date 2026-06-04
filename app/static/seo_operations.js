@@ -288,6 +288,57 @@ function renderArticlePreview(card, draft) {
   card.dataset.markersHtml = markers;
 }
 
+async function runPackageImageAction(button) {
+  const card = button.closest("[data-article-id]");
+  if (!card) return;
+  const feedback = card.querySelector("[data-image-feedback]");
+  const imageKey = button.dataset.imageKey;
+  const draftId = button.dataset.draftId;
+  const item = button.closest("[data-image-key]");
+  button.disabled = true;
+  if (feedback) feedback.textContent = `Generating ${imageKey}...`;
+  try {
+    const response = await fetch(`/content/articles/${draftId}/generate-image/${imageKey}`, { method: "POST", headers: { Accept: "application/json" } });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || payload.error || "Image generation failed");
+    const imageItem = payload.image_item || {};
+    const url = payload.preview_url || payload.generated_url || imageItem.preview_url || imageItem.generated_url || imageItem.image_url || "";
+    if (item) {
+      const statusNode = item.querySelector("[data-image-status-inline]");
+      if (statusNode) statusNode.textContent = payload.image_status || imageItem.status || "generated";
+      if (url && !item.querySelector("img.image-package-preview")) {
+        const img = document.createElement("img");
+        img.className = "image-package-preview";
+        img.alt = imageItem.alt || "";
+        img.src = url;
+        item.appendChild(img);
+      } else if (url) {
+        item.querySelector("img.image-package-preview").src = url;
+      }
+    }
+    if (feedback) feedback.innerHTML = `✓ Generated ${escapeHtml(imageKey)} · <a href="${escapeHtml(url)}" target="_blank" rel="noopener">Preview</a> · <a href="${escapeHtml(url)}" download>Download</a>`;
+  } catch (error) {
+    if (feedback) feedback.textContent = `שגיאה: ${error.message}`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function runGenerateAllImages(button) {
+  const card = button.closest("[data-article-id]");
+  if (!card) return;
+  const keys = ["featured_image", "image_1", "image_2", "image_3", "image_4"];
+  const progress = card.querySelector("[data-image-progress]");
+  button.disabled = true;
+  for (let i = 0; i < keys.length; i += 1) {
+    if (progress) progress.textContent = `Generating ${i + 1}/5`;
+    const imageButton = card.querySelector(`[data-action='generate-package-image'][data-image-key='${keys[i]}']`);
+    if (imageButton) await runPackageImageAction(imageButton);
+  }
+  if (progress) progress.textContent = "✓ All Images Ready";
+  button.disabled = false;
+}
+
 async function runManualImageAction(button, action) {
   const card = button.closest("[data-article-id]");
   if (!card) return;
@@ -412,6 +463,14 @@ function bindOperations(root = document) {
   root.querySelectorAll("[data-action='generate-image']:not([data-bound='true'])").forEach((button) => {
     button.dataset.bound = "true";
     button.addEventListener("click", () => runManualImageAction(button, "image"));
+  });
+  root.querySelectorAll("[data-action='generate-package-image']:not([data-bound='true'])").forEach((button) => {
+    button.dataset.bound = "true";
+    button.addEventListener("click", () => runPackageImageAction(button));
+  });
+  root.querySelectorAll("[data-action='generate-all-images']:not([data-bound='true'])").forEach((button) => {
+    button.dataset.bound = "true";
+    button.addEventListener("click", () => runGenerateAllImages(button));
   });
   root.querySelectorAll("[data-action='copy-html']:not([data-bound='true'])").forEach((button) => {
     button.dataset.bound = "true";

@@ -121,9 +121,32 @@
             <div class="manual-upload-card image-placement-guide">
               <h5>IMAGE PLACEMENT GUIDE</h5>
               {% if image_package %}
-              <ul>
+              <div class="image-package-actions">
+                <button type="button" class="secondary-button" data-action="generate-all-images" data-draft-id="{{ article.id }}">Generate All Images</button>
+                <span class="image-progress" data-image-progress>Ready</span>
+              </div>
+              <ul class="image-package-list">
                 {% for image in image_package %}
-                <li><strong>{{ image.key }}</strong> · <span dir="ltr">{{ image.filename }}</span> · ALT: {{ image.alt }} · {{ image.caption }}</li>
+                <li class="image-package-item" data-image-key="{{ image.key }}">
+                  <div><strong>{{ image.key }}</strong> · <span dir="ltr">{{ image.filename }}</span> · <span data-image-status-inline>{{ image.status or 'planned' }}</span></div>
+                  <div><strong>Title:</strong> {{ image.title }}</div>
+                  <div><strong>ALT:</strong> {{ image.alt }}</div>
+                  <div><strong>Caption:</strong> {{ image.caption }}</div>
+                  <textarea readonly>{{ image.prompt }}</textarea>
+                  <div class="actions">
+                    <button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ image.prompt }}">Copy Prompt</button>
+                    <button type="button" class="secondary-button" data-action="generate-package-image" data-draft-id="{{ article.id }}" data-image-key="{{ image.key }}">Generate Image</button>
+                    {% if image.generated_url or image.image_url %}
+                    {% set package_url = image.generated_url or image.image_url %}
+                    <a class="secondary-button" href="{{ package_url }}" target="_blank" rel="noopener">Preview</a>
+                    <a class="secondary-button" href="{{ package_url }}" download>Download</a>
+                    <button type="button" class="secondary-button" data-action="generate-package-image" data-draft-id="{{ article.id }}" data-image-key="{{ image.key }}">Regenerate</button>
+                    {% endif %}
+                  </div>
+                  {% if image.preview_url or image.generated_url or image.image_url %}
+                  <img src="{{ image.preview_url or image.generated_url or image.image_url }}" alt="{{ image.alt }}" class="image-package-preview">
+                  {% endif %}
+                </li>
                 {% endfor %}
               </ul>
               {% endif %}
@@ -282,7 +305,7 @@
               <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/generate-daily-draft" data-method="POST" data-refresh-on-success="true">צור מאמר מחדש</button>
             {% endif %}
             <button type="button" class="secondary-button" data-action="generate-image-plan" data-draft-id="{{ article.id }}">צור תכנון תמונה</button>
-            <button type="button" class="secondary-button" data-action="generate-image" data-draft-id="{{ article.id }}">צור תמונה</button>
+            <button type="button" class="secondary-button" data-action="generate-image" data-draft-id="{{ article.id }}">Generate All Images</button>
             <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/{{ article.id }}/archive-manual-work" data-method="POST" data-label="סיים עבודה / העבר לארכיון" data-refresh-on-success="true">סיים עבודה / העבר לארכיון</button>
             <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/{{ article.id }}/set-active" data-method="POST" data-label="הפוך למאמר פעיל" data-refresh-on-success="true">הפוך למאמר פעיל</button>
           </div>
