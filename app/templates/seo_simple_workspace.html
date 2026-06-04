@@ -85,7 +85,46 @@
             <h4>העתקה לאתר לפי החלונות ב־ISTORE</h4>
             {% set existing_image_url = article.generated_image_url or article.featured_image_url %}
             {% set hero_html = '<p><img src="' ~ existing_image_url ~ '" alt="' ~ (article.image_alt_text or '') ~ '"></p>' if existing_image_url else '' %}
-            {% set publish_ready_html = (hero_html ~ '\n' ~ (article.article_body or ''))|replace('[IMAGE_1_HERE]', hero_html)|replace('[IMAGE_2_HERE]', '') %}
+            {% set publish_ready_html = (hero_html ~ '\n' ~ (article.article_body or ''))|replace('[IMAGE_1_HERE]', hero_html)|replace('[IMAGE_2_HERE]', '')|replace('<!-- IMAGE_1 -->', '')|replace('<!-- IMAGE_2 -->', '')|replace('<!-- IMAGE_3 -->', '')|replace('<!-- IMAGE_4 -->', '') %}
+            {% set publishing_meta = article.image_generation_metadata or {} %}
+            {% set image_package = publishing_meta.image_package or [] %}
+            {% set placement_guide = publishing_meta.image_placement_guide or [] %}
+            {% set istore_steps = publishing_meta.istore_copy_paste_package.steps or [] %}
+            <div class="manual-upload-card istore-copy-mode">
+              <h5>ISTORE COPY/PASTE MODE · אפס ניחושים</h5>
+              {% if istore_steps %}
+                {% for step in istore_steps %}
+                <div class="istore-step">
+                  <h6>STEP {{ step.step }} — {{ step.label }}</h6>
+                  {% if step.filename %}<p><strong>Filename:</strong> <span dir="ltr">{{ step.filename }}</span></p>{% endif %}
+                  {% if step.alt %}<p><strong>ALT:</strong> {{ step.alt }}</p>{% endif %}
+                  {% if step.caption %}<p><strong>Caption:</strong> {{ step.caption }}</p>{% endif %}
+                  {% if step.prompt %}<p><strong>Prompt:</strong> {{ step.prompt }}</p>{% endif %}
+                  {% if step.value %}<textarea readonly>{{ step.value }}</textarea><button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ step.value }}">העתק STEP {{ step.step }}</button>{% endif %}
+                  {% if step.html %}<textarea id="istore-step-{{ article.id }}-{{ step.step }}" readonly>{{ step.html|replace('<!-- IMAGE_1 -->', '')|replace('<!-- IMAGE_2 -->', '')|replace('<!-- IMAGE_3 -->', '')|replace('<!-- IMAGE_4 -->', '') }}</textarea><button type="button" class="secondary-button" data-action="copy-from-target" data-copy-target="istore-step-{{ article.id }}-{{ step.step }}">העתק STEP {{ step.step }}</button>{% endif %}
+                </div>
+                {% endfor %}
+              {% else %}
+                <p class="empty">מצב ISTORE יופיע לאחר יצירת מאמר חדש במנוע החבילות.</p>
+              {% endif %}
+            </div>
+            <div class="manual-upload-card image-placement-guide">
+              <h5>IMAGE PLACEMENT GUIDE</h5>
+              {% if image_package %}
+              <ul>
+                {% for image in image_package %}
+                <li><strong>{{ image.key }}</strong> · <span dir="ltr">{{ image.filename }}</span> · ALT: {{ image.alt }} · {{ image.caption }}</li>
+                {% endfor %}
+              </ul>
+              {% endif %}
+              {% if placement_guide %}
+              <ol>
+                {% for item in placement_guide %}
+                <li><strong>{{ item.image }}</strong>: {{ item.instruction }}{% if item.section %} — {{ item.section }}{% endif %}</li>
+                {% endfor %}
+              </ol>
+              {% endif %}
+            </div>
             <div class="manual-upload-card">
               <h5>1. כותרת</h5><textarea readonly>{{ article.title }}</textarea><button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ article.title }}">העתק</button><p>להדביק בשדה כותרת באתר</p>
               <h5>2. שם ייחודי לקישור / Slug</h5><textarea readonly>{{ article.slug }}</textarea><button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ article.slug }}">העתק</button><p>להדביק בשדה slug באתר</p>
@@ -101,7 +140,7 @@
               <textarea readonly>{{ article.featured_image_prompt }}</textarea><button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ article.featured_image_prompt }}">העתק prompt</button>
               {% endif %}
               <p>להדביק בשדה תמונה ראשית באתר</p>
-              <h5>4. תוכן ראשי להדבקה</h5><textarea id="final-content-box-{{ article.id }}" readonly>{{ publish_ready_html|replace('[IMAGE_3_HERE]', '')|replace('[IMAGE_4_HERE]', '')|replace('[IMAGE_5_HERE]', '') }}</textarea><button type="button" class="secondary-button" data-action="copy-from-target" data-copy-target="final-content-box-{{ article.id }}">העתק</button><p>להדביק בשדה תוכן ראשי באתר</p>
+              <h5>4. תוכן ראשי להדבקה</h5><textarea id="final-content-box-{{ article.id }}" readonly>{{ publish_ready_html|replace('[IMAGE_3_HERE]', '')|replace('[IMAGE_4_HERE]', '')|replace('[IMAGE_5_HERE]', '')|replace('<!-- IMAGE_1 -->', '')|replace('<!-- IMAGE_2 -->', '')|replace('<!-- IMAGE_3 -->', '')|replace('<!-- IMAGE_4 -->', '') }}</textarea><button type="button" class="secondary-button" data-action="copy-from-target" data-copy-target="final-content-box-{{ article.id }}">העתק</button><p>להדביק בשדה תוכן ראשי באתר</p>
               <h5>5. כותרת לקידום במנועי חיפוש (Meta Title)</h5><textarea readonly>{{ article.meta_title }}</textarea><button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ article.meta_title }}">העתק</button><p>להדביק בשדה Meta Title באתר</p>
               <h5>6. תיאור לקידום במנועי חיפוש (Meta Description)</h5><textarea readonly>{{ article.meta_description }}</textarea><button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ article.meta_description }}">העתק</button><p>להדביק בשדה Meta Description באתר</p>
               <h5>7. מילות מפתח (Keywords)</h5><textarea readonly>{{ expanded_keywords_text }}</textarea><button type="button" class="secondary-button" data-action="copy-text" data-copy-text="{{ expanded_keywords_text }}">העתק</button><p>להדביק בשדה Keywords באתר</p>
@@ -133,7 +172,7 @@
             <textarea id="article-html-markers-{{ article.id }}" class="copy-source-hidden" readonly>{{ article.article_body }}
 [IMAGE_1_HERE]
 [IMAGE_2_HERE]</textarea>
-            <textarea id="article-html-clean-{{ article.id }}" class="copy-source-hidden" readonly>{{ publish_ready_html|replace('[IMAGE_3_HERE]', '')|replace('[IMAGE_4_HERE]', '')|replace('[IMAGE_5_HERE]', '') }}</textarea>
+            <textarea id="article-html-clean-{{ article.id }}" class="copy-source-hidden" readonly>{{ publish_ready_html|replace('[IMAGE_3_HERE]', '')|replace('[IMAGE_4_HERE]', '')|replace('[IMAGE_5_HERE]', '')|replace('<!-- IMAGE_1 -->', '')|replace('<!-- IMAGE_2 -->', '')|replace('<!-- IMAGE_3 -->', '')|replace('<!-- IMAGE_4 -->', '') }}</textarea>
             <h5>תצוגה חיה (Live Preview)</h5>
             <div class="actions">
               <button type="button" class="secondary-button" data-action="copy-html" data-copy-type="full">העתק HTML מלא</button>
