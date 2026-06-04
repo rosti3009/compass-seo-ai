@@ -68,7 +68,7 @@ TOPIC_ROUTING = {
     "picanha": ["פיקניה"],
     "gas_grill": ["גריל גז"],
     "tabun": ["טאבון"],
-    "butcher_paper": ["נייר קצבים"],
+    "butcher_paper": ["נייר קצבים", "butcher paper", "pink butcher paper", "smoking paper"],
     "thermometer": ["מדחום לבשר", "מדחום"],
     "charcoal": ["פחם קוקוס", "פחם עץ", "פחם"],
 }
@@ -235,6 +235,17 @@ TOPIC_TYPE_CONTRACTS: dict[str, dict[str, object]] = {
         "image_prompt_pattern": "smoking wood guide for {keyword}, wood chips in smoker box, separate piles of chips and chunks, thin blue smoke, flavor matching setup, no chicken wings, no text",
         "internal_link_keywords": ["שבבי עץ", "צ׳אנקים", "מעשנה", "נייר קצבים"],
     },
+    "smoking_accessory_guide": {
+        "entity_type": "smoking_accessory",
+        "content_format": "smoking_accessory_how_to_guide",
+        "required_sections": ["מה זה", "עטיפת בריסקט", "עטיפת צלעות", "נתחי בקר", "שלב הסטול", "Texas Crutch", "שמירת Bark", "שמירת לחות", "נייר קצבים מול נייר כסף", "מתי לעטוף", "איך לעטוף", "נייר ורוד מול חום", "טעויות נפוצות", "שאלות נפוצות"],
+        "required_terms": ["נייר קצבים", "בריסקט", "צלעות", "נתחי בקר", "סטול", "Texas Crutch", "Bark", "שמירת לחות", "נייר כסף", "מתי לעטוף", "איך לעטוף", "נייר ורוד", "נייר חום", "טעויות נפוצות"],
+        "forbidden_terms": ["התקנה", "התאמה לגריל", "חוסם אוויר", "חסימת אוויר", "תחזוקה", "מתי להחליף", "כיול", "מבערים", "מבער", "החלפת אביזר שחוק", "אביזר שחוק"],
+        "temperature_policy": {"allowed": ["105–120°C", "90–96°C"], "meaning": "smoking wrap timing and finish cues only"},
+        "meta_pattern": "{keyword}: מדריך נייר קצבים לעישון עם בריסקט, סטול, Texas Crutch, Bark והשוואה לנייר כסף.",
+        "image_prompt_pattern": "pink butcher paper for smoking brisket and ribs beside a smoker, bark preservation and moisture retention context, no grill installation, no burners, no airflow diagram, no text",
+        "internal_link_keywords": ["נייר קצבים", "נייר קצבים לעישון", "butcher paper", "pink butcher paper", "בריסקט", "צלעות", "מעשנה", "עצי עישון", "מדחום לבשר"],
+    },
     "grill_accessory_guide": {
         "entity_type": "grill_accessory",
         "content_format": "accessory_use_and_buying_guide",
@@ -289,7 +300,8 @@ TOPIC_CLASSIFIER_RULES: list[tuple[str, list[str], str, str]] = [
     ("poultry_grill_recipe", ["כנפיים", "פרגית", "עוף", "שיפודי פרגית"], "poultry", "how-to"),
     ("fuel_comparison_or_guide", ["פחם", "פחם קוקוס", "פחמי עץ", "גחלים", "charcoal", "fuel"], "fuel", "comparison"),
     ("smoking_wood_guide", ["שבבי עץ", "צ׳אנקים", "צ'אנקים", "צאנקים", "עצי עישון", "wood chips", "smoking wood"], "smoking_wood", "commercial_informational"),
-    ("grill_accessory_guide", ["אבני בזלת", "בזלת", "אבני לבה", "מדחום", "נייר קצבים", "כפפות", "מלקחיים", "מברשת", "basalt", "lava rocks", "lava stones", "thermometer", "accessory"], "accessory", "commercial_informational"),
+    ("smoking_accessory_guide", ["נייר קצבים", "butcher paper", "butcher paper sheets", "pink butcher paper", "smoking paper"], "smoking_accessory", "how-to"),
+    ("grill_accessory_guide", ["אבני בזלת", "בזלת", "אבני לבה", "מדחום", "כפפות", "מלקחיים", "מברשת", "basalt", "lava rocks", "lava stones", "thermometer", "accessory"], "accessory", "commercial_informational"),
     ("equipment_buying_guide", ["גריל גז", "גריל פחמים", "מעשנה", "טאבון", "מטבח חוץ", "gas grill"], "equipment", "commercial"),
 ]
 
@@ -328,6 +340,7 @@ TOPIC_TYPE_GENERATORS = {
     "poultry_grill_recipe": "contract_poultry_grill_recipe",
     "fuel_comparison_or_guide": "contract_fuel_comparison_or_guide",
     "smoking_wood_guide": "contract_smoking_wood_guide",
+    "smoking_accessory_guide": "contract_smoking_accessory_guide",
     "grill_accessory_guide": "contract_grill_accessory_guide",
     "equipment_buying_guide": "contract_equipment_buying_guide",
     "recipe_how_to": "contract_recipe_how_to",
@@ -451,6 +464,7 @@ def _image_prompt_matches_brief(prompt: str, topic_profile: dict[str, object]) -
         "poultry_grill_recipe": ["chicken", "wings", "poultry"],
         "fuel_comparison_or_guide": ["charcoal", "fuel", "briquettes"],
         "smoking_wood_guide": ["wood", "chips", "chunks", "smoke"],
+        "smoking_accessory_guide": ["butcher", "paper", "brisket", "smoking"],
         "grill_accessory_guide": ["accessory", "installed", "grill"],
         "equipment_buying_guide": ["equipment", "buying", "size", "material"],
     }
@@ -676,7 +690,7 @@ def _dedupe_faq_schema(faq_schema: dict[str, object]) -> dict[str, object]:
 
 
 def _dedupe_article_html(html: str) -> str:
-    """Remove duplicate headings, paragraphs and repeated FAQ/list blocks before saving."""
+    """Remove duplicate H2/H3/H4 titles, paragraphs, list blocks and FAQ items before saving."""
     cleaned = html or ""
     seen_headings: set[tuple[str, str]] = set()
 
@@ -692,6 +706,20 @@ def _dedupe_article_html(html: str) -> str:
 
     cleaned = re.sub(r"<(h[2-4])([^>]*)>(.*?)</\1>", heading_repl, cleaned, flags=re.IGNORECASE | re.DOTALL)
 
+    seen_lists: set[str] = set()
+
+    def list_repl(match: re.Match[str]) -> str:
+        tag = match.group(1).lower()
+        attrs = match.group(2) or ""
+        inner = match.group(3) or ""
+        key = _semantic_key(inner)
+        if not key or key in seen_lists:
+            return ""
+        seen_lists.add(key)
+        return f"<{tag}{attrs}>{inner}</{tag}>"
+
+    cleaned = re.sub(r"<(ul|ol)([^>]*)>(.*?)</\1>", list_repl, cleaned, flags=re.IGNORECASE | re.DOTALL)
+
     seen_paragraphs: set[str] = set()
 
     def paragraph_repl(match: re.Match[str]) -> str:
@@ -705,23 +733,19 @@ def _dedupe_article_html(html: str) -> str:
 
     cleaned = re.sub(r"<p([^>]*)>(.*?)</p>", paragraph_repl, cleaned, flags=re.IGNORECASE | re.DOTALL)
 
-    seen_faq_blocks: set[str] = set()
+    seen_faq_items: set[str] = set()
 
-    def faq_list_repl(match: re.Match[str]) -> str:
-        tag = match.group(1).lower()
-        attrs = match.group(2) or ""
-        inner = match.group(3) or ""
-        if "שאל" not in _semantic_key(inner):
-            return match.group(0)
-        key = _semantic_key(inner)
-        if not key or key in seen_faq_blocks:
+    def faq_item_repl(match: re.Match[str]) -> str:
+        question = match.group(1) or ""
+        answer = match.group(2) or ""
+        key = _semantic_key(question + " " + answer)
+        if not key or key in seen_faq_items:
             return ""
-        seen_faq_blocks.add(key)
-        return f"<{tag}{attrs}>{inner}</{tag}>"
+        seen_faq_items.add(key)
+        return match.group(0)
 
-    cleaned = re.sub(r"<(ul|ol)([^>]*)>(.*?)</\1>", faq_list_repl, cleaned, flags=re.IGNORECASE | re.DOTALL)
+    cleaned = re.sub(r"<h3[^>]*>(.*?)</h3>\s*<p[^>]*>(.*?)</p>", faq_item_repl, cleaned, flags=re.IGNORECASE | re.DOTALL)
     return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
-
 
 def _normalize_meta_title(title: str) -> str:
     cleaned = re.sub(r"\s+", " ", (title or "")).strip()
@@ -765,6 +789,8 @@ def _topic_synonyms(topic: str) -> list[str]:
         syn += ["אבני בזלת", "אבני לבה", "אבני לבה לגריל", "אבני בזלת לגריל גז", "basalt", "basalt stones", "lava stones", "lava rocks", "grill accessories", "gas grill accessories", "פיזור חום", "התלקחויות"]
     if "שבבי" in normalized or "עישון" in normalized:
         syn += ["wood chips", "smoker", "smoking", "smoking wood", "עישון", "מעשנה"]
+    if "נייר קצבים" in normalized or "butcher" in lower or "smoking paper" in lower:
+        syn += ["butcher paper", "pink butcher paper", "butcher paper sheets", "smoking paper", "נייר קצבים", "נייר קצבים ורוד", "בריסקט", "צלעות", "סטול", "Texas Crutch", "Bark", "foil", "נייר כסף", "מעשנה", "smoker accessories"]
     if any(term in normalized for term in ["בריסקט", "אסאדו", "שורט", "ריבס"]):
         syn += ["brisket", "butcher paper", "נייר קצבים", "מדחום לבשר", "meat thermometer", "שבבי עץ", "wood chips", "wood chunks", "צ׳אנקים", "מעשנה", "smoker", "smoker accessories"]
     if "מדחום" in normalized or "thermometer" in lower:
@@ -1197,6 +1223,24 @@ def _build_contract_article(title: str, keyword: str, related: list[dict[str, st
             + "<hr><p><strong>CTA:</strong> התאימו עץ לעישון לפי חומר הגלם ורמת הטעם שאתם רוצים, לא לפי שם פופולרי בלבד.</p>"
         )
 
+    if topic_type == "smoking_accessory_guide":
+        return (
+            f"<p><strong>{title}</strong> הוא מדריך לנייר קצבים לעישון: מה זה butcher paper, איך הוא עוזר בעטיפת בריסקט וצלעות, מתי לעטוף בזמן הסטול, ואיך משווים butcher paper vs foil בלי לפגוע ב-Bark.</p>\n"
+            + _h2("מה זה נייר קצבים לעישון", "<p>נייר קצבים הוא נייר עבה ונושם יחסית שמשמש לעטיפת בשר בעישון ארוך. בניגוד לנייר כסף, הוא מאפשר לחלק מהאדים לצאת ולכן עוזר לשמור Bark יציב לצד שמירת לחות טובה בתוך הנתח.</p>")
+            + _h2("עטיפת בריסקט", "<p>בריסקט עוטפים כאשר הצבע כהה, ה-Bark יציב למגע והעלייה בחום מאטה בשלב הסטול. העטיפה מצמצמת אידוי, מקדמת ריכוך ומונעת ייבוש של ה-flat בלי להפוך את הקליפה לספוגית מדי.</p>")
+            + _h2("עטיפת צלעות ונתחי בקר", "<p>בצלעות ובנתחי בקר כמו אסאדו או שורט ריבס, נייר קצבים מתאים כאשר רוצים לקדם ריכוך ועדיין לשמור מרקם חיצוני. העיקרון זהה: קודם בונים צבע ועשן, אחר כך עוטפים רק כשהמעטפת יציבה.</p>")
+            + _h2("שלב הסטול ו-Texas Crutch", "<p>סטול הוא שלב שבו אידוי מקרר את פני הבשר ומאט את העלייה בטמפרטורה. Texas Crutch היא שיטת עטיפה שנועדה לעבור את השלב הזה מהר יותר; נייר קצבים הוא גרסה מאוזנת יותר מנייר כסף כי הוא פחות אוטם.</p>")
+            + _h2("שמירת Bark ושמירת לחות", "<p>Bark טוב נבנה לפני העטיפה מתבלינים יבשים, עשן וחום יציב. נייר קצבים שומר לחות בלי לכלוא יותר מדי אדים, ולכן הוא עוזר לשמר קליפה כהה ויציבה יותר מאשר עטיפה אטומה לחלוטין.</p>")
+            + _h2("butcher paper vs foil", "<p>butcher paper vs foil, כלומר נייר קצבים מול נייר כסף, הוא הבדל בין נשימה לאיטום: נייר כסף מאיץ בישול ושומר נוזלים בצורה חזקה, אבל עלול לרכך Bark; נייר קצבים איטי מעט יותר, שומר מרקם חיצוני טוב יותר ומתאים לבריסקט שרוצים להגיש עם קליפה ברורה.</p>")
+            + _h2("מתי לעטוף", "<p>מתי לעטוף? לא לפי שעה קבועה, אלא לפי צבע, מגע והתקדמות הסטול. לרוב ממתינים עד שה-Bark לא נמרח באצבע, שהנתח קיבל גוון עמוק ושאיבוד הלחות מתחיל להאט את התהליך.</p>")
+            + _h2("איך לעטוף", "<p>איך לעטוף: מניחים שני דפים חופפים של נייר קצבים, מצמידים את הנתח במרכז, מקפלים צדדים בחוזקה ומגלגלים כך שהתפר יישב כלפי מטה. העטיפה צריכה להיות הדוקה, אך לא לקרוע את הנייר או למחוץ את הקליפה.</p>")
+            + _h2("נייר ורוד מול נייר חום", "<p>נייר ורוד מול חום: נייר ורוד הוא בדרך כלל peach/pink butcher paper לא מולבן שמזוהה עם BBQ אמריקאי. נייר חום יכול לעבוד אם הוא food-safe, ללא ציפוי שעווה או פלסטיק וללא צבעים בעייתיים; תמיד בודקים התאמה למגע עם מזון וחום עקיף.</p>")
+            + _h2("טעויות נפוצות", "<ul><li>לעטוף מוקדם לפני שיש Bark יציב.</li><li>להשתמש בנייר מצופה שעווה או פלסטיק במקום נייר קצבים food-safe.</li><li>לעטוף רפוי כך שנוזלים ואדים מצטברים בכיסים.</li><li>להניח שנייר קצבים ונייר כסף נותנים אותה תוצאה.</li></ul>")
+            + links
+            + _faq([("האם נייר קצבים חובה לבריסקט?", "לא חובה, אבל הוא עוזר לעבור סטול תוך שמירה טובה יותר על Bark לעומת נייר כסף."), ("האם אפשר לעטוף צלעות בנייר קצבים?", "כן, בעיקר כאשר רוצים ריכוך בלי לאבד לגמרי את המרקם החיצוני."), ("מה ההבדל בין ורוד לחום?", "הצבע פחות חשוב מהבטיחות: צריך נייר food-safe, לא מצופה, שמתאים לעישון וחום עקיף.")])
+            + "<hr><p><strong>CTA:</strong> לעישון בריסקט, צלעות ונתחי בקר הכינו נייר קצבים מתאים לפני תחילת הסשן, כדי להחליט בזמן אמת מתי לעטוף.</p>"
+        )
+
     if topic_type == "grill_accessory_guide":
         entity_key = str(profile.get("entity_key") or "generic")
         if entity_key == "basalt_stones":
@@ -1307,6 +1351,29 @@ def _topic_specific_expansion_html(topic_type: str, entity: str, keyword: str, e
             + _h2("הגשה ושמירה על קריספיות", "<p>מגישים על רשת או מגש פתוח ולא סוגרים מיד בקופסה אטומה. אדים כלואים מרככים את העור ומוחקים חלק מהקריספיות.</p>"),
             "poultry_grill_recipe_expansion",
         )
+    if topic_type == "smoking_accessory_guide":
+        return (
+            _h2("בריסקט, ריבס ובקר: התאמת העטיפה", "<p>בריסקט נהנה מעטיפה הדוקה אחרי Bark יציב; ריבס וצלעות צריכים בדיקה עדינה יותר כדי לא לרכך יתר על המידה. בנתחי בקר שמנים במיוחד משתמשים בנייר קצבים כדי לאזן בין שמירת לחות לבין מרקם חיצוני.</p>")
+            + _h2("סימני עטיפה בזמן הסטול", "<p>בזמן הסטול מחפשים האטה עקבית, צבע מהגוני וקליפה שאינה נמרחת. אם ה-Bark עדיין רך, ממתינים; אם ה-flat מתחיל להתייבש והצבע מוכן, עוטפים.</p>")
+            + _h2("בדיקה אחרי העטיפה", "<p>אחרי העטיפה ממשיכים לבשל לפי רכות ולא לפי זמן. בודקים שהפרוב נכנס חלק, נותנים מנוחה ארוכה ושומרים את העטיפה סגורה עד שהנתח התייצב.</p>"),
+            "smoking_accessory_guide_expansion",
+        )
+
+    if topic_type == "grill_accessory_guide" and entity_key == "thermometer":
+        return (
+            _h2("סוגי מדחומים לבשר", "<p>יש מדחום קריאה מהירה לבדיקת נקודה בסיום הצלייה, מדחום פרוב שנשאר בנתח לאורך עישון ארוך, ומדחום עם כמה ערוצים למעקב אחרי כמה נתחים או אחרי תא הבישול. הבחירה תלויה במשך העבודה ובמידת השליטה שרוצים לקבל.</p>")
+            + _h2("דיוק, זמן תגובה וטווח מדידה", "<p>דיוק טוב מתחיל בחיישן איכותי וזמן תגובה קצר. מדחום איטי גורם להשאיר מכסה פתוח יותר מדי זמן, ולכן בנתחים מהירים חשוב לקבל קריאה בתוך שניות; בעישון ארוך חשוב יותר יציבות לאורך שעות.</p>")
+            + _h2("מיקום הפרוב בבשר", "<p>מכניסים את ה-probe למרכז החלק העבה, רחוק מעצם, שומן עבה או כיס אוויר. בנתח לא אחיד בודקים כמה נקודות כדי לוודא שהאזור הקר ביותר הגיע לטווח הרצוי בלי לייבש את הקצוות.</p>")
+            + _h2("שימוש בעישון ארוך", "<p>בעישון בריסקט, אסאדו או צלעות, פרוב קבוע עוזר להבין את קצב ההתקדמות ואת קצב ההתקדמות. הוא לא מחליף בדיקת רכות, אבל מונע פתיחות מכסה מיותרות ועוזר לתזמן עטיפה ומנוחה.</p>")
+            + _h2("בטיחות וניקוי בין מדידות", "<p>אחרי כל מגע עם בשר נא מנקים את קצה המדידה לפני שמכניסים אותו למנה מוכנה. יחידה אלקטרונית לא מטביעים במים; מנקים בעדינות את הקצה, מייבשים ושומרים על הכבל בלי קיפול חד.</p>")
+            + _h2("קריאה מהירה מול פרוב קבוע", "<p>קריאה מהירה מתאימה לסטייקים, פרגיות והמבורגרים שבהם מקבלים החלטה ברגע אחד ומחזירים את המכסה. פרוב קבוע מתאים לבריסקט, צלי ארוך או כמה נתחים גדולים, כי הוא נותן רצף נתונים בלי לפתוח את תא הבישול שוב ושוב.</p>")
+            + _h2("מה לבדוק לפני קנייה", "<p>בודקים מסך ברור בשמש, כפתורים נוחים בידיים מלוכלכות, כבל עמיד לחום, אפשרות כיול, אחריות, זמינות סוללות וכיסוי לטווח הטמפרטורות שאתם באמת צריכים. עדיף מדחום פשוט ומדויק מאשר מוצר עמוס אפשרויות שלא נוח להשתמש בו.</p>")
+            + _h2("טעויות מדידה שמייבשות בשר", "<p>טעות נפוצה היא למדוד בקצה הדק של הנתח ולקבל תחושת ביטחון שגויה, או להסתמך על צבע חיצוני בלבד. טעות נוספת היא להשאיר מכסה פתוח בזמן שמחפשים נקודת מדידה, מה שמפיל חום ומאריך את הבישול.</p>")
+            + _h2("שגרת עבודה מומלצת", "<p>לפני שהבשר עולה לגריל מכינים את המדחום, בודקים שהוא נדלק ומחליטים מראש איפה מודדים. בזמן הצלייה מודדים קצר ומחזירים מכסה; בסיום רושמים טווחים שעבדו טוב כדי לשפר את הפעם הבאה.</p>")
+            + _h2("התאמה למשפחה ולאירוח", "<p>למשפחה שמכינה סטייקים ועוף מספיק לרוב מדחום קריאה מהירה איכותי. מי שמארח הרבה, מעשן נתחים גדולים או עובד עם כמה אזורי חום ירוויח מפרוב קבוע, התראות ברורות ואפשרות לעקוב אחרי יותר מנתח אחד בצורה עקבית, נוחה וברורה גם במהלך אירוח ארוך בבית ובחצר.</p>"),
+            "thermometer_accessory_depth_expansion",
+        )
+
     if topic_type == "grill_accessory_guide":
         return (
             _h2("התאמה לגריל", f"<p>לפני שימוש ב-{entity}, בודקים התאמה פיזית ובטיחותית לדגם הגריל, למקור החום ולמרחק מהרשת או מהמבערים.</p>")
@@ -1525,6 +1592,8 @@ def _high_intent_phrase(entity: str, topic_type: str, search_intent: str, title:
         return f"איך לצלות {entity}"
     if topic_type == "meat_low_slow_smoking":
         return f"איך לעשן {entity}"
+    if topic_type == "smoking_accessory_guide":
+        return f"איך להשתמש ב{entity} לעישון"
     if topic_type == "poultry_grill_recipe":
         return f"איך להכין {entity} על הגריל"
     if topic_type == "fuel_comparison_or_guide" or search_intent == "comparison":
@@ -1545,6 +1614,8 @@ def _build_meta_title(entity: str, high_intent_phrase: str, topic_type: str) -> 
         base = f"{high_intent_phrase} – מתכון וטיפים"
     elif topic_type == "fuel_comparison_or_guide":
         base = f"{high_intent_phrase}: השוואה וטיפים לבחירה"
+    elif topic_type == "smoking_accessory_guide":
+        base = f"{entity} לעישון – בריסקט, סטול ו-Bark"
     elif topic_type == "grill_accessory_guide" and "מדחום" in entity:
         base = f"איך לבחור {entity}? מדריך לגריל, מעשנה וצלייה מדויקת"
     elif topic_type == "grill_accessory_guide" and ("בזלת" in entity or "לבה" in entity):
@@ -1615,6 +1686,11 @@ def _keyword_groups(entity: str, title: str, topic_profile: dict[str, object]) -
         long_tail = [high_intent, f"{entity} לבריסקט", f"{entity} למעשנה", "שבבים או צ׳אנקים לעישון"]
         question = [f"איך משתמשים ב{entity}?", "האם צריך להשרות שבבי עץ?"]
         usage = [f"{entity} לקנייה", f"{entity} לגריל גז"]
+    elif topic_type == "smoking_accessory_guide":
+        raw_secondary.extend(["נייר קצבים לבריסקט", "pink butcher paper", "butcher paper vs foil", "מתי לעטוף בריסקט", "שמירת Bark", *entity_context_keywords])
+        long_tail = [high_intent, "איך לעטוף בריסקט", "נייר קצבים לצלעות", "Texas Crutch נייר קצבים", "נייר ורוד מול נייר חום"]
+        question = ["מתי לעטוף בריסקט?", "מה ההבדל בין נייר קצבים לנייר כסף?", "איך עוטפים בנייר קצבים?"]
+        usage = ["נייר קצבים לעישון", "נייר קצבים food-safe", "נייר קצבים למעשנה"]
     elif topic_type in {"grill_accessory_guide", "equipment_buying_guide"}:
         raw_secondary.extend([f"{entity} לגריל גז", f"התקנת {entity}", f"תחזוקת {entity}", *entity_context_keywords])
         long_tail = [high_intent, f"{entity} מומלץ", f"{entity} לגריל ביתי", f"איך משתמשים ב{entity}"]
@@ -1669,6 +1745,8 @@ def _build_meta_description(entity: str, topic_profile: dict[str, object], group
         raw = f"השוואת {entity} לגריל: זמן בעירה, יציבות חום, עשן, אפר ועלות מול ביצועים כדי לבחור פחם מתאים למנגל."
     elif topic_type == "smoking_wood_guide":
         raw = f"מדריך {entity} לעישון עם התאמת עץ לבשר, שבבים מול צ׳אנקים, שליטה בעשן וטיפים לקנייה ושימוש נכון."
+    elif topic_type == "smoking_accessory_guide":
+        raw = f"מדריך {entity} לעישון עם בריסקט, צלעות, סטול, Texas Crutch, שמירת Bark, לחות והשוואת butcher paper vs foil."
     elif topic_type == "grill_accessory_guide" and "מדחום" in entity:
         raw = f"איך בוחרים {entity} לגריל או מעשנה? מדריך עם סוגי מדחומים, זמן תגובה, כיול, ניקוי וטיפים למדידה מדויקת."
     elif topic_type == "grill_accessory_guide" and ("בזלת" in entity or "לבה" in entity):
@@ -1739,6 +1817,8 @@ def _generate_image_alt_text(title: str, keyword: str, topic_profile: dict[str, 
         return "בריסקט מעושן במעשנה עם Bark כהה ונייר קצבים", "topic_type_entity_template"
     if topic_type == "meat_low_slow_smoking":
         return f"{entity} מעושן במעשנה עם Bark כהה ונייר קצבים", "topic_type_template"
+    if topic_type == "smoking_accessory_guide":
+        return "נייר קצבים ורוד לעישון בריסקט עם Bark כהה", "topic_type_template"
     if topic_type == "poultry_grill_recipe":
         return "כנפיים קריספיות על גריל עם עור זהוב וגלייז בצד", "topic_type_entity_template"
     if topic_type == "grill_accessory_guide" and entity_key == "basalt_stones":
@@ -1754,22 +1834,42 @@ def _generate_image_alt_text(title: str, keyword: str, topic_profile: dict[str, 
 
 def _html_duplicate_issues(body: str) -> tuple[list[str], list[str]]:
     issues: list[str] = []
-    removed: list[str] = []
+    duplicates: list[str] = []
+
+    def repeated_values(values: list[str]) -> list[str]:
+        counts: dict[str, int] = {}
+        for value in values:
+            if value:
+                counts[value] = counts.get(value, 0) + 1
+        return sorted(key for key, count in counts.items() if count > 1)
+
     h2s = [_semantic_key(h) for h in re.findall(r"<h2[^>]*>(.*?)</h2>", body or "", flags=re.IGNORECASE | re.DOTALL)]
-    dup_h2 = sorted({h for h in h2s if h and h2s.count(h) > 1})
+    dup_h2 = repeated_values(h2s)
     if dup_h2:
         issues.append("duplicate_h2_titles")
-        removed.extend(dup_h2)
+        duplicates.extend(dup_h2[:5])
+
+    lists = [_semantic_key(inner) for inner in re.findall(r"<(?:ul|ol)(?:\s[^>]*)?>(.*?)</(?:ul|ol)>", body or "", flags=re.IGNORECASE | re.DOTALL)]
+    dup_lists = repeated_values(lists)
+    if dup_lists:
+        issues.append("duplicate_list_blocks")
+        duplicates.extend(dup_lists[:5])
+
+    faq_items = [
+        _semantic_key(question + " " + answer)
+        for question, answer in re.findall(r"<h3[^>]*>(.*?)</h3>\s*<p[^>]*>(.*?)</p>", body or "", flags=re.IGNORECASE | re.DOTALL)
+    ]
+    dup_faq_items = repeated_values(faq_items)
+    if dup_faq_items:
+        issues.append("duplicate_faq_blocks")
+        duplicates.extend(dup_faq_items[:5])
+
     paragraphs = [_semantic_key(p) for p in re.findall(r"<p[^>]*>(.*?)</p>", body or "", flags=re.IGNORECASE | re.DOTALL)]
-    dup_p = sorted({p for p in paragraphs if p and paragraphs.count(p) > 1})
+    dup_p = repeated_values(paragraphs)
     if dup_p:
         issues.append("repeated_paragraphs")
-        removed.extend(dup_p[:5])
-    faq_titles = [_semantic_key(h) for h in re.findall(r"<h[23][^>]*>(.*?)</h[23]>", body or "", flags=re.IGNORECASE | re.DOTALL) if "שאל" in _semantic_key(h)]
-    if len(faq_titles) != len(set(faq_titles)):
-        issues.append("duplicate_faq_blocks")
-    return issues, removed
-
+        duplicates.extend(dup_p[:5])
+    return issues, duplicates
 
 def validate_final_article_quality(body: str, meta_title: str, seo_metadata: dict[str, object], topic_profile: dict[str, object], selected_links: list[dict[str, object]], image_alt_text: str) -> dict[str, object]:
     issues, duplicate_sections_removed = _html_duplicate_issues(body)
@@ -1793,7 +1893,8 @@ def validate_final_article_quality(body: str, meta_title: str, seo_metadata: dic
         issues.append("meta_title_contains_internal_contract_name")
     alt_norm = _normalize_hebrew(image_alt_text)
     entity = _normalize_hebrew(str(topic_profile.get("main_entity") or ""))
-    if not image_alt_text or (entity and entity not in alt_norm and str(topic_profile.get("entity_key") or "") not in {"basalt_stones", "thermometer"} and not (topic_type == "poultry_grill_recipe" and "כנפ" in alt_norm)):
+    smoking_paper_alt_ok = topic_type == "smoking_accessory_guide" and any(term in alt_norm for term in ["נייר קצבים", "בריסקט", "bark"])
+    if not image_alt_text or (entity and entity not in alt_norm and str(topic_profile.get("entity_key") or "") not in {"basalt_stones", "thermometer"} and not (topic_type == "poultry_grill_recipe" and "כנפ" in alt_norm) and not smoking_paper_alt_ok):
         issues.append("alt_not_entity_specific")
     if re.search(r"href=['\"](?!https://compassgrill\.co\.il/)[^'\"]+", raw_body):
         issues.append("non_public_or_external_internal_link")
@@ -1812,6 +1913,7 @@ def validate_final_article_quality(body: str, meta_title: str, seo_metadata: dic
         "final_quality_passed": not issues,
         "final_quality_issues": issues,
         "duplicate_sections_removed": duplicate_sections_removed,
+        "publish_ready": "READY_FOR_REVIEW" if not issues else "NEEDS_REWRITE",
     }
 
 def _final_generation_debug(topic_profile: dict[str, object], validation: dict[str, object], *, regeneration_count: int, final_body_source: str, discovery_debug: dict[str, object] | None = None, body: str = "", selected_products: list[dict[str, object]] | None = None, injected_links: list[dict[str, object]] | None = None, seo_metadata: dict[str, object] | None = None) -> dict[str, object]:

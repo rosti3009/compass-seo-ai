@@ -338,3 +338,59 @@ def test_final_html_public_quality_validator_and_link_filters(db_session: Sessio
             "relevance_score": link.get("relevance_score", 0),
         }
         assert service._passes_link_semantic_gate(draft.focus_keyword, f"{link['title']} {link['url']}", str(link.get("page_type") or "product"), scores, profile)
+
+
+def test_butcher_paper_uses_smoking_accessory_contract(db_session: Session) -> None:
+    draft = service.generate_topic_article_draft(
+        db_session,
+        topic_title="butcher paper",
+        focus_keyword="butcher paper",
+        target_intent="how-to",
+    )
+    profile = service._classify_topic(draft.topic_title, draft.focus_keyword, draft.target_intent)
+    body = draft.article_body
+
+    assert profile["topic_type"] == "smoking_accessory_guide"
+    assert draft.status == "READY_FOR_REVIEW"
+    for term in ["סטול", "בריסקט", "Bark", "butcher paper vs foil", "מתי לעטוף"]:
+        assert term in body
+    for forbidden in ["התקנה", "חוסם אוויר", "מבערים", "החלפת אביזר שחוק"]:
+        assert forbidden not in body
+
+
+def test_final_html_dedupes_purchase_checklist_and_repeated_lists() -> None:
+    checklist = "<h2>צ׳קליסט קנייה</h2><ul><li>התאמה לדגם הגריל.</li><li>חומר עמיד לחום.</li></ul>"
+    html = checklist + checklist + "<h2>שאלות נפוצות</h2><h3>מה בודקים?</h3><p>בודקים התאמה.</p><h3>מה בודקים?</h3><p>בודקים התאמה.</p>"
+
+    body, _title, _faq_schema = service._postprocess_article_assets(html, "כותרת")
+    list_blocks = [service._semantic_key(inner) for inner in re.findall(r"<(?:ul|ol)(?:\\s[^>]*)?>(.*?)</(?:ul|ol)>", body, flags=re.IGNORECASE | re.DOTALL)]
+
+    assert body.count("<h2>צ׳קליסט קנייה</h2>") == 1
+    assert len(list_blocks) == len(set(list_blocks))
+    assert body.count("מה בודקים?") == 1
+
+
+def test_final_validator_rejects_duplicate_html_blocks() -> None:
+    duplicate_html = """
+    <h2>צ׳קליסט קנייה</h2><ul><li>התאמה לדגם הגריל.</li></ul>
+    <p>פסקה שחוזרת בדיוק כדי להפעיל את הוולידטור.</p>
+    <h2>צ׳קליסט קנייה</h2><ul><li>התאמה לדגם הגריל.</li></ul>
+    <p>פסקה שחוזרת בדיוק כדי להפעיל את הוולידטור.</p>
+    <h2>שאלות נפוצות</h2><h3>מה בודקים?</h3><p>בודקים התאמה.</p><h3>מה בודקים?</h3><p>בודקים התאמה.</p>
+    """
+    profile = service._classify_topic("אבני בזלת לגריל", "אבני בזלת לגריל", "commercial")
+    result = service.validate_final_article_quality(
+        duplicate_html,
+        "אבני בזלת לגריל | Compass Grill",
+        {"seo_keywords": [str(i) for i in range(8)]},
+        profile,
+        [],
+        "אבני בזלת לגריל גז מעל מבערים לפיזור חום",
+    )
+
+    assert result["final_quality_passed"] is False
+    assert result["publish_ready"] == "NEEDS_REWRITE"
+    assert "duplicate_h2_titles" in result["final_quality_issues"]
+    assert "duplicate_list_blocks" in result["final_quality_issues"]
+    assert "duplicate_faq_blocks" in result["final_quality_issues"]
+    assert "repeated_paragraphs" in result["final_quality_issues"]
