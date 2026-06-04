@@ -3475,6 +3475,13 @@ async def sitemap_discover() -> dict:
     }
 
 
+
+
+def _provider_generate_article_image(provider: object, prompt: str, *, draft_slug: str, image_key: str):
+    if hasattr(provider, "generate_image"):
+        return provider.generate_image(prompt, draft_slug=draft_slug, image_key=image_key)
+    return provider.generate_hero_image(prompt, draft_slug=draft_slug)
+
 @router.post("/content/articles/{draft_id}/generate-image-plan")
 def generate_article_image_plan(draft_id: int, db: DatabaseSession) -> dict[str, object]:
     draft = _get_content_draft_or_404(db, draft_id)
@@ -3491,6 +3498,66 @@ def generate_article_image_plan(draft_id: int, db: DatabaseSession) -> dict[str,
     }
 
 
+@router.post("/content/articles/{draft_id}/generate-image/{image_key}")
+def generate_article_package_image(draft_id: int, image_key: str, db: DatabaseSession) -> dict[str, object]:
+    if image_key not in {"featured_image", "image_1", "image_2", "image_3", "image_4"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown image key")
+    draft = _get_content_draft_or_404(db, draft_id)
+    provider = get_image_provider()
+    public_base_url = "https://compass-seo-ai-1.onrender.com"
+    metadata = json.loads(draft.image_generation_metadata_json or "{}") if draft.image_generation_metadata_json else {}
+    image_package = metadata.get("image_package") if isinstance(metadata.get("image_package"), list) else []
+    image_item = next((item for item in image_package if isinstance(item, dict) and item.get("key") == image_key), None)
+    if not image_item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image package item not found")
+    prompt = build_realistic_hero_prompt(str(image_item.get("prompt") or draft.featured_image_prompt or "premium BBQ article image"))
+    result = _provider_generate_article_image(provider, prompt, draft_slug=f"{draft.slug}-{image_key}", image_key=image_key)
+    public_url = f"{public_base_url}{result.image_url}" if result.image_url and result.image_url.startswith("/") else result.image_url
+    image_item["prompt"] = prompt
+    image_item["image_url"] = public_url or ""
+    image_item["generated_url"] = public_url or ""
+    image_item["preview_url"] = public_url or ""
+    image_item["status"] = result.status
+    image_item["provider"] = result.provider
+    image_item["generated_at"] = result.generated_at
+    assets = metadata.get("assets") if isinstance(metadata.get("assets"), dict) else {}
+    assets[image_key] = {
+        "image_type": image_key,
+        "public_url": public_url,
+        "prompt": prompt,
+        "alt_text": image_item.get("alt") or draft.image_alt_text,
+        "filename": image_item.get("filename"),
+        "caption": image_item.get("caption"),
+        "width": result.width,
+        "height": result.height,
+        "created_at": result.generated_at,
+        "generation_status": result.status,
+    }
+    metadata["assets"] = assets
+    metadata["image_package"] = image_package
+    metadata["generated_image_count"] = len([i for i in image_package if isinstance(i, dict) and (i.get("generated_url") or i.get("image_url"))])
+    metadata["image_generation_workflow"] = {"last_action": "generate_single", "last_image_key": image_key, "provider": result.provider}
+    if image_key == "featured_image":
+        draft.featured_image_status = result.status
+        draft.generated_image_url = public_url
+        draft.featured_image_url = public_url
+    draft.image_generation_metadata_json = json.dumps(metadata, ensure_ascii=False)
+    db.add(draft)
+    db.commit()
+    db.refresh(draft)
+    if result.status == "failed":
+        return JSONResponse(status_code=status.HTTP_502_BAD_GATEWAY, content={"success": False, "error": result.error or "Image generation failed", "image_key": image_key})
+    return {
+        "success": True,
+        "image_key": image_key,
+        "image_status": result.status,
+        "generated_url": public_url,
+        "preview_url": public_url,
+        "image_provider": result.provider,
+        "image_item": image_item,
+        "draft": draft.to_dict(),
+    }
+
 @router.post("/content/articles/{draft_id}/generate-image")
 def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, object]:
     draft = _get_content_draft_or_404(db, draft_id)
@@ -3506,8 +3573,8 @@ def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, obje
         f"wide premium BBQ banner, {draft.focus_keyword} on grill, dark elegant BBQ background, "
         "empty space for Hebrew text overlay, cinematic lighting, no text, no logos"
     )
-    hero_result = provider.generate_hero_image(hero_prompt, draft_slug=f"{draft.slug}-hero")
-    banner_result = provider.generate_hero_image(banner_prompt, draft_slug=f"{draft.slug}-banner")
+    hero_result = _provider_generate_article_image(provider, hero_prompt, draft_slug=f"{draft.slug}-hero", image_key="featured_image")
+    banner_result = _provider_generate_article_image(provider, banner_prompt, draft_slug=f"{draft.slug}-banner", image_key="general_banner_image")
     section_results: dict[str, object] = {}
     image_package = metadata.get("image_package") if isinstance(metadata.get("image_package"), list) else []
     for image_item in image_package:
@@ -3517,7 +3584,7 @@ def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, obje
         if image_key not in {"image_1", "image_2", "image_3", "image_4"}:
             continue
         section_prompt = build_realistic_hero_prompt(str(image_item.get("prompt") or draft.featured_image_prompt or hero_prompt))
-        section_results[image_key] = provider.generate_hero_image(section_prompt, draft_slug=f"{draft.slug}-{image_key}")
+        section_results[image_key] = _provider_generate_article_image(provider, section_prompt, draft_slug=f"{draft.slug}-{image_key}", image_key=image_key)
     result = hero_result
     image_file_path = None
     image_public_url = f"{public_base_url}{result.image_url}" if result.image_url and result.image_url.startswith("/") else result.image_url
@@ -3584,6 +3651,12 @@ def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, obje
     draft.image_publish_status = "NOT_PUBLISHED"
     draft.generated_image_url = image_public_url
     draft.featured_image_url = image_public_url
+    for package_item in image_package:
+        if isinstance(package_item, dict) and package_item.get("key") == "featured_image":
+            package_item["image_url"] = image_public_url or ""
+            package_item["generated_url"] = image_public_url or ""
+            package_item["preview_url"] = image_public_url or ""
+            package_item["status"] = result.status
     assets["article_hero_image"] = {
         "image_type": "article_hero_image",
         "public_url": image_public_url,
@@ -3612,6 +3685,9 @@ def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, obje
         section_public_url = f"{public_base_url}{section_url}" if section_url and str(section_url).startswith("/") else section_url
         package_item = next((item for item in image_package if isinstance(item, dict) and item.get("key") == image_key), {})
         package_item["image_url"] = section_public_url or ""
+        package_item["generated_url"] = section_public_url or ""
+        package_item["preview_url"] = section_public_url or ""
+        package_item["status"] = getattr(section_result, "status", "planned")
         assets[image_key] = {
             "image_type": image_key,
             "public_url": section_public_url,

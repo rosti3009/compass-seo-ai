@@ -15,7 +15,8 @@ from openai import OpenAI
 from app.core.config import settings
 
 REALISTIC_IMAGE_RULES = (
-    "horizontal hero image, ultra realistic premium BBQ photography, natural lighting, "
+    "horizontal image, photorealistic commercial quality BBQ magazine photography, "
+    "natural realistic lighting, realistic metal/stone/wood textures, realistic food, "
     "no text inside image, no fake logos, no unrealistic meat"
 )
 
@@ -34,22 +35,39 @@ class ImageGenerationResult:
 
 
 class BaseImageProvider:
+    """Provider-neutral image API for article image packages."""
+
     provider_name = "none"
 
-    def generate_hero_image(self, prompt: str, *, draft_slug: str) -> ImageGenerationResult:
+    def generate_image(self, prompt: str, *, draft_slug: str, image_key: str = "featured_image") -> ImageGenerationResult:
         raise NotImplementedError
+
+    def generate_hero_image(self, prompt: str, *, draft_slug: str) -> ImageGenerationResult:
+        return self.generate_image(prompt, draft_slug=draft_slug, image_key="featured_image")
 
 
 class DisabledImageProvider(BaseImageProvider):
     provider_name = "none"
 
-    def generate_hero_image(self, prompt: str, *, draft_slug: str) -> ImageGenerationResult:
+    def generate_image(self, prompt: str, *, draft_slug: str, image_key: str = "featured_image") -> ImageGenerationResult:
         return ImageGenerationResult(
             enabled=False,
             provider=self.provider_name,
             status="planned",
             message_he="יצירת תמונה לא פעילה כרגע — קיים תכנון תמונה בלבד",
         )
+
+
+class FluxImageProvider(DisabledImageProvider):
+    provider_name = "flux"
+
+
+class IdeogramImageProvider(DisabledImageProvider):
+    provider_name = "ideogram"
+
+
+class RecraftImageProvider(DisabledImageProvider):
+    provider_name = "recraft"
 
 
 def _png_dimensions(data: bytes) -> tuple[int | None, int | None]:
@@ -66,7 +84,7 @@ class OpenAIImageProvider(BaseImageProvider):
     def __init__(self) -> None:
         self.client = OpenAI(api_key=settings.openai_api_key)
 
-    def generate_hero_image(self, prompt: str, *, draft_slug: str) -> ImageGenerationResult:
+    def generate_image(self, prompt: str, *, draft_slug: str, image_key: str = "featured_image") -> ImageGenerationResult:
         try:
             response = self.client.images.generate(
                 model="gpt-image-1",
@@ -98,7 +116,7 @@ class OpenAIImageProvider(BaseImageProvider):
                 width=width,
                 height=height,
                 generated_at=datetime.now(UTC).isoformat(),
-                message_he="תמונת hero נוצרה ונשמרה בהצלחה.",
+                message_he="התמונה נוצרה ונשמרה בהצלחה.",
             )
         except Exception as exc:
             return ImageGenerationResult(
@@ -110,15 +128,26 @@ class OpenAIImageProvider(BaseImageProvider):
             )
 
 
+IMAGE_PROVIDER_REGISTRY: dict[str, type[BaseImageProvider]] = {
+    "openai": OpenAIImageProvider,
+    "flux": FluxImageProvider,
+    "ideogram": IdeogramImageProvider,
+    "recraft": RecraftImageProvider,
+    "none": DisabledImageProvider,
+    "": DisabledImageProvider,
+}
+
+
 def get_image_provider() -> BaseImageProvider:
     raw = (getattr(settings, "image_provider", None) or "").strip().lower()
-    if raw == "openai":
-        if not settings.openai_api_key:
-            return DisabledImageProvider()
-        return OpenAIImageProvider()
-    return DisabledImageProvider()
+    if raw == "openai" and not settings.openai_api_key:
+        return DisabledImageProvider()
+    provider_cls = IMAGE_PROVIDER_REGISTRY.get(raw, DisabledImageProvider)
+    return provider_cls()
 
 
 def build_realistic_hero_prompt(base_prompt: str) -> str:
     clean = (base_prompt or "premium bbq hero").strip()
+    if "photorealistic commercial quality BBQ magazine photography" in clean:
+        return clean
     return f"{clean}. {REALISTIC_IMAGE_RULES}"
