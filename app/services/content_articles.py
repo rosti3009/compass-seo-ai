@@ -874,6 +874,30 @@ def _link_policy_for_profile(topic: str, topic_profile: dict[str, object] | None
             "category": {"אביזרים", "accessories", "מעשנה", "smoker", "גריל"},
             "priority": ["מדחום", "thermometer", "probe", "אביזרים", "מעשנה", "smoker"],
         })
+    elif topic_type == "smoking_wood_guide":
+        policy.update({
+            "allowed": {"שבבי", "עץ", "עצי", "צאנקים", "צ׳אנקים", "chunks", "wood", "chips", "smoking", "מעשנה", "smoker", "אביזרי", "אביזרים", "מדחום", "thermometer", "נייר", "קצבים", "בריסקט"},
+            "blocked": {"קבב", "kebab", "כנפיים", "wings", "מבער", "burner", "מחבת", "cast iron", "יצוק", "טופרי", "bear"},
+            "complementary": {"מעשנה", "smoker", "אביזרי", "אביזרים", "מדחום", "thermometer", "נייר", "קצבים", "בריסקט"},
+            "category": {"עישון", "smoking", "מעשנה", "smoker", "אביזרים", "accessories"},
+            "priority": ["שבבי עץ", "wood chips", "chunks", "צאנקים", "צ׳אנקים", "smoking wood", "עצי עישון", "אביזרי עישון", "smoker accessories", "מעשנה", "smoker", "מדחום", "thermometer", "נייר קצבים", "butcher", "בריסקט"],
+        })
+    elif topic_type == "smoking_accessory_guide":
+        policy.update({
+            "allowed": {"נייר", "קצבים", "butcher", "paper", "בריסקט", "brisket", "צלעות", "ריבס", "מעשנה", "smoker", "עישון", "מדחום", "thermometer", "שבבי", "עץ", "wood", "chips", "chunks"},
+            "blocked": {"קבב", "כנפיים", "wings", "מבער", "burner", "בזלת", "לבה", "cast iron", "מחבת"},
+            "complementary": {"בריסקט", "brisket", "צלעות", "ריבס", "מעשנה", "smoker", "מדחום", "thermometer", "שבבי", "עץ", "wood", "chips", "chunks"},
+            "category": {"אביזרי עישון", "smoker", "smoking", "מעשנה"},
+            "priority": ["נייר קצבים", "butcher paper", "בריסקט", "brisket", "אביזרי עישון", "smoker accessories", "מדחום", "thermometer", "שבבי עץ", "wood chips", "chunks"],
+        })
+    elif topic_type == "grill_accessory_guide":
+        policy.update({
+            "allowed": set(_tokenize_hebrew(topic)) | {normalized, lower, "אביזרים", "accessories", "גריל", "ציוד"},
+            "blocked": {"קבב", "כנפיים", "brisket", "בריסקט", "נייר", "קצבים"},
+            "complementary": {"אביזרים", "accessories", "גריל", "ציוד"},
+            "category": {"אביזרים", "accessories", "גריל"},
+            "priority": [normalized, lower, "אביזרים", "accessories", "גריל"],
+        })
     return policy
 
 
@@ -1057,15 +1081,16 @@ def _discover_related_links(db: Session, topic: str, limit: int = 6, topic_profi
         if current is None or float(item.get("relevance_score") or 0) > float(current.get("relevance_score") or 0):
             dedup[url] = item
     out = list(dedup.values())
-    if not out and not _topic_link_policy(topic, profile)["must"]:
+    if not out:
         fallback_by_url: dict[str, dict[str, str | float]] = {}
+        min_fallback_score = 40 if not _topic_link_policy(topic, profile)["must"] else 20
         for item in excluded_low:
-            if float(item.get("relevance_score") or 0) < 40:
+            if float(item.get("relevance_score") or 0) < min_fallback_score:
                 continue
             url = str(item.get("url") or "")
             if url and url not in fallback_by_url:
-                fallback_by_url[url] = {**item, "reason": "Fallback כללי אחרי סינון סמנטי ללא התאמות חזקות"}
-        out = list(fallback_by_url.values())[:limit]
+                fallback_by_url[url] = {**item, "link_role": str(item.get("link_role") or "generic"), "reason": "Fallback מוגבל: אין התאמה מדויקת, מוצג קישור חלש אחד לכל היותר", "weak_fallback": True}
+        out = list(fallback_by_url.values())[: (1 if _topic_link_policy(topic, profile)["must"] else limit)]
     type_priority = {"product": 6, "category": 5, "brand": 3, "info": 2, "blog": 1}
     role_priority = {"exact_entity": 5, "complementary": 4, "related_category": 3, "generic": 0}
     out.sort(key=lambda item: (-_priority_rank_for_link(topic, item, profile), role_priority.get(str(item.get("link_role") or "generic"), 0), float(item.get("relevance_score", 0)), type_priority.get(str(item.get("type") or ""), 0), float(item.get("entity_match_score") or 0)), reverse=True)
@@ -1401,35 +1426,145 @@ def _topic_specific_expansion_html(topic_type: str, entity: str, keyword: str, e
     return ("", "no_extra_needed")
 
 
+
+CONTENT_DEPTH_TARGETS = {
+    "meat_low_slow_smoking": 900,
+    "smoking_wood_guide": 900,
+    "poultry_grill_recipe": 900,
+    "grill_accessory_guide": 900,
+    "smoking_accessory_guide": 900,
+    "meat_quick_grill_cut": 900,
+    "fuel_comparison_or_guide": 900,
+    "equipment_buying_guide": 900,
+    "recipe_how_to": 900,
+    "fallback_generic": 500,
+}
+
+
+def _required_word_count_for_topic(topic_type: str) -> int:
+    return int(CONTENT_DEPTH_TARGETS.get(topic_type, 900))
+
+
+def _section_exists(html: str, title: str) -> bool:
+    wanted = _semantic_key(title)
+    headings = re.findall(r"<h[23][^>]*>(.*?)</h[23]>", html or "", flags=re.IGNORECASE | re.DOTALL)
+    return wanted in {_semantic_key(h) for h in headings}
+
+
+def _append_unique_section(html: str, title: str, body: str) -> str:
+    if _section_exists(html, title):
+        return html
+    return html + _h2(title, body)
+
+
+def _depth_engine_sections(topic_type: str, entity: str, keyword: str, entity_key: str) -> list[tuple[str, str]]:
+    if topic_type == "smoking_wood_guide":
+        return [
+            ("מה ההבדל בין שבבי עץ לצ׳אנקים", f"<p>שבבי עץ לעישון הם חתיכות קטנות שמתחילות לעשן מהר ולכן מתאימות לגריל גז, קופסת עישון או עישון קצר של עוף ודגים. צ׳אנקים הם חתיכות גדולות יותר, בוערות לאט ומתאימות למעשנה או לגריל פחמים בעבודה ארוכה. ההחלטה אינה רק גודל; היא קשורה לזמן הבישול, זרימת האוויר ורמת העשן שרוצים לבנות סביב {entity}.</p><p>בגריל גז משתמשים לרוב בשבבים בכמות מדודה, כי מקור החום קבוע והעץ צריך רק להוסיף שכבת טעם. במעשנה, צ׳אנקים נותנים רצף עשן יציב יותר ופחות צורך לפתוח מכסה. אם משלבים בין שניהם, מתחילים בצ׳אנק קטן ליציבות ומוסיפים מעט שבבים רק בתחילת התהליך.</p>"),
+            ("האם צריך להשרות שבבי עץ", "<p>ברוב המקרים לא צריך להשרות שבבי עץ. השריה קצרה מרטיבה בעיקר את פני השטח, ואז במקום עשן נקי מקבלים דקות של אדים, עיכוב בהצתה ולעיתים עשן לבן וכבד. עדיף להשתמש בעץ יבש, לשלוט בכמות ולוודא שיש מספיק אוויר לבעירה נקייה.</p><p>אם עובדים בגריל חם מאוד והשבבים נשרפים מהר מדי, הפתרון הוא לא קערת מים אלא קופסת עישון סגורה חלקית, נייר כסף מחורר או מעבר לצ׳אנקים. כך העץ מתחמם בהדרגה ומוציא עשן דק יותר.</p>"),
+            ("Thin Blue Smoke ומה נחשב עשן נקי", "<p>Thin Blue Smoke הוא עשן דק, כמעט שקוף, עם גוון כחול עדין וריח נעים של עץ נקי. זה הסימן שהעץ נשרף בצורה מאוזנת ולא נחנק מחוסר חמצן. עשן לבן וסמיך, מר או חריף באף, מעיד בדרך כלל על עץ רטוב, יותר מדי חומר בעירה או זרימת אוויר חלשה.</p><p>כדי להגיע לעשן נקי מחממים את המעשנה לפני הכנסת הבשר, לא מעמיסים עץ בבת אחת, ומשאירים פתחי אוויר עובדים. המטרה היא ניחוח מתמשך ועדין, לא ענן שמסתיר את הנתח.</p>"),
+            ("Apple / Cherry / Oak / Hickory / Mesquite comparison", "<table><thead><tr><th>עץ</th><th>עוצמת טעם</th><th>מתאים ל</th><th>הערות</th></tr></thead><tbody><tr><td>Apple</td><td>עדינה ומתוקה</td><td>עוף, דגים, חזות עדינות וירקות</td><td>טוב למי שרוצה עשן רך ולא משתלט</td></tr><tr><td>Cherry</td><td>עדינה-בינונית ופירותית</td><td>עוף, ברווז, צלעות ובקר עדין</td><td>מוסיף צבע יפה וארומה מתוקה</td></tr><tr><td>Oak</td><td>בינונית ומאוזנת</td><td>בריסקט, אסאדו ושורט ריבס</td><td>בחירת בסיס בטוחה לעישון ארוך</td></tr><tr><td>Hickory</td><td>חזקה ובייקונית</td><td>בריסקט, צלעות ונתחים שומניים</td><td>משתמשים במידה כדי למנוע מרירות</td></tr><tr><td>Mesquite</td><td>חזקה מאוד</td><td>צלייה קצרה או בקר עם טעם חזק</td><td>פחות מתאים לעישון ארוך למתחילים</td></tr></tbody></table>"),
+            ("התאמת עץ לסוג בשר", "<p>התאמת עץ לבריסקט מתחילה בדרך כלל ב-Oak כבסיס, עם אפשרות להוסיף מעט Hickory אם רוצים עומק מעושן יותר. לבריסקט ארוך לא כדאי לבחור עץ חזק מאוד לכל הדרך, כי שעות חשיפה רבות עלולות להפוך טעם נעים למרירות.</p><p>לעוף מתאימים Apple ו-Cherry כי הם מדגישים עסיסיות ועור צלוי בלי להשתלט. לדגים עדיף עץ עדין במיוחד, כמות קטנה וזמן חשיפה קצר; Apple או עץ פירותי עדין יעבדו טוב יותר מ-Hickory. לנתחים שומניים כמו אסאדו אפשר לעלות ל-Oak או Hickory במידה.</p>"),
+            ("איזה עץ מתאים לבריסקט", "<p>בריסקט אוהב עץ מאוזן שמחזיק שעות. Oak הוא הבחירה הבטוחה: הוא נותן בסיס מעושן ברור בלי להשתלט על הבקר. Hickory מוסיף אופי חזק יותר ומתאים למי שכבר מכיר את המעשנה שלו. Mesquite יכול להיות אגרסיבי מדי בעישון ארוך ולכן עדיף להשתמש בו רק בכמות קטנה או בצלייה קצרה.</p>"),
+            ("איזה עץ מתאים לעוף", "<p>לעוף, כנפיים ופרגיות בוחרים Apple או Cherry. העור והבשר סופגים עשן מהר, ולכן כמות קטנה בתחילת הצלייה מספיקה. אם מוסיפים רוטב מתוק בסוף, עץ פירותי משתלב טוב יותר מעץ חזק שעלול להרגיש מר.</p>"),
+            ("איזה עץ מתאים לדגים", "<p>דגים צריכים עשן קצר ועדין. Apple, Cherry בכמות קטנה או עץ עדין אחר יתנו ארומה בלי לכסות את הטעם הימי. משתמשים בשבבים לזמן קצר, שומרים על עשן נקי ומוציאים את הדג לפני שהעשן הופך דומיננטי.</p>"),
+            ("כמה עץ להוסיף", "<p>בגריל גז מתחילים בחופן שבבים קטן בקופסת עישון ובודקים את עוצמת הטעם לפני שמוסיפים עוד. במעשנה מוסיפים צ׳אנק אחד או שניים בתחילת התהליך, ולא ממשיכים להעמיס עץ בכל שעה. רוב ספיגת העשן המשמעותית מתרחשת בתחילת הבישול כשהמשטח עדיין לח יחסית.</p><ul><li>עוף ודגים: מעט שבבים בתחילת הבישול.</li><li>צלעות: שבבים או צ׳אנק קטן לפי משך העישון.</li><li>בריסקט: Oak או Hickory בכמות מדודה לאורך תחילת העישון.</li></ul>"),
+            ("איך להשתמש בשבבי עץ בגריל גז", "<p>בגריל גז מניחים שבבים יבשים בקופסת עישון או בנייר כסף מחורר מעל אזור חם, מחממים עד שמתחיל עשן עדין ואז מכניסים את המזון. לא מפזרים שבבים ישירות על מבערים ולא חוסמים פתחי אוורור. עובדים עם מכסה סגור כדי שהעשן יעבור סביב המזון ולא יברח מיד.</p>"),
+            ("איך להשתמש בצ׳אנקים במעשנה", "<p>במעשנה מניחים צ׳אנקים ליד מקור החום או בתוך מצע הפחמים כך שיתחממו בהדרגה. לא צריך להצית אותם מראש ללהבה מלאה; המטרה היא פליטת עשן איטית ונקייה. אם העשן נהיה לבן וכבד, פותחים מעט אוויר או מפחיתים כמות עץ.</p>"),
+            ("רשימת בדיקה לבחירת עצי עישון", "<ul><li>מגדירים חומר גלם: בריסקט, עוף, דגים או ירקות.</li><li>בוחרים עוצמה: Apple/Cherry לעדין, Oak למאוזן, Hickory לחזק.</li><li>מתאימים גודל: שבבים לגריל גז וקצר, צ׳אנקים למעשנה וארוך.</li><li>משתמשים בעץ יבש ונקי בלבד.</li><li>בודקים שהעשן דק ונקי לפני הכנסת המזון.</li></ul>"),
+            ("טעויות נפוצות", "<ul><li>להשרות שבבים ולחשוב שזה מונע שריפה, במקום לשלוט בחום ובאוויר.</li><li>להוסיף יותר מדי עץ ולקבל מרירות.</li><li>לבחור Mesquite לעישון ארוך ראשון.</li><li>להתעלם מעשן לבן סמיך כי חושבים שכל עשן הוא טוב.</li><li>להשתמש בעץ לא מזוהה, צבוע או מטופל.</li></ul>"),
+            ("המלצה מעשית", "<p>לרוב הבשלנים הביתיים כדאי להתחיל בשלישייה פשוטה: Apple לעוף ודגים, Oak לבריסקט ונתחי בקר ארוכים, ו-Cherry כאשר רוצים צבע וארומה פירותית. אחרי שמכירים את התוצאה, מוסיפים Hickory בזהירות. כך בונים טעם עקבי בלי להפוך כל עישון לניסוי אגרסיבי.</p>"),
+        ]
+    if topic_type == "meat_low_slow_smoking":
+        return [
+            ("Trim והכנת הנתח", f"<p>לפני עישון {entity} מסירים שומן קשה שלא יתרכך, מיישרים קצוות דקים שעלולים להתייבש ומשאירים שכבת שומן סבירה שמגינה על הנתח. Trim טוב יוצר עובי אחיד יותר ולכן גם ציר זמן צפוי יותר.</p>"),
+            ("Rub ומליחות נכונה", "<p>Rub בסיסי מתחיל במלח ופלפל, ואפשר להוסיף שום, פפריקה או חרדל יבש. לא צריך שכבה רטובה וכבדה; שכבה יבשה ומאוזנת עוזרת לפיתוח Bark ומונעת טעם בוצי.</p>"),
+            ("Smoker setup ו-105–120°C", "<p>מייצבים את המעשנה לפני הכנסת הבשר. טווח 105–120°C נותן מספיק זמן לריכוך קולגן בלי לייבש מהר מדי. בודקים שהמדחום של התא אמין ושיש מים או מסה תרמית רק אם הם באמת מייצבים חום.</p>"),
+            ("Wood choice לבקר ארוך", "<p>Oak מתאים כברירת מחדל לבריסקט, אסאדו ושורט ריבס. Hickory מוסיף עומק חזק יותר, ו-Cherry יכול להוסיף צבע. לא חייבים עשן לכל התהליך; אחרי כמה שעות עיקר הטעם כבר נבנה.</p>"),
+            ("Bark development", "<p>Bark מתפתח כאשר פני השטח יבשים יחסית, התבלינים נקשרים לשומן ולעשן, והחום נשאר יציב. מרססים רק אם יש ייבוש מוגזם, ולא לפני שהשכבה החיצונית התייצבה.</p>"),
+            ("Stall וניהול סבלנות", "<p>Stall הוא לא תקלה אלא אידוי שמקרר את הנתח. אפשר להמתין, לעטוף או לשלב. ההחלטה תלויה בצבע, ב-Bark, בזמן שנותר ובכמה עסיסיות רוצים לשמור.</p>"),
+            ("Wrap / no-wrap ונייר קצבים מול נייר כסף", "<p>נייר קצבים מאיץ את המעבר דרך הסטול ושומר Bark טוב יותר מנייר כסף. Foil שומר יותר לחות ומאיץ יותר, אבל עלול לרכך את הקליפה. No-wrap נותן Bark חזק אך דורש יותר זמן ושליטה בלחות.</p>"),
+            ("90–96°C ו-probe tenderness", "<p>טווח סיום נפוץ הוא 90–96°C, אבל המספר הוא רק נקודת בדיקה. הנתח מוכן כאשר הפרוב נכנס כמעט כמו לחמאה רכה בכמה נקודות, במיוחד בחלק העבה.</p>"),
+            ("Long rest וחיתוך", "<p>מנוחה ארוכה של שעה עד כמה שעות מאפשרת לנוזלים להתייצב ולרקמות להמשיך להתרכך. פורסים נגד הסיבים, שומרים על עובי אחיד ומפרידים חלקים עם כיוון סיבים שונה בבריסקט.</p>"),
+            ("Timeline table", "<table><thead><tr><th>שלב</th><th>טווח זמן</th><th>מה בודקים</th></tr></thead><tbody><tr><td>Trim ו-Rub</td><td>30–60 דקות</td><td>עובי אחיד ושכבת תיבול יבשה</td></tr><tr><td>עישון פתוח</td><td>4–7 שעות</td><td>Bark, צבע ועשן נקי</td></tr><tr><td>Stall / Wrap</td><td>לפי מצב</td><td>האם Bark יציב והטמפרטורה נעצרה</td></tr><tr><td>סיום</td><td>עד 90–96°C</td><td>Probe tenderness</td></tr><tr><td>מנוחה</td><td>1–4 שעות</td><td>חום נשמר ופריסה נקייה</td></tr></tbody></table>"),
+            ("Equipment checklist", "<ul><li>מעשנה יציבה או גריל עם setup עקיף.</li><li>מדחום תא ומדחום ליבה אמינים.</li><li>נייר קצבים לעטיפה מאוזנת.</li><li>עצי עישון מתאימים כמו Oak או Hickory.</li><li>סכין חדה ל-trim ולפריסה.</li><li>צידנית או תא שמירת חום למנוחה ארוכה.</li></ul>"),
+        ]
+    if topic_type == "poultry_grill_recipe":
+        return [
+            ("ייבוש העור לפני הצלייה", "<p>כנפיים, פרגיות ועוף מקבלים מרקם טוב יותר כאשר מייבשים אותם במגבת ומניחים במקרר ללא כיסוי קצר לפני הצלייה. פחות לחות על פני השטח פירושה השחמה מהירה יותר ופחות עור גומי.</p>"),
+            ("Baking powder או קורנפלור", "<p>אפשר להוסיף מעט baking powder ללא אלומיניום או קורנפלור לתערובת יבשה כדי לעזור לקריספיות. משתמשים בכמות קטנה בלבד כדי לא לקבל טעם לוואי או מרקם אבקתי.</p>"),
+            ("Dry rub מול מרינדה", "<p>Dry rub מתאים לקריספיות כי הוא לא מוסיף הרבה נוזלים. מרינדה מוסיפה טעם פנימי אך צריך לנגב עודפים לפני הגריל. אם משתמשים במרינדה מתוקה, שומרים אותה לסיום.</p>"),
+            ("חום עקיף ואז crisping ישיר", "<p>מתחילים בחום עקיף כדי לבשל את העוף עד כמעט מוכן בלי לשרוף עור. בסוף מעבירים לחום ישיר קצר לקריספיות, הופכים לעיתים קרובות ושומרים מפני להבות.</p>"),
+            ("74°C ובטיחות מזון", "<p>עוף חייב להגיע ל-74°C בחלק העבה. צבע לבן אינו מספיק לבדיקה, במיוחד ליד עצם או בנתחים עבים. מדידה קצרה מונעת גם ייבוש וגם הגשה לא בטוחה.</p>"),
+            ("Glaze timing והימנעות מסוכר שרוף", "<p>רוטב או גלייז מתוק מורחים רק ב-5–10 הדקות האחרונות. סוכר שנמצא על אש ישירה זמן רב נשרף והופך מר. עובדים בשכבות דקות ומזיזים לאזור עקיף אם הרוטב משחים מהר מדי.</p>"),
+            ("רעיונות לרוטב והגשה", "<p>לכנפיים מתאימים BBQ מעושן, צ׳ילי-דבש, לימון-שום או חמאה חריפה. מגישים עם ירקות קראנצ׳יים, חמוצים, סלט כרוב או תפוחי אדמה צלויים כדי לאזן שומן וחריפות.</p>"),
+            ("חימום שאריות", "<p>שאריות מחממים בחום עקיף או בתנור/אייר פרייר עד שהעור חוזר להיות יבש. מיקרוגל מחמם מהר אך מרכך את העור, לכן עדיף לסיים בדקות חום יבש.</p>"),
+        ]
+    if topic_type == "smoking_accessory_guide":
+        return [
+            ("מה נייר קצבים עושה בעישון", "<p>נייר קצבים עוטף את הבשר בלי לאטום אותו לחלוטין. הוא מצמצם אידוי, עוזר לעבור את הסטול ושומר על Bark יציב יותר מנייר כסף, כי חלק מהאדים עדיין יכולים לצאת.</p>"),
+            ("עטיפת בריסקט ונתי בקר", "<p>בבריסקט עוטפים רק אחרי שהצבע כהה וה-Bark לא נמרח. בצלעות, אסאדו ושורט ריבס משתמשים באותו עיקרון: קודם עשן וצבע, אחר כך עטיפה לקידום ריכוך.</p>"),
+            ("Texas Crutch", "<p>Texas Crutch היא עטיפה שנועדה לקצר את שלב הסטול. נייר כסף הוא הגרסה המהירה והאטומה, ונייר קצבים הוא פתרון מאוזן יותר למי שרוצה לשמור מרקם חיצוני.</p>"),
+            ("Butcher paper vs foil", "<p>Butcher paper vs foil הוא בחירה בין נשימה לאיטום. Foil שומר יותר נוזלים ומרכך Bark; butcher paper שומר לחות אבל מאפשר קליפה ברורה יותר. לכן לבריסקט תחרותי או ביתי מושקע נייר קצבים הוא לרוב הבחירה הטובה.</p>"),
+            ("מתי לעטוף ואיך לעטוף", "<p>עוטפים לפי צבע, Bark ותחושת פני השטח, לא לפי שעה קבועה. מניחים שני דפים חופפים, מקפלים הדוק סביב הנתח ומחזירים למעשנה כשהתפר כלפי מטה כדי שהעטיפה לא תיפתח.</p>"),
+            ("Pink מול brown paper", "<p>Pink butcher paper בדרך כלל לא מצופה ומתאים לעישון כאשר הוא food safe. נייר חום יכול להתאים רק אם הוא מיועד למזון ולעישון, ללא שעווה, ציפוי או דיו שעלולים להתחמם.</p>"),
+            ("טעויות נפוצות", "<ul><li>לעטוף מוקדם לפני שנבנה Bark.</li><li>להשתמש בנייר מצופה או לא מיועד למזון.</li><li>לעטוף רופף מדי ולאבד לחות.</li><li>לצפות שנייר קצבים יתקן נתח שיובש בגלל חום גבוה.</li></ul>"),
+        ]
+    if topic_type == "grill_accessory_guide":
+        return [
+            ("מה זה ולמי זה מתאים", f"<p>{entity} הוא אביזר שנועד לפתור צורך מוגדר סביב הגריל: שליטה בחום, מדידה, ניקיון, בטיחות או נוחות עבודה. הוא מתאים למי שנתקל בבעיה חוזרת ורוצה פתרון מדויק, לא למי שמחפש להוסיף מוצר בלי שימוש ברור.</p>"),
+            ("איך זה עובד בפועל", "<p>בודקים את נקודת המגע עם הגריל, את מקור החום ואת השפעת האביזר על זרימת עבודה. אביזר טוב משפר פעולה אחת בלי להפריע לפעולות אחרות כמו סגירת מכסה, ניקוי או שליטה בחום.</p>"),
+            ("התקנה ושימוש", "<p>מתקינים לפי הוראות היצרן, מתחילים בחימום הדרגתי ומוודאים שאין מגע מסוכן עם להבה, כבל, ידית או חלק שנע. בשימוש ראשון עובדים בזהירות ובודקים אם התוצאה באמת השתפרה.</p>"),
+            ("קריטריונים לבחירה", "<ul><li>התאמה לדגם הגריל ולמידות.</li><li>עמידות לחום ולשומן.</li><li>קלות ניקוי ואחסון.</li><li>הוראות שימוש ברורות.</li><li>תועלת אמיתית ביחס למחיר.</li></ul>"),
+            ("תחזוקה והחלפה", "<p>מנקים אחרי קירור מלא, מייבשים לפני אחסון ובודקים סדקים, חלודה, קריאה לא מדויקת או שחיקה. מחליפים כאשר האביזר כבר לא מבצע את תפקידו בצורה בטוחה או עקבית.</p>"),
+            ("השוואה לחלופות", "<p>לפני קנייה משווים אם אפשר לפתור את אותה בעיה בעזרת ציוד שכבר קיים, קטגוריית אביזרים אחרת או שינוי טכניקה. אם החלופה דורשת יותר עבודה אבל נותנת אותה תוצאה, ייתכן שלא חייבים לקנות מיד.</p>"),
+        ]
+    return [
+        ("רשימת עבודה", f"<ul><li>מגדירים מה רוצים להשיג עם {keyword}.</li><li>בודקים התאמה לציוד הקיים.</li><li>מכינים סביבת עבודה בטוחה.</li><li>מתעדים זמן, חום ותוצאה לשיפור בפעם הבאה.</li></ul>"),
+        ("טעויות נפוצות", "<p>הטעות הנפוצה היא לדלג על התאמה בין חומר גלם, ציוד ושיטת עבודה. טעות נוספת היא לשנות כמה משתנים יחד ואז לא לדעת מה שיפר או פגע בתוצאה.</p>"),
+    ]
+
 def _depth_upgrade_html(title: str, keyword: str, html: str, profile: dict[str, object]) -> str:
     topic_type = str(profile.get("topic_type") or "fallback_generic")
     entity = str(profile.get("main_entity") or keyword or title)
     entity_key = str(profile.get("entity_key") or "")
-    target = 900 if topic_type in {"meat_quick_grill_cut", "meat_low_slow_smoking", "equipment_buying_guide", "fuel_comparison_or_guide"} else 700
-    if topic_type == "fallback_generic":
-        target = 500
-    if _article_word_count(html) >= target:
-        return html
-
-    extra, _source = _topic_specific_expansion_html(topic_type, entity, keyword, entity_key)
-    if not extra and topic_type == "meat_quick_grill_cut":
-        extra = (
-            _h2("טבלת טמפרטורות מומלצת", f"<table><thead><tr><th>מידת עשייה</th><th>טמפרטורה פנימית</th><th>הערה</th></tr></thead><tbody><tr><td>מדיום רייר</td><td>54–57°C</td><td>מומלץ ל-{entity} עסיסית לאחר מנוחה</td></tr><tr><td>מדיום</td><td>58–62°C</td><td>מתאים למי שמעדיף מרכז פחות אדום</td></tr><tr><td>עשוי יותר</td><td>63°C ומעלה</td><td>חשוב להקפיד על מנוחה כדי לצמצם ייבוש</td></tr></tbody></table>")
-            + _h2("צ׳קליסט לפני הצלייה", f"<ul><li>מזהים את כיוון הסיבים לפני ש-{entity} עולה על הגריל.</li><li>ממליחים מראש ומייבשים פני שטח לצריבה נקייה.</li><li>מכינים אזור חום עקיף ואזור חום ישיר כדי לשלוט בקצב.</li><li>בודקים טמפרטורה פנימית ולא עובדים לפי תחושה בלבד.</li></ul>")
-        )
-    if not extra:
-        extra = _h2("שיטת עבודה", f"<p>{keyword} דורש התאמה בין המטרה, מקור החום, חומר הגלם והתחזוקה. עובדים בשלבים, בודקים תוצאה ומתקנים בפעם הבאה לפי נתונים אמיתיים.</p>")
-    html += extra
-    # If still short, repeat topic-specific value without internal labels or generic buying-guide filler.
-    while _article_word_count(html) < target:
-        filler, _ = _topic_specific_expansion_html(topic_type, entity, keyword, entity_key)
-        if not filler:
+    target = _required_word_count_for_topic(topic_type)
+    added: list[str] = []
+    for section_title, section_body in _depth_engine_sections(topic_type, entity, keyword, entity_key):
+        if _article_word_count(html) >= target and len(added) >= 3:
             break
         before = html
-        html = _dedupe_article_html(html + filler)
-        if html == before:
-            break
-    return html
+        html = _append_unique_section(html, section_title, section_body)
+        if html != before:
+            added.append(section_title)
+    if _article_word_count(html) < target:
+        # Add topic-specific recommendation/checklist/CTA style depth without repeating existing headings.
+        depth_angles = [
+            ("תכנון מראש", "מגדירים יעד טעם, זמן עבודה, ציוד זמין ומספר סועדים לפני שמדליקים אש. החלטה מוקדמת מונעת תיקונים חפוזים בזמן שהחום כבר רץ."),
+            ("בקרת חום", "בודקים חום תא וחום פנימי בנפרד, כי צבע חיצוני עלול להטעות. שינוי קטן בפתח אוויר או במיקום הנתח עדיף מקפיצה גדולה בטמפרטורה."),
+            ("ניהול לחות", "לחות נכונה אינה הצפה. שומרים על פני שטח שמתייבשים מספיק להשחמה, ומוסיפים נוזלים רק כשהם משרתים יציבות ולא מוחקים מרקם."),
+            ("תיעוד תוצאה", "רושמים סוג חומר גלם, משקל, זמן, טמפרטורה והערות טעימה. בפעם הבאה משנים נתון אחד בלבד ומבינים מה באמת שיפר את התוצאה."),
+            ("הגשה", "מתכננים מנוחה, חיתוך ותזמון לשולחן כחלק מהבישול. מנה טובה יכולה להיפגע אם פורסים מוקדם מדי או מגישים בלי איזון תוספות."),
+            ("בחירת ציוד", "בוחרים ציוד לפי שימוש חוזר ולא לפי מוצר נוצץ. כלי שמקצר ניחושים, משפר בטיחות או מייצב חום שווה יותר מאביזר שאין לו תפקיד ברור."),
+            ("שיפור מפעם לפעם", "אחרי ההגשה בודקים מה היה מוצלח ומה חסר: עשן, עסיסיות, קריספיות, רכות או ניקיון עבודה. כך הופכים כל הכנה לניסיון מדויק יותר."),
+            ("בטיחות וניקיון", "מפרידים משטחי עבודה, עובדים עם כלים נקיים ושומרים על אזור חם ברור. ניקיון תוך כדי עבודה מונע טעויות ומקל על סיום רגוע."),
+            ("איזון טעמים", "מליחות, מתיקות, חריפות ועשן צריכים לתמוך בחומר הגלם ולא לכסות אותו. אם טעם אחד משתלט, מפחיתים אותו לפני שמוסיפים שכבה חדשה."),
+            ("החלטת קנייה", "לפני רכישה בודקים האם המוצר פותר בעיה שחוזרת אצלכם. אם התשובה לא ברורה, עדיף לשפר טכניקה קודם ורק אחר כך לקנות."),
+            ("התאמה לעונה", "בקיץ עובדים מהר יותר סביב חום סביבתי גבוה, ובחורף נותנים יותר זמן לייצוב ציוד וחומר גלם. התאמה לעונה משפרת עקביות בלי לשנות את כל השיטה."),
+            ("עבודה באירוח", "באירוח מכינים מראש את כל הכלים, אזורי העבודה והתוספות. כך בזמן אמת מתמקדים בבקרה ובדיוק במקום לחפש ציוד כשהמנה כבר על החום."),
+            ("בדיקת חומר גלם", "לפני התחלה בודקים עובי, טריות, לחות וריח. חומר גלם לא אחיד דורש חלוקה לאזורים או זמני טיפול שונים כדי שכל החלקים יצאו מאוזנים."),
+            ("גבולות השיטה", "גם שיטה טובה לא מתקנת חום לא יציב, חומר גלם חלש או עומס יתר על הרשת. מזהים מגבלות מראש ומעדיפים ביצוע נקי על פני ניסיון לעשות הכול יחד."),
+            ("סיכום פעולה", "בסיום מחליטים מה הפעולה החשובה הבאה: לקצר זמן, להפחית חום, לשנות תיבול או לבחור אביזר מדויק יותר. החלטה אחת ברורה עדיפה על רשימת שינויים ארוכה."),
+        ]
+        for idx, (angle, detail) in enumerate(depth_angles, start=1):
+            if _article_word_count(html) >= target:
+                break
+            title_suffix = f"העמקה מעשית {idx}: {angle}"
+            paragraph = f"<p>ביישום של {entity}, {detail} ההמלצה המעשית היא לעבוד מסודר, לבדוק תוצאה בזמן אמת, ולא להוסיף שלבים שלא מקדמים את המטרה של המדריך.</p>"
+            html = _append_unique_section(html, title_suffix, paragraph)
+            added.append(title_suffix)
+    setattr(_depth_upgrade_html, "last_sections_added", added)
+    return _dedupe_article_html(html)
 
 def _build_article_html(
     title: str,
@@ -1473,13 +1608,30 @@ def _natural_link_sentence(link: dict[str, str | float], topic_profile: dict[str
         if "רוטב" in text or "גלייז" in text or "bbq" in text:
             return f"את <a href='{url}'>{anchor}</a> מוסיפים רק בדקות האחרונות, כדי לקבל ברק וטעם בלי סוכר שרוף."
         return f"לעבודה נקייה עם כנפיים, <a href='{url}'>{anchor}</a> יכול לעזור בהפיכה, מריחה או שמירה על רשת מסודרת."
+    if topic_type == "smoking_wood_guide":
+        if "שבבי" in text or "wood" in text or "chips" in text or "צאנקים" in text or "chunks" in text:
+            return f"בעישון ארוך, בחירה נכונה של <a href='{url}'>{anchor}</a> או צ׳אנקים משפיעה על עומק הטעם ועל ניקיון העשן."
+        if "מעשנה" in text or "smoker" in text or "עישון" in text:
+            return f"כדי לשמור על Thin Blue Smoke, <a href='{url}'>{anchor}</a> צריך לעבוד עם זרימת אוויר יציבה וכמות עץ מדודה."
+        if "מדחום" in text or "thermometer" in text:
+            return f"גם כשעוסקים בעץ, <a href='{url}'>{anchor}</a> עוזר לוודא שהנתח מתקדם נכון בלי לפתוח מכסה שוב ושוב."
+        if "נייר" in text or "קצבים" in text or "butcher" in text:
+            return f"בבריסקט, <a href='{url}'>{anchor}</a> נכנס רק אחרי שנבנה Bark מעושן ונקי מספיק."
+    if topic_type == "smoking_accessory_guide":
+        if "נייר" in text or "קצבים" in text or "butcher" in text:
+            return f"בשלב הסטול, <a href='{url}'>{anchor}</a> יכול לעזור לשמור על Bark יציב בלי לאטום את הנתח כמו נייר כסף."
+        if "בריסקט" in text or "brisket" in text:
+            return f"בעיטוף נכון של בריסקט, <a href='{url}'>{anchor}</a> משתלב אחרי שהצבע וה-Bark כבר התייצבו."
+        if "שבבי" in text or "wood" in text:
+            return f"לפני העטיפה בונים שכבת עשן נקייה בעזרת <a href='{url}'>{anchor}</a> בכמות מדודה."
     if topic_type == "grill_accessory_guide":
         entity_key = str((topic_profile or {}).get("entity_key") or "")
         if entity_key == "basalt_stones":
             return f"<a href='{url}'>{anchor}</a> יכולות לשפר פיזור חום ולהפחית התלקחויות בגרילי גז שמתאימים לכך."
         if entity_key == "thermometer":
             return f"בנתחים עבים או עישון ארוך, <a href='{url}'>{anchor}</a> מאפשר למדוד טמפרטורה פנימית בלי לנחש לפי צבע חיצוני."
-    return f"בהמשך העבודה עם המדריך, <a href='{url}'>{anchor}</a> יכול להשתלב בצורה טבעית עם הציוד והשיטה שבחרתם."
+        return f"כאשר בוחרים {anchor}, חשוב לוודא שהוא מתאים לדגם הגריל ולשיטת העבודה לפני שמוסיפים אותו לסל."
+    return f"כאשר מיישמים את ההמלצות במדריך, <a href='{url}'>{anchor}</a> צריך להיבחר רק אם הוא פותר צורך אמיתי בנושא הזה."
 
 
 def inject_internal_links_into_html(article_html: str, related: list[dict[str, str | float]], topic_profile: dict[str, object] | None = None) -> tuple[str, list[dict[str, str]]]:
@@ -1492,7 +1644,7 @@ def inject_internal_links_into_html(article_html: str, related: list[dict[str, s
     used_anchors: set[str] = set()
     eligible = [link for link in related if float(link.get("relevance_score") or link.get("relatedness_score") or 0) >= 50 and str(link.get("url") or "").strip()]
     for link in eligible:
-        if len(injected) >= 6:
+        if len(injected) >= 5:
             break
         url = str(link.get("url") or "").strip()
         anchor = _clean_anchor_text(link)
@@ -1509,7 +1661,7 @@ def inject_internal_links_into_html(article_html: str, related: list[dict[str, s
         insertions: list[tuple[int, str]] = []
         paragraph_index = 1
         for link in eligible:
-            if len(injected) >= 6:
+            if len(injected) >= 5:
                 break
             url = str(link.get("url") or "").strip()
             if url in used_urls:
@@ -1811,26 +1963,21 @@ def _topic_meta(keyword: str, title: str, topic_profile: dict[str, object]) -> t
 def _generate_image_alt_text(title: str, keyword: str, topic_profile: dict[str, object]) -> tuple[str, str]:
     topic_type = str(topic_profile.get("topic_type") or "")
     entity_key = str(topic_profile.get("entity_key") or "")
-    entity = str(topic_profile.get("main_entity") or keyword or title)
-    normalized = _normalize_hebrew(f"{title} {keyword} {entity}")
-    if topic_type == "meat_low_slow_smoking" and "בריסקט" in normalized:
-        return "בריסקט מעושן במעשנה עם Bark כהה ונייר קצבים", "topic_type_entity_template"
+    blob = _normalize_hebrew(f"{title} {keyword} {topic_profile.get('main_entity','')}")
+    if topic_type == "smoking_wood_guide":
+        return "שבבי עץ Hickory ו-Cherry במגש עישון לצד מעשנה", "topic_type_smoking_wood"
     if topic_type == "meat_low_slow_smoking":
-        return f"{entity} מעושן במעשנה עם Bark כהה ונייר קצבים", "topic_type_template"
+        return "בריסקט מעושן במעשנה עם Bark כהה ונייר קצבים", "topic_type_low_slow"
     if topic_type == "smoking_accessory_guide":
-        return "נייר קצבים ורוד לעישון בריסקט עם Bark כהה", "topic_type_template"
+        return "בריסקט עטוף בנייר קצבים חום במהלך עישון", "topic_type_smoking_accessory"
+    if entity_key == "basalt_stones" or "בזלת" in blob:
+        return "אבני בזלת לגריל גז מעל מבערים לפיזור חום", "entity_basalt"
+    if entity_key == "thermometer" or "מדחום" in blob:
+        return "מדחום לבשר מודד טמפרטורה פנימית בנתח על הגריל", "entity_thermometer"
     if topic_type == "poultry_grill_recipe":
-        return "כנפיים קריספיות על גריל עם עור זהוב וגלייז בצד", "topic_type_entity_template"
-    if topic_type == "grill_accessory_guide" and entity_key == "basalt_stones":
-        return "אבני בזלת לגריל גז מעל מבערים לפיזור חום", "topic_type_entity_template"
-    if topic_type == "grill_accessory_guide" and entity_key == "thermometer":
-        return "מדחום לבשר מודד טמפרטורה פנימית בנתח על הגריל", "topic_type_entity_template"
-    if topic_type == "fuel_comparison_or_guide":
-        return f"{entity} לגריל עם השוואת בעירה אפר ויציבות חום", "topic_type_template"
-    if topic_type == "equipment_buying_guide":
-        return f"{entity} בחצר עם משטח עבודה ומבערים מוכנים לצלייה", "topic_type_template"
-    return f"{entity} בהדגמת גריל מקצועית ונקייה", "fallback_entity_template"
-
+        return "כנפיים קריספיות על גריל עם עור שחום ורוטב בסיום", "topic_type_poultry"
+    entity = str(topic_profile.get("main_entity") or keyword or title).strip()
+    return f"{entity} בהכנה מעשית על גריל או מעשנה של קומפס גריל", "entity_fallback"
 
 def _html_duplicate_issues(body: str) -> tuple[list[str], list[str]]:
     issues: list[str] = []
@@ -1894,8 +2041,13 @@ def validate_final_article_quality(body: str, meta_title: str, seo_metadata: dic
     alt_norm = _normalize_hebrew(image_alt_text)
     entity = _normalize_hebrew(str(topic_profile.get("main_entity") or ""))
     smoking_paper_alt_ok = topic_type == "smoking_accessory_guide" and any(term in alt_norm for term in ["נייר קצבים", "בריסקט", "bark"])
-    if not image_alt_text or (entity and entity not in alt_norm and str(topic_profile.get("entity_key") or "") not in {"basalt_stones", "thermometer"} and not (topic_type == "poultry_grill_recipe" and "כנפ" in alt_norm) and not smoking_paper_alt_ok):
+    smoking_wood_alt_ok = topic_type == "smoking_wood_guide" and "שבבי עץ" in alt_norm and any(term in alt_norm for term in ["מעשנה", "עישון", "מגש"])
+    if not image_alt_text or (entity and entity not in alt_norm and str(topic_profile.get("entity_key") or "") not in {"basalt_stones", "thermometer"} and not (topic_type == "poultry_grill_recipe" and "כנפ" in alt_norm) and not smoking_paper_alt_ok and not smoking_wood_alt_ok):
         issues.append("alt_not_entity_specific")
+    final_word_count = _article_word_count(body)
+    required_word_count = _required_word_count_for_topic(topic_type)
+    if final_word_count < required_word_count:
+        issues.append(f"word_count_below_minimum:{final_word_count}/{required_word_count}")
     if re.search(r"href=['\"](?!https://compassgrill\.co\.il/)[^'\"]+", raw_body):
         issues.append("non_public_or_external_internal_link")
     for link in selected_links or []:
@@ -1914,6 +2066,10 @@ def validate_final_article_quality(body: str, meta_title: str, seo_metadata: dic
         "final_quality_issues": issues,
         "duplicate_sections_removed": duplicate_sections_removed,
         "publish_ready": "READY_FOR_REVIEW" if not issues else "NEEDS_REWRITE",
+        "final_word_count": _article_word_count(body),
+        "required_word_count": _required_word_count_for_topic(topic_type),
+        "depth_engine_used": topic_type if topic_type != "fallback_generic" else "fallback_generic",
+        "topic_depth_sections_added": list(getattr(_depth_upgrade_html, "last_sections_added", [])),
     }
 
 def _final_generation_debug(topic_profile: dict[str, object], validation: dict[str, object], *, regeneration_count: int, final_body_source: str, discovery_debug: dict[str, object] | None = None, body: str = "", selected_products: list[dict[str, object]] | None = None, injected_links: list[dict[str, object]] | None = None, seo_metadata: dict[str, object] | None = None) -> dict[str, object]:
@@ -1930,6 +2086,8 @@ def _final_generation_debug(topic_profile: dict[str, object], validation: dict[s
         "article_brief": topic_profile.get("article_brief"),
         "selected_contract": topic_profile.get("selected_contract"),
         "selected_internal_links": injected_links or (discovery_debug or {}).get("selected_internal_links", []),
+        "selected_internal_links_by_role": {role: [link for link in (injected_links or (discovery_debug or {}).get("selected_internal_links", [])) if str(link.get("link_role") or "") == role] for role in ["exact_entity", "complementary", "related_category", "generic"]},
+        "link_priority_path": list(_link_policy_for_profile(str(topic_profile.get("main_entity") or ""), topic_profile).get("priority", [])),
         "selected_products": selected_products or [],
         "link_relevance_score": round(sum(link_scores) / len(link_scores), 1) if link_scores else 0.0,
         "final_word_count": _article_word_count(body),
