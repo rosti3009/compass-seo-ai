@@ -3508,6 +3508,16 @@ def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, obje
     )
     hero_result = provider.generate_hero_image(hero_prompt, draft_slug=f"{draft.slug}-hero")
     banner_result = provider.generate_hero_image(banner_prompt, draft_slug=f"{draft.slug}-banner")
+    section_results: dict[str, object] = {}
+    image_package = metadata.get("image_package") if isinstance(metadata.get("image_package"), list) else []
+    for image_item in image_package:
+        if not isinstance(image_item, dict):
+            continue
+        image_key = str(image_item.get("key") or "")
+        if image_key not in {"image_1", "image_2", "image_3", "image_4"}:
+            continue
+        section_prompt = build_realistic_hero_prompt(str(image_item.get("prompt") or draft.featured_image_prompt or hero_prompt))
+        section_results[image_key] = provider.generate_hero_image(section_prompt, draft_slug=f"{draft.slug}-{image_key}")
     result = hero_result
     image_file_path = None
     image_public_url = f"{public_base_url}{result.image_url}" if result.image_url and result.image_url.startswith("/") else result.image_url
@@ -3597,18 +3607,39 @@ def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, obje
         "created_at": banner_result.generated_at,
         "generation_status": banner_result.status,
     }
-    draft.image_generation_metadata_json = json.dumps({
+    for image_key, section_result in section_results.items():
+        section_url = getattr(section_result, "image_url", None)
+        section_public_url = f"{public_base_url}{section_url}" if section_url and str(section_url).startswith("/") else section_url
+        package_item = next((item for item in image_package if isinstance(item, dict) and item.get("key") == image_key), {})
+        package_item["image_url"] = section_public_url or ""
+        assets[image_key] = {
+            "image_type": image_key,
+            "public_url": section_public_url,
+            "local_path": (f"app{section_url}" if section_url and str(section_url).startswith("/static/") else None),
+            "prompt": package_item.get("prompt") or draft.featured_image_prompt,
+            "alt_text": package_item.get("alt") or draft.image_alt_text,
+            "filename": package_item.get("filename"),
+            "caption": package_item.get("caption"),
+            "width": getattr(section_result, "width", None),
+            "height": getattr(section_result, "height", None),
+            "created_at": getattr(section_result, "generated_at", None),
+            "generation_status": getattr(section_result, "status", None),
+        }
+    metadata.update({
         "width": result.width,
         "height": result.height,
         "provider": result.provider,
         "generated_at": result.generated_at,
         "assets": assets,
-        "generated_image_count": len([a for a in assets.values() if a.get("public_url")]),
+        "image_package": image_package,
+        "generated_image_count": len([a for a in assets.values() if isinstance(a, dict) and a.get("public_url")]),
         "article_hero_image_status": hero_result.status,
         "general_banner_image_status": banner_result.status,
-        "image_prompt_version": "v2-separate-assets",
+        "section_image_statuses": {key: getattr(value, "status", None) for key, value in section_results.items()},
+        "image_prompt_version": "v3-multi-image-section-aware",
         "regeneration_count": regeneration_count,
-    }, ensure_ascii=False)
+    })
+    draft.image_generation_metadata_json = json.dumps(metadata, ensure_ascii=False)
     diagnostics["image_storage_success"] = bool(result.image_url)
     diagnostics["image_file_saved"] = bool(result.image_url and str(result.image_url).startswith("/static/generated-images/"))
     diagnostics["image_public_url"] = image_public_url
@@ -3629,6 +3660,8 @@ def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, obje
         "copy_image_url": image_public_url,
         "article_hero_image": assets.get("article_hero_image"),
         "general_banner_image": assets.get("general_banner_image"),
+        "section_images": {key: assets.get(key) for key in ["image_1", "image_2", "image_3", "image_4"] if assets.get(key)},
+        "image_package": image_package,
         "image_metadata": {
             "width": result.width,
             "height": result.height,

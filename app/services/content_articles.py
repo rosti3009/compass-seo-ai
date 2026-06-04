@@ -1153,7 +1153,7 @@ def _h2(title: str, body: str) -> str:
 
 
 def _faq(items: list[tuple[str, str]]) -> str:
-    return "<h2>שאלות נפוצות</h2>" + "".join(f"<h3>{q}</h3><p>{a}</p>" for q, a in items) + "\n"
+    return "<h2>❓ שאלות נפוצות</h2>" + "".join(f"<h3>❓ {q}</h3><p>✅ {a}</p>" for q, a in items) + "\n"
 
 
 def _links_section(related: list[dict[str, str | float]]) -> str:
@@ -1575,7 +1575,8 @@ def _build_article_html(
 ) -> str:
     profile = topic_profile or _classify_topic(title, keyword, "informational")
     html = _build_contract_article(title, keyword, related, profile)
-    return _depth_upgrade_html(title, keyword, html, profile)
+    html = _depth_upgrade_html(title, keyword, html, profile)
+    return apply_visual_article_formatter(title, keyword, html, profile)
 
 def _clean_anchor_text(link: dict[str, str | float]) -> str:
     explicit = str(link.get("anchor_text") or "").strip()
@@ -1697,6 +1698,267 @@ def _topic_image_prompts(keyword: str, topic_profile: dict[str, object]) -> tupl
         {"section": str(topic_profile.get("selected_contract") or topic_type), "placement_hint": "[IMAGE_2_HERE]", "prompt": f"detail photo for {topic_type} article about {keyword}, matching the article contract, realistic BBQ photography, no text"},
     ]
     return featured, section_prompts
+
+_IMAGE_ICONS = {
+    "מעשנה": "🔥", "עישון": "🔥", "עצי": "🌳", "Bark": "🥩", "בריסקט": "🥩",
+    "בזלת": "🪨", "חום": "🌡️", "טמפרטורה": "🌡️", "ציר זמן": "⏱️",
+    "ציוד": "🧰", "מוצרים": "🛒", "שאלות": "❓", "טעויות": "⚠️",
+    "בחירה": "✅", "השוואה": "📊", "ניקוי": "🧽", "בטיחות": "🛡️",
+}
+
+
+def _section_icon(title: str) -> str:
+    if re.match(r"^\s*[🔥🌳🥩🪨🌡️⏱️🧰🛒❓⚠️✅📊🧽🛡️💡]", title or ""):
+        return ""
+    for needle, icon in _IMAGE_ICONS.items():
+        if needle in (title or ""):
+            return icon
+    return "✅"
+
+
+def _iconize_h2(html: str) -> str:
+    def repl(match: re.Match[str]) -> str:
+        inner = match.group(1).strip()
+        plain = _plain_text(inner)
+        if "מוצרים" in plain:
+            return f"<h2>{inner}</h2>"
+        icon = _section_icon(plain)
+        return f"<h2>{icon + ' ' if icon else ''}{inner}</h2>"
+    return re.sub(r"<h2[^>]*>(.*?)</h2>", repl, html or "", flags=re.IGNORECASE | re.DOTALL)
+
+
+def _topic_table_html(topic_type: str, entity: str) -> str:
+    if topic_type == "meat_low_slow_smoking":
+        rows = [("הכנה", "תיבול, ייצוב מעשנה", "לפני העלאה לרשת"), ("עישון פתוח", "105–120°C ובניית Bark", "עד צבע יציב"), ("עטיפה", "נייר קצבים לפי צורך", "בשלב הסטול"), ("סיום", "90–96°C ובדיקת רכות", "לפני מנוחה")]
+        head = ("שלב", "מה עושים", "סימן מעבר")
+    elif topic_type == "grill_accessory_guide":
+        rows = [("פיזור חום", "צלייה אחידה יותר", "כשיש נקודות חמות"), ("התלקחויות", "הפחתת להבה ישירה", "בגרילי גז מתאימים"), ("תחזוקה", "ניקוי והחלפה בזמן", "אחרי שומן מצטבר"), ("התאמה", "בדיקת דגם ומרווחים", "לפני רכישה")]
+        head = ("שיקול", "תועלת", "מתי חשוב")
+    elif topic_type == "smoking_wood_guide":
+        rows = [("Apple/Cherry", "עדין ומתוק", "עוף, דגים ובשר עדין"), ("Oak", "מאוזן", "בריסקט ונתחי בקר"), ("Hickory", "חזק", "בקר ועישון ארוך"), ("Mesquite", "עז מאוד", "שימוש קצר ומדוד")]
+        head = ("סוג עץ", "פרופיל טעם", "התאמה")
+    elif topic_type == "equipment_buying_guide":
+        rows = [("גודל", "כמות סועדים", "לא לקנות קטן מדי"), ("חומר", "עמידות ושמירת חום", "חשוב בגינה פתוחה"), ("ניקוי", "גישה למגש שומן", "חוסך זמן"), ("אביזרים", "מדחום, כיסוי וכלים", "משפר דיוק")]
+        head = ("קריטריון", "למה לבדוק", "המלצה")
+    else:
+        rows = [("לפני עבודה", "הכנת ציוד וחומר גלם", "מונע עצירות"), ("במהלך העבודה", "בקרת חום ומרקם", "משפר עקביות"), ("לפני הגשה", "מנוחה, חיתוך וסידור", "שומר עסיסיות"), ("אחרי", "ניקוי ותיעוד", "משפר את הפעם הבאה")]
+        head = ("שלב", "פעולה", "למה זה חשוב")
+    tr = "".join(f"<tr><td>{a}</td><td>{b}</td><td>{c}</td></tr>" for a,b,c in rows)
+    return f"<h2>📊 טבלה שימושית ל-{entity}</h2><table><thead><tr><th>{head[0]}</th><th>{head[1]}</th><th>{head[2]}</th></tr></thead><tbody>{tr}</tbody></table>"
+
+
+def _intro_summary_html(title: str, keyword: str, topic_type: str) -> str:
+    bullets = {
+        "meat_low_slow_smoking": ["איך לייצב מעשנה ב-105–120°C", "מתי לבחור עצי עישון", "איך לנהל Bark, סטול ועטיפה", "איפה לשלב מדחום ונייר קצבים"],
+        "smoking_wood_guide": ["איך לבחור שבבים או צ׳אנקים", "איזה עץ מתאים לכל בשר", "איך להימנע מעשן מר", "איך לתכנן תמונות ופרסום ב-ISTORE"],
+        "grill_accessory_guide": ["מה האביזר באמת עושה", "איך לבדוק התאמה לגריל", "מהן טעויות התחזוקה", "מתי נכון לקנות בקומפס גריל"],
+        "equipment_buying_guide": ["איך להשוות דגמים", "אילו אביזרים משלימים חשובים", "מה לבדוק לפני רכישה", "איך לשמור על חוויית צלייה נוחה"],
+    }.get(topic_type, [f"מה חשוב לדעת על {keyword}", "איך לעבוד מסודר יותר", "אילו טעויות כדאי למנוע", "איך לבחור ציוד מתאים בקומפס גריל"])
+    return "<div class='intro-summary'><p><strong>במאמר זה תלמד:</strong></p><ul>" + "".join(f"<li>✅ {b}</li>" for b in bullets) + "</ul></div>"
+
+
+def _tip_block(topic_type: str, entity: str) -> str:
+    tips = {
+        "meat_low_slow_smoking": "שמרו על שינויי חום קטנים. פתיחה תכופה של המכסה מאריכה את העישון ופוגעת ב-Bark.",
+        "smoking_wood_guide": "התחילו בכמות עץ קטנה והוסיפו רק אם העשן נשאר דק וכחלחל, לא סמיך ולבן.",
+        "grill_accessory_guide": "לפני רכישה בדקו התאמה לדגם הגריל, מרווחים ויכולת ניקוי — לא רק מחיר.",
+    }.get(topic_type, f"ב-{entity}, תוצאה עקבית מגיעה ממדידה, הכנה מראש ושינוי קטן אחד בכל פעם.")
+    return f"<div class='professional-tip'><p><strong>💡 טיפ מקצועי</strong></p><p>{tips}</p></div>"
+
+
+def _mistake_block(topic_type: str) -> str:
+    mistakes = {
+        "meat_low_slow_smoking": "פתיחת מעשנה בכל כמה דקות כדי לבדוק צבע. עדיף למדוד, להציץ בנקודות החלטה ולהחזיר יציבות.",
+        "smoking_wood_guide": "להוסיף עוד עץ כשלא רואים עשן. עשן נקי כמעט שקוף עדיף על ענן לבן ומר.",
+        "grill_accessory_guide": "להניח שכל אבני בזלת או אביזר יתאימו לכל גריל גז בלי לבדוק מפרט ודגם.",
+    }.get(topic_type, "להתחיל בלי ציוד מוכן, ואז לעצור באמצע כשהחום כבר גבוה וחומר הגלם על הרשת.")
+    return f"<div class='common-mistake'><p><strong>⚠ טעות נפוצה</strong></p><p>{mistakes}</p></div>"
+
+
+def _checklist_html(topic_type: str) -> str:
+    items = {
+        "meat_low_slow_smoking": ["מעשנה יציבה", "מדחום לבשר", "נייר קצבים", "עצי עישון", "זמן מנוחה"],
+        "smoking_wood_guide": ["שבבי עץ או צ׳אנקים", "כלי השריה לפי צורך", "מעשנה או קופסת עישון", "מדחום", "תיעוד טעמים"],
+        "grill_accessory_guide": ["בדיקת התאמה לדגם", "כפפות וכלי עבודה", "מברשת ניקוי", "מדחום", "מגש שומן נקי"],
+    }.get(topic_type, ["ציוד מתאים", "מדחום", "אזור עבודה נקי", "כלי הגשה", "תוכנית זמן"])
+    return "<h2>✅ צ׳קליסט לפני שמתחילים</h2><ul class='article-checklist'>" + "".join(f"<li>✅ {item}</li>" for item in items) + "</ul>"
+
+
+def _cta_block_html(topic_type: str) -> str:
+    items = {
+        "meat_low_slow_smoking": ["מעשנות", "עצי עישון", "מדחומים", "נייר קצבים"],
+        "smoking_wood_guide": ["שבבי עץ לעישון", "צ׳אנקים", "מעשנות", "מדחומים"],
+        "grill_accessory_guide": ["אביזרים לגריל", "אבני בזלת", "מדחומים", "כיסויים וכלי ניקוי"],
+        "equipment_buying_guide": ["Gas Grills", "Charcoal Grills", "Kamado Grills", "Outdoor Kitchens"],
+    }.get(topic_type, ["Gas Grills", "Smokers", "Thermometers", "Grill Accessories"])
+    return "<div class='article-cta'><h2>🛒 מחפשים ציוד מתאים?</h2><p>בקומפס גריל תמצאו פתרונות שנבחרים לפי שימוש אמיתי ולא לפי ניחוש:</p><ul>" + "".join(f"<li>✅ {item}</li>" for item in items) + "</ul></div>"
+
+
+def _insert_image_markers(html: str) -> str:
+    if "<!-- IMAGE_1 -->" in html:
+        return html
+    matches = list(re.finditer(r"<h2[^>]*>.*?</h2>", html or "", flags=re.IGNORECASE | re.DOTALL))
+    if not matches:
+        return (html or "") + "\n<!-- IMAGE_1 -->\n<!-- IMAGE_2 -->\n<!-- IMAGE_3 -->\n<!-- IMAGE_4 -->"
+    positions = []
+    if matches:
+        positions.append(matches[0].start())
+    for idx in (2, 4, 6):
+        positions.append(matches[min(idx, len(matches)-1)].start())
+    out = html or ""
+    for marker_no, pos in reversed(list(enumerate(positions[:4], start=1))):
+        out = out[:pos] + f"\n<!-- IMAGE_{marker_no} -->\n" + out[pos:]
+    return out
+
+
+def apply_visual_article_formatter(title: str, keyword: str, html: str, topic_profile: dict[str, object]) -> str:
+    topic_type = str(topic_profile.get("topic_type") or "fallback_generic")
+    entity = str(topic_profile.get("main_entity") or keyword or title)
+    formatted = _iconize_h2(html)
+    if "intro-summary" not in formatted:
+        formatted = _intro_summary_html(title, keyword, topic_type) + "\n" + formatted
+    if "professional-tip" not in formatted:
+        formatted = formatted + "\n" + _tip_block(topic_type, entity)
+    if "common-mistake" not in formatted:
+        formatted = formatted + "\n" + _mistake_block(topic_type)
+    if "article-checklist" not in formatted:
+        formatted = formatted + "\n" + _checklist_html(topic_type)
+    if "<table" not in formatted.lower():
+        formatted = formatted + "\n" + _topic_table_html(topic_type, entity)
+    if "article-cta" not in formatted:
+        formatted = formatted + "\n" + _cta_block_html(topic_type)
+    formatted = _insert_image_markers(formatted)
+    return _dedupe_article_html(formatted)
+
+
+def _image_filename(slug: str, key: str) -> str:
+    safe = re.sub(r"[^a-z0-9-]+", "-", (slug or "compass-grill-article").lower()).strip("-")
+    return f"{safe}-{key}.jpg"
+
+
+def _unique_alt(base: str, used: set[str], suffix: str) -> str:
+    alt = re.sub(r"\s+", " ", base).strip()
+    generic = {"image", "photo", "grill image", "bbq image", "תמונה", "צילום", "תמונת גריל"}
+    if not alt or alt.lower() in generic or len(alt) < 18:
+        alt = f"{base} - {suffix}".strip(" -")
+    original = alt
+    i = 2
+    while _normalize_hebrew(alt) in used:
+        alt = f"{original} - {suffix} {i}"
+        i += 1
+    used.add(_normalize_hebrew(alt))
+    return alt
+
+
+def build_multi_image_package(title: str, keyword: str, slug: str, topic_profile: dict[str, object], featured_prompt: str) -> dict[str, object]:
+    topic_type = str(topic_profile.get("topic_type") or "fallback_generic")
+    entity = str(topic_profile.get("main_entity") or keyword or title)
+    plans = {
+        "meat_low_slow_smoking": [("featured_image", "finished brisket with dark bark", "בריסקט מעושן מוכן עם Bark כהה", "תמונת שער: בריסקט מעושן מוכן לפריסה", "finished smoked brisket, dark bark, butcher paper, premium BBQ photography, no text"), ("image_1", "smoker setup", "מעשנה מוכנה לעישון בריסקט עם מדחום", "אחרי הפתיח: הכנת המעשנה והציוד", "stable smoker setup for brisket, thermometer probes, thin blue smoke, no text"), ("image_2", "wood selection", "עצי עישון Oak ו-Hickory ליד בריסקט", "בחירת עצי עישון מתאימים לבקר", "oak and hickory smoking wood chunks beside brisket prep, realistic, no text"), ("image_3", "bark development", "בריסקט בתוך מעשנה בזמן פיתוח Bark", "שלב פיתוח ה-Bark לפני עטיפה", "brisket in smoker developing dark bark, thin smoke, close up, no text"), ("image_4", "slicing and serving", "פריסת בריסקט מעושן לאחר מנוחה ארוכה", "לפני FAQ: פריסה והגשה נכונה", "slicing rested smoked brisket on board, juicy slices, BBQ serving, no text")],
+        "smoking_wood_guide": [("featured_image", "smoking woods", "שבבי עץ וצ׳אנקים לעישון ליד מעשנה", "תמונת שער: בחירת עץ לעישון", "variety of smoking wood chips and chunks near smoker, realistic BBQ photo, no text"), ("image_1", "chips versus chunks", "שבבי עץ מול צ׳אנקים לעישון", "אחרי הפתיח: ההבדל בין שבבים לצ׳אנקים", "wood chips versus wood chunks for smoking, clear realistic setup, no text"), ("image_2", "wood flavor pairing", "Oak Cherry ו-Hickory מסודרים לפי התאמה לבשר", "אחרי פרופיל טעם והתאמה לבשר", "oak cherry hickory smoking woods arranged by meat pairing, no text"), ("image_3", "thin blue smoke", "עשן דק וכחלחל יוצא ממעשנה", "אחרי סעיף עוצמת עשן", "thin blue smoke from smoker vent, premium realistic BBQ photography, no text"), ("image_4", "wood storage", "אחסון יבש של עצי עישון ושבבים", "לפני FAQ: אחסון ושימוש חוזר", "dry storage of smoking wood chips and chunks, clean BBQ workspace, no text")],
+        "grill_accessory_guide": [("featured_image", "basalt stones in gas grill", "אבני בזלת לגריל גז מעל מבערים", "תמונת שער: אבני בזלת בגריל גז", "black basalt lava stones installed in gas grill above burners, realistic, no text"), ("image_1", "gas grill setup", "גריל גז פתוח עם אבני בזלת מסודרות", "אחרי הפתיח: מיקום האבנים בגריל", "open gas grill with basalt stones correctly arranged, no text"), ("image_2", "heat distribution", "פיזור חום אחיד מעל אבני בזלת בגריל", "אחרי סעיף פיזור חום", "even heat over basalt stones in gas grill, glowing burners, realistic, no text"), ("image_3", "flare up control", "אבני בזלת מפחיתות התלקחויות משומן בגריל", "אחרי סעיף התלקחויות", "basalt stones controlling flare ups in gas grill, realistic BBQ photo, no text"), ("image_4", "cleaning stones", "ניקוי אבני בזלת ואביזרי גריל", "לפני FAQ: תחזוקה וניקוי", "cleaning basalt lava stones and grill accessories, no text")],
+    }.get(topic_type)
+    if not plans:
+        plans = [("featured_image", entity, f"{entity} בהכנה מקצועית על גריל", f"תמונת שער: {title}", featured_prompt), ("image_1", "setup", f"ציוד מוכן עבור {entity}", "אחרי הפתיח: הכנת ציוד", f"BBQ setup for {keyword}, realistic, no text"), ("image_2", "process", f"שלב עבודה מרכזי בנושא {entity}", "אחרי סעיף מרכזי ראשון", f"process detail for {keyword} article, realistic BBQ photo, no text"), ("image_3", "detail", f"פרט מקצועי בהכנת {entity}", "אחרי סעיף טיפים", f"close detail for {keyword}, premium BBQ photo, no text"), ("image_4", "serving", f"תוצאה סופית והגשה של {entity}", "לפני FAQ", f"final serving for {keyword}, realistic BBQ photo, no text")]
+    used: set[str] = set()
+    package = []
+    for key, filename_key, alt, caption, prompt in plans:
+        package.append({"key": key, "filename": _image_filename(slug, filename_key), "title": caption.replace("תמונת שער: ", ""), "alt": _unique_alt(alt, used, key), "caption": caption, "prompt": prompt if key != "featured_image" or not featured_prompt else featured_prompt, "image_url": ""})
+    placement = [
+        {"image": "featured_image", "instruction": "Place as article cover.", "section": "cover"},
+        {"image": "image_1", "instruction": "Place after introduction.", "section": "פתיח"},
+        {"image": "image_2", "instruction": "Place after the closest matching H2 section.", "section": package[2]["caption"]},
+        {"image": "image_3", "instruction": "Place after the process/detail section.", "section": package[3]["caption"]},
+        {"image": "image_4", "instruction": "Place before FAQ section.", "section": "שאלות נפוצות"},
+    ]
+    return {"image_package": package, "image_placement_guide": placement, "image_prompt_version": "v3-multi-image-section-aware"}
+
+
+def _split_article_blocks(body: str) -> list[dict[str, str]]:
+    pieces = re.split(r"(?=<h2[^>]*>)", body or "")
+    blocks = []
+    first = pieces[0].strip() if pieces else ""
+    if first:
+        blocks.append({"label": "Introduction", "html": first})
+    for idx, piece in enumerate((p for p in pieces[1:] if p.strip()), start=1):
+        heading = _plain_text(re.search(r"<h2[^>]*>(.*?)</h2>", piece, flags=re.I|re.S).group(1)) if re.search(r"<h2[^>]*>(.*?)</h2>", piece, flags=re.I|re.S) else f"Section {idx}"
+        if "שאלות נפוצות" in heading:
+            label = "FAQ"
+        elif "מחפשים" in heading or "CTA" in piece or "article-cta" in piece:
+            label = "CTA"
+        else:
+            label = f"Section {idx}: {heading.strip()}"
+        blocks.append({"label": label, "html": piece.strip()})
+    return blocks
+
+
+def build_istore_copy_paste_package(title: str, slug: str, meta_title: str, meta_description: str, body: str, image_package: list[dict[str, str]]) -> dict[str, object]:
+    steps = [
+        {"step": 1, "label": "Copy into Title field", "value": title},
+        {"step": 2, "label": "Copy into Slug field", "value": slug},
+        {"step": 3, "label": "Copy into Meta Title", "value": meta_title},
+        {"step": 4, "label": "Copy into Meta Description", "value": meta_description},
+    ]
+    featured = next((img for img in image_package if img.get("key") == "featured_image"), image_package[0] if image_package else {})
+    steps.append({"step": 5, "label": "Upload Featured Image", "filename": featured.get("filename", ""), "alt": featured.get("alt", ""), "caption": featured.get("caption", "")})
+    step_no = 6
+    for block in _split_article_blocks(body):
+        steps.append({"step": step_no, "label": f"Paste {block['label']}", "html": block["html"]})
+        step_no += 1
+        marker = re.search(r"<!--\s*IMAGE_(\d)\s*-->", block["html"])
+        if marker:
+            image_key = f"image_{marker.group(1)}"
+            img = next((item for item in image_package if item.get("key") == image_key), {})
+            if img:
+                steps.append({"step": step_no, "label": f"Insert {image_key}", "filename": img.get("filename", ""), "alt": img.get("alt", ""), "caption": img.get("caption", ""), "prompt": img.get("prompt", "")})
+                step_no += 1
+    return {"mode": "ISTORE_COPY_PASTE", "steps": steps, "article_blocks": _split_article_blocks(body)}
+
+
+def validate_complete_publishing_package(body: str, image_package: list[dict[str, str]], placement_guide: list[dict[str, str]], istore_package: dict[str, object], diversity: dict[str, object] | None = None) -> dict[str, object]:
+    checks = {
+        "article_generated": bool(body and _article_word_count(body) > 50),
+        "diversity_score_passed": bool((diversity or {}).get("passed", True)),
+        "table_exists": "<table" in (body or "").lower(),
+        "faq_exists": "שאלות נפוצות" in (body or "") or "FAQ" in (body or ""),
+        "cta_exists": "article-cta" in (body or "") or "🛒" in (body or ""),
+        "checklist_exists": "article-checklist" in (body or "") or "צ׳קליסט" in (body or ""),
+        "tip_block_exists": "professional-tip" in (body or "") or "טיפ מקצועי" in (body or ""),
+        "warning_block_exists": "common-mistake" in (body or "") or "טעות נפוצה" in (body or ""),
+        "five_image_package_exists": len(image_package) == 5,
+        "image_placement_guide_exists": len(placement_guide) >= 5,
+        "image_markers_exist": all(f"<!-- IMAGE_{i} -->" in (body or "") for i in range(1,5)),
+        "alt_values_unique": len({_normalize_hebrew(str(i.get("alt") or "")) for i in image_package}) == len(image_package),
+        "filenames_exist": all(i.get("filename") for i in image_package),
+        "captions_exist": all(i.get("caption") for i in image_package),
+        "image_prompts_exist": all(i.get("prompt") for i in image_package),
+        "istore_publishing_mode_exists": istore_package.get("mode") == "ISTORE_COPY_PASTE" and bool(istore_package.get("steps")),
+    }
+    failed = [k for k, ok in checks.items() if not ok]
+    return {"publishing_package_checks": checks, "publishing_package_failed_checks": failed, "publish_readiness": "READY_FOR_REVIEW" if not failed else "NEEDS_REWRITE"}
+
+
+def article_structure_signature(body: str) -> set[str]:
+    h2s = re.findall(r"<h2[^>]*>(.*?)</h2>", body or "", flags=re.IGNORECASE | re.DOTALL)
+    tokens = {_normalize_hebrew(re.sub(r"^[^\w\u0590-\u05FF]+", "", _plain_text(h))) for h in h2s}
+    tokens.update(re.findall(r"<!--\s*IMAGE_\d\s*-->", body or ""))
+    if "intro-summary" in (body or ""):
+        tokens.add("intro_summary")
+    if "article-cta" in (body or ""):
+        tokens.add("cta")
+    return {t for t in tokens if t}
+
+
+def calculate_diversity_score(candidate_body: str, previous_bodies: list[str]) -> dict[str, object]:
+    candidate = article_structure_signature(candidate_body)
+    max_similarity = 0.0
+    for prev in previous_bodies:
+        other = article_structure_signature(prev)
+        union = candidate | other
+        similarity = (len(candidate & other) / len(union)) if union else 0.0
+        max_similarity = max(max_similarity, similarity)
+    score = round(100 * (1 - max_similarity), 1)
+    return {"diversity_score": score, "max_similarity": round(max_similarity, 3), "threshold": 0.82, "passed": max_similarity <= 0.82}
 
 
 INTERNAL_SEO_CONTRACT_TERMS = {
@@ -2096,6 +2358,33 @@ def _final_generation_debug(topic_profile: dict[str, object], validation: dict[s
         "final_body_source": final_body_source,
     }
 
+
+def _prepare_publishing_metadata(
+    *,
+    title: str,
+    slug: str,
+    keyword: str,
+    body: str,
+    meta_title: str,
+    meta_description: str,
+    topic_profile: dict[str, object],
+    featured_prompt: str,
+    diversity: dict[str, object] | None = None,
+) -> tuple[dict[str, object], dict[str, object]]:
+    package = build_multi_image_package(title, keyword, slug, topic_profile, featured_prompt)
+    image_package = package["image_package"]
+    placement = package["image_placement_guide"]
+    istore_package = build_istore_copy_paste_package(title, slug, meta_title, meta_description, body, image_package)  # type: ignore[arg-type]
+    qa = validate_complete_publishing_package(body, image_package, placement, istore_package, diversity)
+    metadata = {
+        **package,
+        "istore_copy_paste_package": istore_package,
+        "istore_block_structure": istore_package.get("article_blocks", []),
+        "final_qa_validation": qa,
+        "diversity": diversity or {"diversity_score": 100, "max_similarity": 0, "threshold": 0.82, "passed": True},
+    }
+    return metadata, qa
+
 def generate_daily_article_draft(db: Session, *, randomize: bool = False) -> tuple[ContentArticleDraft, bool, datetime | None]:
     if randomize:
         (title, keyword, intent), reused, last_generated_at = select_random_topic(db)
@@ -2110,12 +2399,24 @@ def generate_daily_article_draft(db: Session, *, randomize: bool = False) -> tup
     body, _ = _remove_h1_tags(_build_article_html(title, keyword, related, topic_profile=topic_profile))
     body, injected_links = inject_internal_links_into_html(body, related, topic_profile)
     body, _, _ = _postprocess_article_assets(body, "")
+    previous_bodies: list[str] = []
+    if randomize:
+        cutoff = datetime.now(UTC) - timedelta(days=60)
+        previous_bodies = [str(row[0] or "") for row in db.query(ContentArticleDraft.article_body).filter(ContentArticleDraft.created_at >= cutoff).order_by(ContentArticleDraft.created_at.desc()).limit(10).all()]
+    diversity = calculate_diversity_score(body, previous_bodies)
+    if randomize and not diversity["passed"]:
+        regenerated_body, _ = _remove_h1_tags(_build_article_html(title, keyword, related, topic_profile=topic_profile))
+        body, injected_links = inject_internal_links_into_html(regenerated_body, related, topic_profile)
+        body, _, _ = _postprocess_article_assets(body, "")
+        diversity = calculate_diversity_score(body, previous_bodies)
     validation = validate_article_relevance(title, keyword, body, topic_profile, image_prompt=featured_prompt, internal_links=injected_links or related)
     regeneration_count = 0
     if not validation["validation_passed"]:
         regenerated_body, _ = _remove_h1_tags(_build_article_html(title, keyword, related, topic_profile=topic_profile))
         body, injected_links = inject_internal_links_into_html(regenerated_body, related, topic_profile)
         body, _, _ = _postprocess_article_assets(body, "")
+        if randomize:
+            diversity = calculate_diversity_score(body, previous_bodies)
         regeneration_count = 1
         validation = validate_article_relevance(title, keyword, body, topic_profile, image_prompt=featured_prompt, internal_links=injected_links or related)
     faq_schema = {
@@ -2132,9 +2433,10 @@ def generate_daily_article_draft(db: Session, *, randomize: bool = False) -> tup
     body, meta_title, faq_schema = _postprocess_article_assets(body, meta_title, faq_schema)
     image_alt_text, alt_source = _generate_image_alt_text(title, keyword, topic_profile)
     final_quality = validate_final_article_quality(body, meta_title, seo_metadata, topic_profile, injected_links or related, image_alt_text)
-    validation = {**validation, **final_quality, "alt_generation_source": alt_source, "topic_specific_expansion_source": _topic_specific_expansion_html(str(topic_profile.get("topic_type") or ""), str(topic_profile.get("main_entity") or keyword), keyword, str(topic_profile.get("entity_key") or ""))[1]}
+    publishing_metadata, publishing_qa = _prepare_publishing_metadata(title=title, slug=slug, keyword=keyword, body=body, meta_title=meta_title, meta_description=meta_description, topic_profile=topic_profile, featured_prompt=featured_prompt, diversity=diversity)
+    validation = {**validation, **final_quality, **publishing_qa, "alt_generation_source": alt_source, "topic_specific_expansion_source": _topic_specific_expansion_html(str(topic_profile.get("topic_type") or ""), str(topic_profile.get("main_entity") or keyword), keyword, str(topic_profile.get("entity_key") or ""))[1]}
     draft = ContentArticleDraft(
-        status="READY_FOR_REVIEW" if validation["validation_passed"] and validation.get("final_quality_passed", True) else "NEEDS_REWRITE", topic_title=title, title=title, slug=slug,
+        status="READY_FOR_REVIEW" if validation["validation_passed"] and validation.get("final_quality_passed", True) and not publishing_qa.get("publishing_package_failed_checks") else "NEEDS_REWRITE", topic_title=title, title=title, slug=slug,
         meta_title=meta_title,
         meta_description=meta_description,
         focus_keyword=keyword, target_intent=intent, article_body=body,
@@ -2148,6 +2450,7 @@ def generate_daily_article_draft(db: Session, *, randomize: bool = False) -> tup
         generated_image_url=None, uploaded_media_id=None, image_publish_status="NOT_PUBLISHED",
         target_site_section="blog", target_publish_type="article", target_blog_base_url="https://compassgrill.co.il/blog/",
         target_path=f"/blog/{slug}", target_url=f"https://compassgrill.co.il/blog/{slug}", publish_destination_status="ready", featured_image_status="planned",
+        image_generation_metadata_json=json.dumps(publishing_metadata, ensure_ascii=False),
     )
     db.add(draft)
     db.commit()
@@ -2189,6 +2492,7 @@ def generate_topic_article_draft(
     body, _ = _remove_h1_tags(_build_article_html(topic_title, focus_keyword, related, topic_profile=topic_profile))
     body, injected_links = inject_internal_links_into_html(body, related, topic_profile)
     body, _, _ = _postprocess_article_assets(body, "")
+    diversity = calculate_diversity_score(body, [])
     validation = validate_article_relevance(topic_title, focus_keyword, body, topic_profile, image_prompt=featured_prompt, internal_links=injected_links or related)
     regeneration_count = 0
     if not validation["validation_passed"]:
@@ -2203,6 +2507,7 @@ def generate_topic_article_draft(
         regenerated_body, _ = _remove_h1_tags(_build_article_html(topic_title, focus_keyword, related, topic_profile=topic_profile))
         body, injected_links = inject_internal_links_into_html(regenerated_body, related, topic_profile)
         body, _, _ = _postprocess_article_assets(body, "")
+        diversity = calculate_diversity_score(body, [])
         regeneration_count = 1
         validation = validate_article_relevance(topic_title, focus_keyword, body, topic_profile, image_prompt=featured_prompt, internal_links=injected_links or related)
     seo_metadata = build_topic_seo_metadata(focus_keyword, topic_title, topic_profile)
@@ -2210,9 +2515,10 @@ def generate_topic_article_draft(
     body, meta_title, _ = _postprocess_article_assets(body, meta_title)
     image_alt_text, alt_source = _generate_image_alt_text(topic_title, focus_keyword, topic_profile)
     final_quality = validate_final_article_quality(body, meta_title, seo_metadata, topic_profile, injected_links or related, image_alt_text)
-    validation = {**validation, **final_quality, "alt_generation_source": alt_source, "topic_specific_expansion_source": _topic_specific_expansion_html(str(topic_profile.get("topic_type") or ""), str(topic_profile.get("main_entity") or focus_keyword), focus_keyword, str(topic_profile.get("entity_key") or ""))[1]}
+    publishing_metadata, publishing_qa = _prepare_publishing_metadata(title=topic_title, slug=slug, keyword=focus_keyword, body=body, meta_title=meta_title, meta_description=meta_description, topic_profile=topic_profile, featured_prompt=featured_prompt, diversity=diversity)
+    validation = {**validation, **final_quality, **publishing_qa, "alt_generation_source": alt_source, "topic_specific_expansion_source": _topic_specific_expansion_html(str(topic_profile.get("topic_type") or ""), str(topic_profile.get("main_entity") or focus_keyword), focus_keyword, str(topic_profile.get("entity_key") or ""))[1]}
     draft = ContentArticleDraft(
-        status="READY_FOR_REVIEW" if validation["validation_passed"] and validation.get("final_quality_passed", True) else "NEEDS_REWRITE", topic_title=topic_title, title=topic_title, slug=slug,
+        status="READY_FOR_REVIEW" if validation["validation_passed"] and validation.get("final_quality_passed", True) and not publishing_qa.get("publishing_package_failed_checks") else "NEEDS_REWRITE", topic_title=topic_title, title=topic_title, slug=slug,
         meta_title=meta_title,
         meta_description=meta_description,
         focus_keyword=focus_keyword, target_intent=target_intent, article_body=body,
@@ -2225,6 +2531,7 @@ def generate_topic_article_draft(
         generated_image_url=None, uploaded_media_id=None, image_publish_status="NOT_PUBLISHED",
         target_site_section="blog", target_publish_type="article", target_blog_base_url="https://compassgrill.co.il/blog/",
         target_path=f"/blog/{slug}", target_url=f"https://compassgrill.co.il/blog/{slug}", publish_destination_status="ready", featured_image_status="planned",
+        image_generation_metadata_json=json.dumps(publishing_metadata, ensure_ascii=False),
     )
     db.add(draft)
     db.commit()

@@ -689,3 +689,33 @@ pre {
   line-height: 1.55;
   margin: 0;
 }
+
+/* ISTORE publishing package generator */
+.istore-copy-mode,
+.image-placement-guide {
+  border: 1px solid #e2d6c3;
+  background: #fffaf3;
+}
+.istore-step {
+  border-top: 1px dashed #d0b58e;
+  padding: 0.75rem 0;
+}
+.istore-step h6 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+  color: #5c3518;
+}
+.intro-summary,
+.professional-tip,
+.common-mistake,
+.article-cta {
+  border-radius: 14px;
+  padding: 1rem;
+  margin: 1rem 0;
+  background: #fff7e8;
+  border: 1px solid #ead4ad;
+}
+.professional-tip { background: #eef9f0; border-color: #b8dfbd; }
+.common-mistake { background: #fff0ee; border-color: #edb8b1; }
+.article-cta { background: #f4efe7; border-color: #d6b991; }
+.article-checklist li { margin-bottom: 0.35rem; }
