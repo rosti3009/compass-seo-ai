@@ -41,7 +41,7 @@
           <button type="button" class="secondary-button inline-action" data-result-target="simple-action-result" data-action="fetch" data-endpoint="/content/articles/internal-links/refresh-index" data-method="POST" data-label="רענון אינדקס קישורים">רענן אינדקס קישורים מהאתר</button>
         </div>
         <form class="manual-topic-form" id="manual-topic-form">
-          <h3>כור מאמר לפי נושא</h3>
+          <h3>צור מאמר לפי נושא</h3>
           <label>נושא המאמר
             <input name="topic_title" type="text" required value="אבני בזלת לגריל – איך הן משפרות צלייה בגריל גז">
           </label>
@@ -57,7 +57,7 @@
           <label>רשימת נושאים מרובה (מושבת)
             <textarea disabled placeholder="מושבת: תמיכה בנושא יחיד בלבד"></textarea>
           </label>
-          <button type="submit" class="secondary-button">כור מאמר לפי נושא</button>
+          <button type="submit" class="secondary-button">צור מאמר לפי נושא</button>
         </form>
         <h2>המאמר הפעיל לעבודה</h2>
         {% if active_article %}
@@ -66,6 +66,14 @@
           <h3>{{ article.title }}</h3>
           <p><strong>מילת מפתח:</strong> {{ article.focus_keyword }} | <strong>כוונה:</strong> {{ article.target_intent }}</p>
           <p><strong>Slug:</strong> {{ article.slug }}</p>
+          <section class="manual-upload-card" aria-label="Article generation diagnostics">
+            <h4>דיאגנוסטיקת יצירת מאמר</h4>
+            <p><strong>Topic Type:</strong> {{ article.debug.selected_topic_type or article.debug.detected_topic_type }}</p>
+            <p><strong>Contract:</strong> {{ article.debug.selected_contract }}</p>
+            <p><strong>Generator:</strong> {{ article.debug.selected_generator }}</p>
+            <p><strong>Generator Version:</strong> {{ article.debug.generator_version }}</p>
+            <p><strong>Draft Source:</strong> {{ article.debug.draft_source }}</p>
+          </section>
           <p><strong>Meta Title:</strong> {{ article.meta_title }}</p>
           <p><strong>Meta Description:</strong> {{ article.meta_description }}</p>
           {% set expanded_keywords = article.debug.seo_keywords if article.debug and article.debug.seo_keywords else [article.focus_keyword] %}
@@ -193,8 +201,13 @@
             <p><strong>article_id:</strong> {{ article.id }}</p>
             <p><strong>created_at:</strong> {{ article.created_at }}</p>
             <p><strong>generator_version:</strong> {{ article.debug.generator_version }}</p>
+            <p><strong>selected_topic_type:</strong> {{ article.debug.selected_topic_type }}</p>
+            <p><strong>selected_contract:</strong> {{ article.debug.selected_contract }}</p>
             <p><strong>selected_generator:</strong> {{ article.debug.selected_generator }}</p>
             <p><strong>generator_source:</strong> {{ article.debug.generator_source }}</p>
+            <p><strong>draft_source:</strong> {{ article.debug.draft_source }}</p>
+            <p><strong>article_body_sha256:</strong> <span dir="ltr">{{ article.debug.article_body_sha256 }}</span></p>
+            <p><strong>rendered_article_body_matches_persisted:</strong> {{ article.debug.rendered_article_body_matches_persisted }}</p>
             <p><strong>detected_topic_type:</strong> {{ article.debug.detected_topic_type }}</p>
             <p><strong>endpoint_used:</strong> {{ article.debug.endpoint_used or 'workspace-load' }}</p>
           </details>
