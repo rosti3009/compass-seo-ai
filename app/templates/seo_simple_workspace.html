@@ -86,10 +86,14 @@
             {% set existing_image_url = article.generated_image_url or article.featured_image_url %}
             {% set hero_html = '<p><img src="' ~ existing_image_url ~ '" alt="' ~ (article.image_alt_text or '') ~ '"></p>' if existing_image_url else '' %}
             {% set publish_ready_html = (hero_html ~ '\n' ~ (article.article_body or ''))|replace('[IMAGE_1_HERE]', hero_html)|replace('[IMAGE_2_HERE]', '')|replace('<!-- IMAGE_1 -->', '')|replace('<!-- IMAGE_2 -->', '')|replace('<!-- IMAGE_3 -->', '')|replace('<!-- IMAGE_4 -->', '') %}
-            {% set publishing_meta = article.image_generation_metadata or {} %}
-            {% set image_package = publishing_meta.image_package or [] %}
-            {% set placement_guide = publishing_meta.image_placement_guide or [] %}
-            {% set istore_steps = publishing_meta.istore_copy_paste_package.steps or [] %}
+            {% set publishing_meta = article.image_generation_metadata if article.image_generation_metadata is mapping else {} %}
+            {% set image_package = publishing_meta.image_package if publishing_meta.image_package is sequence else [] %}
+            {% set placement_guide = publishing_meta.image_placement_guide if publishing_meta.image_placement_guide is sequence else [] %}
+            {% set istore_package = publishing_meta.istore_copy_paste_package if publishing_meta.istore_copy_paste_package is mapping else {} %}
+            {% set istore_steps = publishing_meta.istore_copy_paste_steps if publishing_meta.istore_copy_paste_steps is sequence else istore_package.steps if istore_package.steps is sequence else [] %}
+            {% set article_blocks = publishing_meta.article_blocks if publishing_meta.article_blocks is sequence else istore_package.article_blocks if istore_package.article_blocks is sequence else [] %}
+            {% set visual_elements = publishing_meta.visual_elements if publishing_meta.visual_elements is mapping else {} %}
+            {% set publishing_qa = publishing_meta.publishing_qa if publishing_meta.publishing_qa is mapping else publishing_meta.final_qa_validation if publishing_meta.final_qa_validation is mapping else {} %}
             <div class="manual-upload-card istore-copy-mode">
               <h5>ISTORE COPY/PASTE MODE · אפס ניחושים</h5>
               {% if istore_steps %}
@@ -107,6 +111,12 @@
               {% else %}
                 <p class="empty">מצב ISTORE יופיע לאחר יצירת מאמר חדש במנוע החבילות.</p>
               {% endif %}
+            </div>
+            <div class="manual-upload-card publishing-package-summary">
+              <h5>Publishing package status</h5>
+              <p><strong>Article blocks:</strong> {{ article_blocks|length }}</p>
+              <p><strong>Visual elements:</strong> {{ visual_elements|length }}</p>
+              <p><strong>QA checks:</strong> {{ publishing_qa|length }}</p>
             </div>
             <div class="manual-upload-card image-placement-guide">
               <h5>IMAGE PLACEMENT GUIDE</h5>

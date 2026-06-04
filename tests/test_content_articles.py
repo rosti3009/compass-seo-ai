@@ -1,4 +1,5 @@
 from collections.abc import Generator
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -115,6 +116,72 @@ def test_workspace_shows_single_active_article_and_compact_archive(client: TestC
     assert second['title'] in page
     assert first['title'] in page
 
+
+
+def test_simple_workspace_renders_before_after_article_generation_with_istore_fields(client: TestClient, db_session: Session) -> None:
+    empty_response = client.get('/seo/simple-workspace')
+    assert empty_response.status_code == 200
+    assert 'המאמר הפעיל לעבודה' in empty_response.text
+
+    normal_response = client.post('/content/articles/generate-daily-draft')
+    assert normal_response.status_code == 200
+    normal_draft = normal_response.json()['draft']
+    assert normal_draft['image_package']
+    assert normal_draft['image_placement_guide']
+    assert normal_draft['istore_copy_paste_steps']
+    assert normal_draft['article_blocks']
+    assert normal_draft['visual_elements'] == {}
+    assert normal_draft['publishing_qa']
+    normal_workspace = client.get('/seo/simple-workspace')
+    assert normal_workspace.status_code == 200
+    assert 'ISTORE COPY/PASTE MODE' in normal_workspace.text
+
+    random_response = client.post('/content/articles/generate-random-daily-draft')
+    assert random_response.status_code == 200
+    random_workspace = client.get('/seo/simple-workspace')
+    assert random_workspace.status_code == 200
+    assert 'manual-upload-view · הכנה מהירה לעובד חנות' in random_workspace.text
+
+    draft = db_session.get(ContentArticleDraft, random_response.json()['draft_id'])
+    assert draft is not None
+    metadata = json.loads(draft.image_generation_metadata_json)
+    metadata['istore_copy_paste_steps'] = metadata.pop('istore_copy_paste_package')['steps']
+    metadata['article_blocks'] = metadata.pop('istore_block_structure')
+    metadata['visual_elements'] = {'hero': {'type': 'image'}}
+    metadata['publishing_qa'] = metadata.pop('final_qa_validation')
+    draft.image_generation_metadata_json = json.dumps(metadata, ensure_ascii=False)
+    db_session.add(draft)
+    db_session.commit()
+
+    compatible_workspace = client.get('/seo/simple-workspace')
+    assert compatible_workspace.status_code == 200
+    assert 'Publishing package status' in compatible_workspace.text
+
+
+def test_simple_workspace_renders_legacy_article_without_publishing_package(client: TestClient, db_session: Session) -> None:
+    draft = generate_topic_article_draft(
+        db_session,
+        topic_title='אבני בזלת לגריל',
+        focus_keyword='אבני בזלת לגריל',
+        target_intent='commercial_informational',
+        preferred_slug='basalt-stones-for-grill',
+    )
+    draft.image_generation_metadata_json = '{}'
+    draft.is_active_manual_article = True
+    db_session.add(draft)
+    db_session.commit()
+
+    response = client.get('/seo/simple-workspace')
+    assert response.status_code == 200
+    assert 'מצב ISTORE יופיע לאחר יצירת מאמר חדש במנוע החבילות.' in response.text
+
+    payload = client.get(f"/content/articles/{draft.id}").json()['draft']
+    assert payload['image_package'] == []
+    assert payload['image_placement_guide'] == []
+    assert payload['istore_copy_paste_steps'] == []
+    assert payload['article_blocks'] == []
+    assert payload['visual_elements'] == {}
+    assert payload['publishing_qa'] == {}
 
 def test_newest_draft_becomes_active_after_generation(client: TestClient) -> None:
     first = client.post('/content/articles/generate-daily-draft').json()['draft']
