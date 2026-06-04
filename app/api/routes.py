@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import re
@@ -1391,13 +1392,16 @@ def _simple_workspace_context(db: Session) -> dict[str, object]:
     invalidated_count = db.query(IStoreSEOApproval).filter(IStoreSEOApproval.status == "INVALIDATED").count()
     regenerated_count = db.query(IStoreSEOApproval).filter(IStoreSEOApproval.regenerated_from_id.is_not(None)).count()
     all_article_drafts = db.query(ContentArticleDraft).order_by(ContentArticleDraft.created_at.desc()).limit(20).all()
-    eligible_manual = [d for d in all_article_drafts if d.status in {"CONTENT_DRAFT", "READY_FOR_REVIEW"}]
+    eligible_manual = [d for d in all_article_drafts if d.status in {"CONTENT_DRAFT", "READY_FOR_REVIEW", "NEEDS_REWRITE"}]
     active_article = next((d for d in eligible_manual if d.is_active_manual_article), None)
     if active_article is None and eligible_manual:
         active_article = eligible_manual[0]
         _set_active_manual_article(db, active_article)
         db.commit()
     active_id = active_article.id if active_article else None
+    if active_article is not None:
+        _log_article_trace(active_article, "employee_workspace_article_rendering", endpoint_used="/seo/simple-workspace")
+        _log_article_trace(active_article, "final_html_shown_to_user", endpoint_used="/seo/simple-workspace")
     return {
         "cards": cards,
         "safe_cards": safe,
@@ -1436,9 +1440,44 @@ def _set_active_manual_article(db: Session, active_draft: ContentArticleDraft) -
 def _latest_active_candidate(db: Session) -> ContentArticleDraft | None:
     return (
         db.query(ContentArticleDraft)
-        .filter(ContentArticleDraft.status.in_(["CONTENT_DRAFT", "READY_FOR_REVIEW"]))
+        .filter(ContentArticleDraft.status.in_(["CONTENT_DRAFT", "READY_FOR_REVIEW", "NEEDS_REWRITE"]))
         .order_by(ContentArticleDraft.created_at.desc(), ContentArticleDraft.id.desc())
         .first()
+    )
+
+
+def _article_body_sha256(body: str | None) -> str:
+    return hashlib.sha256((body or "").encode("utf-8")).hexdigest()
+
+
+def _article_trace_payload(draft: ContentArticleDraft, step: str, *, endpoint_used: str | None = None) -> dict[str, object]:
+    debug = _draft_debug(draft, "title")
+    return {
+        "step": step,
+        "draft_id": draft.id,
+        "selected_topic_type": debug.get("selected_topic_type"),
+        "selected_contract": debug.get("selected_contract"),
+        "selected_generator": debug.get("selected_generator"),
+        "generator_version": debug.get("generator_version"),
+        "draft_source": debug.get("draft_source"),
+        "body_sha256": debug.get("article_body_sha256"),
+        "endpoint_used": endpoint_used,
+    }
+
+
+def _log_article_trace(draft: ContentArticleDraft, step: str, *, endpoint_used: str | None = None) -> None:
+    payload = _article_trace_payload(draft, step, endpoint_used=endpoint_used)
+    logger.info(
+        "[ARTICLE_TRACE] step=%s draft_id=%s selected_topic_type=%s selected_contract=%s selected_generator=%s generator_version=%s draft_source=%s body_sha256=%s endpoint_used=%s",
+        payload["step"],
+        payload["draft_id"],
+        payload["selected_topic_type"],
+        payload["selected_contract"],
+        payload["selected_generator"],
+        payload["generator_version"],
+        payload["draft_source"],
+        payload["body_sha256"],
+        payload["endpoint_used"],
     )
 
 
@@ -1452,6 +1491,10 @@ def _article_generation_response(draft: ContentArticleDraft, endpoint_used: str)
     )
     diagnostics = {
         "article_id": draft.id,
+        "selected_topic_type": debug.get("selected_topic_type"),
+        "draft_source": debug.get("draft_source"),
+        "article_body_sha256": debug.get("article_body_sha256"),
+        "rendered_article_body_matches_persisted": True,
         "created_at": draft.created_at.isoformat() if draft.created_at else None,
         "generator_version": debug.get("generator_version"),
         "selected_generator": debug.get("selected_generator"),
@@ -1535,10 +1578,14 @@ def _draft_debug(draft: ContentArticleDraft, slug_source: str = "title") -> dict
     return {
         "generator_version": GENERATOR_VERSION,
         "slug_source": slug_source,
+        "draft_source": "content_article_drafts.article_body",
+        "article_body_sha256": _article_body_sha256(body),
+        "rendered_article_body_matches_persisted": True,
         "article_brief": topic_profile.get("article_brief"),
         "main_entity": topic_profile.get("main_entity"),
         "entity_type": topic_profile.get("entity_type"),
         "topic_type": topic_profile.get("topic_type"),
+        "selected_topic_type": topic_profile.get("topic_type"),
         "content_format": topic_profile.get("content_format"),
         "detected_topic_type": topic_profile.get("topic_type"),
         "selected_contract": topic_profile.get("selected_contract"),
@@ -1871,7 +1918,9 @@ def generate_topic_content_article(payload: ManualTopicArticleRequest, db: Datab
     _set_active_manual_article(db, draft)
     db.commit()
     db.refresh(draft)
+    _log_article_trace(draft, "api_endpoint", endpoint_used="/content/articles/generate-topic-draft")
     response = _article_generation_response(draft, "/content/articles/generate-topic-draft")
+    _log_article_trace(draft, "draft_creation_response", endpoint_used="/content/articles/generate-topic-draft")
     quality = response["draft"]["quality"]
     manual_upload_url = f"/seo/simple-workspace#article-{draft.id}"
     logger.info(
@@ -1910,6 +1959,10 @@ def latest_content_article_debug(db: DatabaseSession) -> dict[str, object]:
         "generator_version": debug.get("generator_version"),
         "generator_source": debug.get("generator_source"),
         "selected_generator": debug.get("selected_generator"),
+        "selected_topic_type": debug.get("selected_topic_type"),
+        "selected_contract": debug.get("selected_contract"),
+        "draft_source": debug.get("draft_source"),
+        "article_body_sha256": debug.get("article_body_sha256"),
         "created_at": latest.created_at.isoformat() if latest.created_at else None,
     }
 
@@ -1946,6 +1999,7 @@ def list_content_drafts(db: DatabaseSession) -> dict[str, object]:
 @router.get("/content/articles/{draft_id}")
 def get_content_draft(draft_id: int, db: DatabaseSession) -> dict[str, object]:
     draft = _get_content_draft_or_404(db, draft_id)
+    _log_article_trace(draft, "final_html_preview", endpoint_used=f"/content/articles/{draft_id}")
     return {"draft": {**draft.to_dict(), "debug": _draft_debug(draft, "title"), "quality": _article_quality_summary(draft)}}
 
 

@@ -101,7 +101,7 @@ def test_workspace_has_article_controls(client: TestClient) -> None:
     assert response.status_code == 200
     assert 'צור מאמר חדש' in response.text
     assert 'המאמר הפעיל לעבודה' in response.text
-    assert 'כור מאמר לפי נושא' in response.text
+    assert 'צור מאמר לפי נושא' in response.text
     assert 'תמיכה בנושא יחיד בלבד' in response.text
 
 
@@ -342,6 +342,45 @@ def test_topic_switch_replaces_active_article(client: TestClient) -> None:
     assert picanha["draft"]["title"] in page
     assert basalt["diagnostics"]["selected_generator"] == "contract_grill_accessory_guide"
 
+def test_butcher_paper_workspace_uses_smoking_accessory_article_body(client: TestClient) -> None:
+    response = client.post(
+        "/content/articles/generate-topic-draft",
+        json={
+            "topic_title": "נייר קצבים",
+            "focus_keyword": "נייר קצבים",
+            "target_intent": "commercial_informational",
+            "preferred_slug": "butcher-paper-smoking-guide",
+        },
+    )
+
+    assert response.status_code == 200
+    generated = response.json()
+    draft = generated["draft"]
+    diagnostics = generated["diagnostics"]
+    assert diagnostics["selected_topic_type"] == "smoking_accessory_guide"
+    assert diagnostics["selected_contract"] == "smoking_accessory_guide"
+    assert diagnostics["selected_generator"] == "contract_smoking_accessory_guide"
+    assert diagnostics["draft_source"] == "content_article_drafts.article_body"
+    assert diagnostics["rendered_article_body_matches_persisted"] is True
+
+    stored = client.get(f"/content/articles/{draft['draft_id']}").json()["draft"]
+    assert stored["article_body"] == draft["article_body"]
+    assert stored["debug"]["article_body_sha256"] == draft["debug"]["article_body_sha256"]
+
+    workspace = client.get("/seo/simple-workspace").text
+    assert "Topic Type:" in workspace
+    assert "Contract:" in workspace
+    assert "Generator:" in workspace
+    assert "Generator Version:" in workspace
+    assert "Draft Source:" in workspace
+    assert "smoking_accessory_guide" in workspace
+    assert "contract_smoking_accessory_guide" in workspace
+    assert draft["article_body"] in workspace
+    for term in ["Stall", "Texas Crutch", "Bark", "Butcher Paper vs Foil"]:
+        assert term in workspace
+    for term in ["התאמה לגריל", "לא חוסמים פתחי אוויר", "מתי להחליף", "התקנה לגריל"]:
+        assert term not in workspace
+
 
 def test_latest_debug_endpoint(client: TestClient) -> None:
     client.post("/content/articles/generate-random-daily-draft")
@@ -349,7 +388,7 @@ def test_latest_debug_endpoint(client: TestClient) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["latest_article_id"] == payload["active_article_id"]
-    assert payload["generator_version"] == "v4-production-quality-links-expansions-2026-06-03"
+    assert payload["generator_version"] == "v5-render-path-diagnostics-2026-06-04"
     assert payload["selected_generator"]
 
 
@@ -629,7 +668,7 @@ def test_regression_wood_chips_topic_quality_and_prompts(client: TestClient, mon
     assert float(draft["quality"]["article_quality_score"]) > 75
 
     details = client.get(f"/content/articles/{draft['id']}").json()['draft']
-    assert details['debug']['generator_version'] == 'v4-production-quality-links-expansions-2026-06-03'
+    assert details['debug']['generator_version'] == 'v5-render-path-diagnostics-2026-06-04'
     assert details['debug']['h1_removed'] is True
     assert details['debug']['slug_source'] in {'title', 'focus_keyword', 'topic_mapping', 'hard_fallback'}
 

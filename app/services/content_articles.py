@@ -15,7 +15,7 @@ import requests
 from app.db.models import ContentArticleDraft, IStoreProduct
 
 logger = logging.getLogger(__name__)
-GENERATOR_VERSION = "v4-production-quality-links-expansions-2026-06-03"
+GENERATOR_VERSION = "v5-render-path-diagnostics-2026-06-04"
 
 TOPIC_POOL = [
     ("שבבי עץ לעישון", "שבבי עץ לעישון", "informational"),
@@ -1229,9 +1229,9 @@ def _build_contract_article(title: str, keyword: str, related: list[dict[str, st
             + _h2("מה זה נייר קצבים לעישון", "<p>נייר קצבים הוא נייר עבה ונושם יחסית שמשמש לעטיפת בשר בעישון ארוך. בניגוד לנייר כסף, הוא מאפשר לחלק מהאדים לצאת ולכן עוזר לשמור Bark יציב לצד שמירת לחות טובה בתוך הנתח.</p>")
             + _h2("עטיפת בריסקט", "<p>בריסקט עוטפים כאשר הצבע כהה, ה-Bark יציב למגע והעלייה בחום מאטה בשלב הסטול. העטיפה מצמצמת אידוי, מקדמת ריכוך ומונעת ייבוש של ה-flat בלי להפוך את הקליפה לספוגית מדי.</p>")
             + _h2("עטיפת צלעות ונתחי בקר", "<p>בצלעות ובנתחי בקר כמו אסאדו או שורט ריבס, נייר קצבים מתאים כאשר רוצים לקדם ריכוך ועדיין לשמור מרקם חיצוני. העיקרון זהה: קודם בונים צבע ועשן, אחר כך עוטפים רק כשהמעטפת יציבה.</p>")
-            + _h2("שלב הסטול ו-Texas Crutch", "<p>סטול הוא שלב שבו אידוי מקרר את פני הבשר ומאט את העלייה בטמפרטורה. Texas Crutch היא שיטת עטיפה שנועדה לעבור את השלב הזה מהר יותר; נייר קצבים הוא גרסה מאוזנת יותר מנייר כסף כי הוא פחות אוטם.</p>")
+            + _h2("שלב הסטול (Stall) ו-Texas Crutch", "<p>סטול (Stall) הוא שלב שבו אידוי מקרר את פני הבשר ומאט את העלייה בטמפרטורה. Texas Crutch היא שיטת עטיפה שנועדה לעבור את השלב הזה מהר יותר; נייר קצבים הוא גרסה מאוזנת יותר מנייר כסף כי הוא פחות אוטם.</p>")
             + _h2("שמירת Bark ושמירת לחות", "<p>Bark טוב נבנה לפני העטיפה מתבלינים יבשים, עשן וחום יציב. נייר קצבים שומר לחות בלי לכלוא יותר מדי אדים, ולכן הוא עוזר לשמר קליפה כהה ויציבה יותר מאשר עטיפה אטומה לחלוטין.</p>")
-            + _h2("butcher paper vs foil", "<p>butcher paper vs foil, כלומר נייר קצבים מול נייר כסף, הוא הבדל בין נשימה לאיטום: נייר כסף מאיץ בישול ושומר נוזלים בצורה חזקה, אבל עלול לרכך Bark; נייר קצבים איטי מעט יותר, שומר מרקם חיצוני טוב יותר ומתאים לבריסקט שרוצים להגיש עם קליפה ברורה.</p>")
+            + _h2("Butcher Paper vs Foil – נייר קצבים מול נייר כסף", "<p>Butcher Paper vs Foil, כלומר נייר קצבים מול נייר כסף, הוא הבדל בין נשימה לאיטום: נייר כסף מאיץ בישול ושומר נוזלים בצורה חזקה, אבל עלול לרכך Bark; נייר קצבים איטי מעט יותר, שומר מרקם חיצוני טוב יותר ומתאים לבריסקט שרוצים להגיש עם קליפה ברורה.</p>")
             + _h2("מתי לעטוף", "<p>מתי לעטוף? לא לפי שעה קבועה, אלא לפי צבע, מגע והתקדמות הסטול. לרוב ממתינים עד שה-Bark לא נמרח באצבע, שהנתח קיבל גוון עמוק ושאיבוד הלחות מתחיל להאט את התהליך.</p>")
             + _h2("איך לעטוף", "<p>איך לעטוף: מניחים שני דפים חופפים של נייר קצבים, מצמידים את הנתח במרכז, מקפלים צדדים בחוזקה ומגלגלים כך שהתפר יישב כלפי מטה. העטיפה צריכה להיות הדוקה, אך לא לקרוע את הנייר או למחוץ את הקליפה.</p>")
             + _h2("נייר ורוד מול נייר חום", "<p>נייר ורוד מול חום: נייר ורוד הוא בדרך כלל peach/pink butcher paper לא מולבן שמזוהה עם BBQ אמריקאי. נייר חום יכול לעבוד אם הוא food-safe, ללא ציפוי שעווה או פלסטיק וללא צבעים בעייתיים; תמיד בודקים התאמה למגע עם מזון וחום עקיף.</p>")
@@ -1994,6 +1994,16 @@ def generate_daily_article_draft(db: Session, *, randomize: bool = False) -> tup
     db.add(draft)
     db.commit()
     db.refresh(draft)
+    logger.info(
+        "[ARTICLE_TRACE] step=draft_persistence draft_id=%s selected_topic_type=%s selected_contract=%s selected_generator=%s generator_version=%s draft_source=%s article_body_length=%s",
+        draft.id,
+        topic_profile.get("topic_type"),
+        topic_profile.get("selected_contract"),
+        topic_profile.get("selected_generator"),
+        GENERATOR_VERSION,
+        "content_article_drafts.article_body",
+        len(draft.article_body or ""),
+    )
     setattr(draft, "link_match_debug", _final_generation_debug(topic_profile, validation, regeneration_count=regeneration_count, final_body_source="contract_engine", discovery_debug=discovery_debug, body=body, selected_products=related, injected_links=injected_links or related, seo_metadata=seo_metadata))
     return draft, reused, last_generated_at
 
@@ -2010,12 +2020,28 @@ def generate_topic_article_draft(
     related, discovery_debug = _discover_related_links(db, focus_keyword)
     slug = _slugify(preferred_slug or "") if preferred_slug else _fallback_topic_slug(focus_keyword, topic_title)[0]
     featured_prompt, section_prompts = _topic_image_prompts(focus_keyword, topic_profile)
+    logger.info(
+        "[ARTICLE_TRACE] step=selected_generator selected_topic_type=%s selected_contract=%s selected_generator=%s generator_version=%s draft_source=%s",
+        topic_profile.get("topic_type"),
+        topic_profile.get("selected_contract"),
+        topic_profile.get("selected_generator"),
+        GENERATOR_VERSION,
+        "generator_return",
+    )
     body, _ = _remove_h1_tags(_build_article_html(topic_title, focus_keyword, related, topic_profile=topic_profile))
     body, injected_links = inject_internal_links_into_html(body, related, topic_profile)
     body, _, _ = _postprocess_article_assets(body, "")
     validation = validate_article_relevance(topic_title, focus_keyword, body, topic_profile, image_prompt=featured_prompt, internal_links=injected_links or related)
     regeneration_count = 0
     if not validation["validation_passed"]:
+        logger.info(
+            "[ARTICLE_TRACE] step=depth_expansion_regeneration selected_topic_type=%s selected_contract=%s selected_generator=%s generator_version=%s draft_source=%s",
+            topic_profile.get("topic_type"),
+            topic_profile.get("selected_contract"),
+            topic_profile.get("selected_generator"),
+            GENERATOR_VERSION,
+            "generator_return",
+        )
         regenerated_body, _ = _remove_h1_tags(_build_article_html(topic_title, focus_keyword, related, topic_profile=topic_profile))
         body, injected_links = inject_internal_links_into_html(regenerated_body, related, topic_profile)
         body, _, _ = _postprocess_article_assets(body, "")
@@ -2045,5 +2071,15 @@ def generate_topic_article_draft(
     db.add(draft)
     db.commit()
     db.refresh(draft)
+    logger.info(
+        "[ARTICLE_TRACE] step=draft_persistence draft_id=%s selected_topic_type=%s selected_contract=%s selected_generator=%s generator_version=%s draft_source=%s article_body_length=%s",
+        draft.id,
+        topic_profile.get("topic_type"),
+        topic_profile.get("selected_contract"),
+        topic_profile.get("selected_generator"),
+        GENERATOR_VERSION,
+        "content_article_drafts.article_body",
+        len(draft.article_body or ""),
+    )
     setattr(draft, "link_match_debug", _final_generation_debug(topic_profile, validation, regeneration_count=regeneration_count, final_body_source="contract_engine", discovery_debug=discovery_debug, body=body, selected_products=related, injected_links=injected_links or related, seo_metadata=seo_metadata))
     return draft
