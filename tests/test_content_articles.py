@@ -1,5 +1,6 @@
 from collections.abc import Generator
 import json
+import re
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,6 +18,7 @@ from app.services.content_articles import (
     _classify_topic,
     build_topic_seo_metadata,
     generate_topic_article_draft,
+    validate_complete_publishing_package,
 )
 
 
@@ -1356,3 +1358,61 @@ def test_employee_workspace_keywords_field_uses_expanded_comma_separated_keyword
     assert "מילות מפתח לקידום במנועי חיפוש" in html
     assert "אבני בזלת לגריל, אבני לבה לגריל" in html
     assert "ניקוי אבני בזלת" in html
+
+
+def _assert_single_faq_and_cta(body: str) -> None:
+    assert len(re.findall(r"<h2[^>]*>.*?שאלות נפוצות.*?</h2>", body, flags=re.IGNORECASE | re.DOTALL)) == 1
+    assert len(re.findall(r"article-cta", body, flags=re.IGNORECASE)) == 1
+    assert "<strong>CTA:</strong>" not in body
+    assert "נושא שמכריע אם תקבלו תוצאה בינונית" not in body
+
+
+def test_comparison_article_routes_to_comparison_contract_and_single_blocks(client: TestClient) -> None:
+    draft = _generate_topic(client, "פחם קוקוס מול פחם עץ", "פחם קוקוס", "comparison", "coconut-charcoal-vs-wood-charcoal")
+    assert draft["debug"]["article_contract"] == "comparison_article"
+    assert draft["debug"]["intent_router"]["article_contract"] == "comparison_article"
+    assert draft["debug"]["search_intent"] == "comparison"
+    _assert_single_faq_and_cta(draft["article_body"])
+
+
+def test_tutorial_article_routes_to_tutorial_contract_and_single_blocks(client: TestClient) -> None:
+    draft = _generate_topic(client, "פיקניה על הגריל – מדריך מלא", "פיקניה", "how-to", "picanha-on-grill")
+    assert draft["debug"]["article_contract"] == "tutorial_article"
+    assert draft["debug"]["intent_router"]["article_contract"] == "tutorial_article"
+    assert draft["debug"]["search_intent"] == "how-to"
+    _assert_single_faq_and_cta(draft["article_body"])
+
+
+def test_product_education_article_routes_to_product_education_contract_and_single_blocks(client: TestClient) -> None:
+    draft = _generate_topic(client, "אבני בזלת לגריל – איך הן משפרות צלייה בגריל גז", "אבני בזלת לגריל", "commercial_informational", "basalt-stones-for-gas-grill")
+    assert draft["debug"]["article_contract"] == "product_education_article"
+    assert draft["debug"]["intent_router"]["article_contract"] == "product_education_article"
+    assert draft["debug"]["detected_topic_type"] == "grill_accessory_guide"
+    _assert_single_faq_and_cta(draft["article_body"])
+
+
+def test_category_article_routes_to_category_contract_and_single_blocks(client: TestClient) -> None:
+    draft = _generate_topic(client, "גריל גז", "גריל גז", "category", "gas-grills")
+    assert draft["debug"]["article_contract"] == "category_article"
+    assert draft["debug"]["intent_router"]["article_contract"] == "category_article"
+    assert draft["debug"]["search_intent"] == "category"
+    assert draft["debug"]["detected_topic_type"] == "equipment_buying_guide"
+    _assert_single_faq_and_cta(draft["article_body"])
+
+
+def test_quality_below_90_blocks_ready_for_publishing_in_publishing_qa() -> None:
+    qa = validate_complete_publishing_package(
+        "<h2>טבלה</h2><table><tr><td>בדיקה</td></tr></table><h2>שאלות נפוצות</h2><h3>❓ שאלה</h3><p>תשובה</p><div class='article-cta'>🛒 בדיקה</div><ul class='article-checklist'><li>בדיקה</li></ul><div class='professional-tip'>טיפ מקצועי</div><div class='common-mistake'>טעות נפוצה</div><a href='https://compassgrill.co.il/products/test'>קישור</a><!-- IMAGE_1 --><!-- IMAGE_2 --><!-- IMAGE_3 --><!-- IMAGE_4 -->",
+        [
+            {"key": "featured_image", "status": "generated", "generated_url": "https://example.com/1.jpg", "filename": "1.jpg", "alt": "אחד", "caption": "אחד", "prompt": "one"},
+            {"key": "image_1", "status": "generated", "generated_url": "https://example.com/2.jpg", "filename": "2.jpg", "alt": "שתיים", "caption": "שתיים", "prompt": "two"},
+            {"key": "image_2", "status": "generated", "generated_url": "https://example.com/3.jpg", "filename": "3.jpg", "alt": "שלוש", "caption": "שלוש", "prompt": "three"},
+            {"key": "image_3", "status": "generated", "generated_url": "https://example.com/4.jpg", "filename": "4.jpg", "alt": "ארבע", "caption": "ארבע", "prompt": "four"},
+            {"key": "image_4", "status": "generated", "generated_url": "https://example.com/5.jpg", "filename": "5.jpg", "alt": "חמש", "caption": "חמש", "prompt": "five"},
+        ],
+        [{"image_key": "featured_image"}, {"image_key": "image_1"}, {"image_key": "image_2"}, {"image_key": "image_3"}, {"image_key": "image_4"}],
+        {"mode": "ISTORE_COPY_PASTE", "steps": [{"step": 1}]},
+        {"passed": True, "overall_quality_score": 89},
+    )
+    assert qa["publish_readiness"] != "READY_FOR_PUBLISHING"
+    assert "article_quality_score_at_least_90" in qa["ready_for_publishing_failed_checks"]
