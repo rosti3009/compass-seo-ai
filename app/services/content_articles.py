@@ -347,6 +347,81 @@ ACCESSORY_ENTITY_PROFILES: dict[str, dict[str, object]] = {
     },
 }
 
+
+ARTICLE_CONTRACTS = {
+    "comparison_article",
+    "tutorial_article",
+    "buying_guide_article",
+    "product_education_article",
+    "brand_article",
+    "category_article",
+}
+
+ARTICLE_INTENT_ALIASES = {
+    "comparison": "comparison_article",
+    "compare": "comparison_article",
+    "vs": "comparison_article",
+    "how-to": "tutorial_article",
+    "how_to": "tutorial_article",
+    "tutorial": "tutorial_article",
+    "recipe": "tutorial_article",
+    "commercial": "buying_guide_article",
+    "commercial_informational": "product_education_article",
+    "product_education": "product_education_article",
+    "education": "product_education_article",
+    "buying_guide": "buying_guide_article",
+    "buying-guide": "buying_guide_article",
+    "brand": "brand_article",
+    "category": "category_article",
+}
+
+TOPIC_TYPE_ARTICLE_CONTRACTS = {
+    "meat_quick_grill_cut": "tutorial_article",
+    "meat_low_slow_smoking": "tutorial_article",
+    "poultry_grill_recipe": "tutorial_article",
+    "recipe_how_to": "tutorial_article",
+    "fuel_comparison_or_guide": "comparison_article",
+    "smoking_wood_guide": "product_education_article",
+    "smoking_accessory_guide": "product_education_article",
+    "grill_accessory_guide": "product_education_article",
+    "equipment_buying_guide": "buying_guide_article",
+    "fallback_generic": "product_education_article",
+}
+
+CATEGORY_INTENT_TERMS = ["קטגוריה", "קטגוריית", "category", "אביזרים לגריל", "גרילים", "מעשנות", "טאבונים"]
+BRAND_INTENT_TERMS = ["מותג", "brand", "ברויל קינג", "נפוליאון", "weber", "traeger"]
+
+
+def _detect_article_intent(topic_title: str, focus_keyword: str, target_intent: str) -> str:
+    requested = (target_intent or "").strip().lower()
+    if requested in ARTICLE_CONTRACTS:
+        return requested
+    if requested in ARTICLE_INTENT_ALIASES:
+        return ARTICLE_INTENT_ALIASES[requested]
+    blob = _normalize_text_for_matching(f"{topic_title} {focus_keyword}")
+    if any(term in blob for term in [" מול ", " או ", "vs", "השווא", "הבדל", "עדיף"]):
+        return "comparison_article"
+    if any(_normalize_text_for_matching(term) in blob for term in BRAND_INTENT_TERMS):
+        return "brand_article"
+    if any(_normalize_text_for_matching(term) in blob for term in CATEGORY_INTENT_TERMS):
+        return "category_article"
+    if any(term in blob for term in ["איך", "מדריך", "מתכון", "להכין", "לנקות", "להשתמש"]):
+        return "tutorial_article"
+    if any(term in blob for term in ["לבחור", "מומלץ", "קנייה", "לקנות", "מחיר"]):
+        return "buying_guide_article"
+    return "product_education_article"
+
+
+def _route_article_contract(topic_type: str, detected_article_intent: str, requested_intent: str) -> str:
+    requested = (requested_intent or "").strip().lower()
+    if requested in ARTICLE_CONTRACTS:
+        return requested
+    if requested in ARTICLE_INTENT_ALIASES:
+        return ARTICLE_INTENT_ALIASES[requested]
+    if detected_article_intent in ARTICLE_CONTRACTS and detected_article_intent not in {"product_education_article"}:
+        return detected_article_intent
+    return TOPIC_TYPE_ARTICLE_CONTRACTS.get(topic_type, "product_education_article")
+
 TOPIC_TYPE_GENERATORS = {
     "meat_quick_grill_cut": "contract_meat_quick_grill_cut",
     "meat_low_slow_smoking": "contract_meat_low_slow_smoking",
@@ -427,6 +502,7 @@ def _build_expert_content_brief(topic_title: str, focus_keyword: str, intent: st
 def _classify_topic(topic_title: str, focus_keyword: str, target_intent: str) -> dict[str, object]:
     blob = _normalize_text_for_matching(f"{topic_title} {focus_keyword}")
     requested_intent = (target_intent or "").strip()
+    detected_article_intent = _detect_article_intent(topic_title, focus_keyword, requested_intent)
     topic_type = "fallback_generic"
     entity_type = "unknown"
     intent = requested_intent or "informational"
@@ -449,6 +525,18 @@ def _classify_topic(topic_title: str, focus_keyword: str, target_intent: str) ->
             intent = requested_intent or "how-to"
             fallback_reason = "generic_recipe_semantics"
 
+    article_contract = _route_article_contract(topic_type, detected_article_intent, requested_intent)
+    if article_contract == "comparison_article":
+        intent = "comparison"
+    elif article_contract == "tutorial_article" and intent not in {"how-to", "tutorial", "recipe"}:
+        intent = "how-to"
+    elif article_contract == "buying_guide_article" and not intent.startswith("commercial"):
+        intent = "commercial"
+    elif article_contract == "category_article":
+        intent = "category"
+    elif article_contract == "brand_article":
+        intent = "brand"
+
     contract = _contract_for(topic_type)
     main_entity = _extract_main_entity(topic_title, focus_keyword)
     entity_key = "generic"
@@ -468,6 +556,8 @@ def _classify_topic(topic_title: str, focus_keyword: str, target_intent: str) ->
         "topic_type": topic_type,
         "content_format": contract.get("content_format", "guide"),
         "search_intent": intent,
+        "detected_article_intent": detected_article_intent,
+        "article_contract": article_contract,
         "required_sections": list(contract.get("required_sections", [])),
         "required_terms": list(dict.fromkeys(str(term) for term in required_terms if str(term).strip())),
         "forbidden_terms": list(contract.get("forbidden_terms", [])),
@@ -488,6 +578,9 @@ def _classify_topic(topic_title: str, focus_keyword: str, target_intent: str) ->
         "generator_source": "contract_engine" if topic_type != "fallback_generic" else "fallback",
         "fallback_reason": fallback_reason,
         "selected_contract": topic_type,
+        "article_contract": article_contract,
+        "selected_article_contract": article_contract,
+        "intent_router": {"detected_article_intent": detected_article_intent, "article_contract": article_contract, "topic_type": topic_type},
         "contract": contract,
     }
 
@@ -945,6 +1038,14 @@ def _enforce_single_faq(html: str) -> str:
     return prefix + first_block + suffix
 
 
+def _enforce_single_content_blocks(html: str, topic_profile: dict[str, object] | None = None) -> str:
+    cleaned = _enforce_single_faq(html or "")
+    cleaned = _augment_faq_to_minimum(cleaned, topic_profile)
+    cleaned = _enforce_single_faq(cleaned)
+    cleaned = _enforce_single_cta(cleaned)
+    return cleaned
+
+
 def _html_validation_issues(html: str) -> list[str]:
     issues: list[str] = []
     stack: list[str] = []
@@ -1043,7 +1144,7 @@ def _enforce_phase2_article_quality(body: str, topic_profile: dict[str, object] 
         marker = f"<!-- IMAGE_{marker_no} -->"
         if marker not in cleaned:
             cleaned += "\n" + marker
-    cleaned = _enforce_single_cta(cleaned)
+    cleaned = _enforce_single_content_blocks(cleaned, topic_profile)
     return _dedupe_article_html(cleaned)
 
 
@@ -1054,6 +1155,7 @@ def _postprocess_article_assets(
     topic_profile: dict[str, object] | None = None,
 ) -> tuple[str, str, dict[str, object] | None]:
     body = _enforce_phase2_article_quality(body, topic_profile)
+    body = _enforce_single_content_blocks(body, topic_profile) if topic_profile is not None else body
     return _dedupe_article_html(body), _normalize_meta_title(meta_title), (_dedupe_faq_schema(faq_schema) if faq_schema is not None else None)
 
 
@@ -2374,13 +2476,16 @@ def validate_complete_publishing_package(body: str, image_package: list[dict[str
         "image_placement_guide_exists": len(placement_guide) >= 5,
         "internal_links_exist": "href='https://compassgrill.co.il/" in (body or "") or 'href="https://compassgrill.co.il/' in (body or ""),
     }
+    quality_score = float((diversity or {}).get("overall_quality_score", 100) or 0) if isinstance(diversity, dict) else 100.0
+    if quality_score < 90:
+        publishing_required_checks["article_quality_score_at_least_90"] = False
     publishing_failed = [k for k, ok in publishing_required_checks.items() if not ok]
     return {
         "publishing_package_checks": checks,
         "publishing_package_failed_checks": failed,
         "ready_for_publishing_checks": publishing_required_checks,
         "ready_for_publishing_failed_checks": publishing_failed,
-        "publish_readiness": "READY_FOR_PUBLISHING" if not failed and not publishing_failed else ("READY_FOR_REVIEW" if not failed else "NEEDS_REWRITE"),
+        "publish_readiness": "READY_FOR_PUBLISHING" if not failed and not publishing_failed and quality_score >= 90 else ("READY_FOR_REVIEW" if not failed else "NEEDS_REWRITE"),
     }
 
 
@@ -2873,6 +2978,13 @@ def _final_generation_debug(topic_profile: dict[str, object], validation: dict[s
     }
 
 
+
+def _qa_diversity_context(diversity: dict[str, object] | None, final_quality: dict[str, object]) -> dict[str, object]:
+    context = dict(diversity or {"diversity_score": 100, "max_similarity": 0, "threshold": 0.82, "passed": True})
+    context["overall_quality_score"] = final_quality.get("overall_quality_score", 0)
+    context["article_quality_score"] = final_quality.get("overall_quality_score", 0)
+    return context
+
 def _prepare_publishing_metadata(
     *,
     title: str,
@@ -2947,7 +3059,7 @@ def generate_daily_article_draft(db: Session, *, randomize: bool = False) -> tup
     body, meta_title, faq_schema = _postprocess_article_assets(body, meta_title, faq_schema, topic_profile=topic_profile)
     image_alt_text, alt_source = _generate_image_alt_text(title, keyword, topic_profile)
     final_quality = validate_final_article_quality(body, meta_title, seo_metadata, topic_profile, injected_links or related, image_alt_text)
-    publishing_metadata, publishing_qa = _prepare_publishing_metadata(title=title, slug=slug, keyword=keyword, body=body, meta_title=meta_title, meta_description=meta_description, topic_profile=topic_profile, featured_prompt=featured_prompt, diversity=diversity)
+    publishing_metadata, publishing_qa = _prepare_publishing_metadata(title=title, slug=slug, keyword=keyword, body=body, meta_title=meta_title, meta_description=meta_description, topic_profile=topic_profile, featured_prompt=featured_prompt, diversity=_qa_diversity_context(diversity, final_quality))
     validation = {**validation, **final_quality, **publishing_qa, "alt_generation_source": alt_source, "topic_specific_expansion_source": _topic_specific_expansion_html(str(topic_profile.get("topic_type") or ""), str(topic_profile.get("main_entity") or keyword), keyword, str(topic_profile.get("entity_key") or ""))[1]}
     draft = ContentArticleDraft(
         status="READY_FOR_REVIEW" if validation["validation_passed"] and validation.get("final_quality_passed", True) and not publishing_qa.get("publishing_package_failed_checks") else "NEEDS_REWRITE", topic_title=title, title=title, slug=slug,
@@ -3029,7 +3141,7 @@ def generate_topic_article_draft(
     body, meta_title, _ = _postprocess_article_assets(body, meta_title, topic_profile=topic_profile)
     image_alt_text, alt_source = _generate_image_alt_text(topic_title, focus_keyword, topic_profile)
     final_quality = validate_final_article_quality(body, meta_title, seo_metadata, topic_profile, injected_links or related, image_alt_text)
-    publishing_metadata, publishing_qa = _prepare_publishing_metadata(title=topic_title, slug=slug, keyword=focus_keyword, body=body, meta_title=meta_title, meta_description=meta_description, topic_profile=topic_profile, featured_prompt=featured_prompt, diversity=diversity)
+    publishing_metadata, publishing_qa = _prepare_publishing_metadata(title=topic_title, slug=slug, keyword=focus_keyword, body=body, meta_title=meta_title, meta_description=meta_description, topic_profile=topic_profile, featured_prompt=featured_prompt, diversity=_qa_diversity_context(diversity, final_quality))
     validation = {**validation, **final_quality, **publishing_qa, "alt_generation_source": alt_source, "topic_specific_expansion_source": _topic_specific_expansion_html(str(topic_profile.get("topic_type") or ""), str(topic_profile.get("main_entity") or focus_keyword), focus_keyword, str(topic_profile.get("entity_key") or ""))[1]}
     draft = ContentArticleDraft(
         status="READY_FOR_REVIEW" if validation["validation_passed"] and validation.get("final_quality_passed", True) and not publishing_qa.get("publishing_package_failed_checks") else "NEEDS_REWRITE", topic_title=topic_title, title=topic_title, slug=slug,

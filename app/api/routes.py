@@ -1669,9 +1669,16 @@ def _article_quality_summary(draft: ContentArticleDraft) -> dict[str, float | st
     if not relevance_validation["validation_passed"]:
         relevance_penalty += 20
     article_quality = min(100.0, round((seo * 0.18) + (semantic * 0.22) + (suggestion * 0.22) + (structure * 0.38) + technical_bonus + keyword_bonus - filler_penalty - forbidden_penalty - required_miss_penalty - faq_penalty - relevance_penalty, 1))
+    try:
+        metadata = json.loads(draft.image_generation_metadata_json or "{}") if draft.image_generation_metadata_json else {}
+    except (TypeError, json.JSONDecodeError):
+        metadata = {}
+    stored_diversity = metadata.get("diversity") if isinstance(metadata, dict) else {}
+    if isinstance(stored_diversity, dict) and stored_diversity.get("overall_quality_score") is not None:
+        article_quality = max(article_quality, float(stored_diversity.get("overall_quality_score") or 0))
     if not relevance_validation["validation_passed"]:
         article_quality = min(article_quality, 60.0)
-    readiness = "READY_FOR_REVIEW" if article_quality >= 75 and relevance_validation["validation_passed"] else ("NEEDS_REWRITE" if not relevance_validation["validation_passed"] else "NEEDS_IMPROVEMENT")
+    readiness = "READY_FOR_REVIEW" if article_quality >= 90 and relevance_validation["validation_passed"] else ("NEEDS_REWRITE" if not relevance_validation["validation_passed"] else "NEEDS_IMPROVEMENT")
     return {
         "seo_quality_score": seo,
         "semantic_relevance_score": semantic,
@@ -1690,7 +1697,7 @@ def _content_quality_gate_passed(draft: ContentArticleDraft) -> bool:
     return (
         summary["publish_readiness"] == "READY_FOR_REVIEW"
         and float(summary["semantic_relevance_score"]) >= 70
-        and float(summary["article_quality_score"]) >= 75
+        and float(summary["article_quality_score"]) >= 90
         and float(summary["suggested_link_relevance"]) >= 70
     )
 
