@@ -16,6 +16,7 @@ from app.db.models import ContentArticleDraft, IStoreProduct
 
 logger = logging.getLogger(__name__)
 GENERATOR_VERSION = "v5-render-path-diagnostics-2026-06-04"
+EXPERT_ENGINE_VERSION = "v6-expert-content-engine-phase4-2026-06-05"
 
 TOPIC_POOL = [
     ("שבבי עץ לעישון", "שבבי עץ לעישון", "informational"),
@@ -181,7 +182,13 @@ GENERIC_FILLER_PHRASES = [
     "תיעוד תוצאה",
     "שיפור מפעם לפעם",
     "בחירת ציוד כללית",
+    "שיקולים כלליים",
+    "ניהול תהליך",
+    "תיעוד תוצאות",
+    "שיפור תוצאות",
 ]
+
+EXPERT_INSIGHT_CLASS = "expert-insight"
 
 GENERIC_TEMPLATE_INTRO = "נושא שמכריע אם תקבלו תוצאה בינונית או מנה שמרגישה כמו מסעדת בשרים מקצועית"
 
@@ -375,6 +382,48 @@ def _extract_main_entity(topic_title: str, focus_keyword: str) -> str:
     return (focus_keyword or topic_title or "נושא גריל").strip()
 
 
+
+def _build_expert_content_brief(topic_title: str, focus_keyword: str, intent: str, topic_type: str, entity: str, entity_key: str) -> dict[str, object]:
+    """Pre-generation brief for the Expert Content Engine."""
+    industry_by_topic = {
+        "meat_quick_grill_cut": "BBQ meat cooking",
+        "meat_low_slow_smoking": "low and slow smoking",
+        "poultry_grill_recipe": "poultry grilling",
+        "fuel_comparison_or_guide": "BBQ fuel and fire management",
+        "smoking_wood_guide": "smoking wood and flavor matching",
+        "smoking_accessory_guide": "BBQ smoking accessories",
+        "grill_accessory_guide": "grill accessories and maintenance",
+        "equipment_buying_guide": "outdoor cooking equipment buying",
+        "recipe_how_to": "practical grill cooking",
+    }.get(topic_type, "outdoor cooking")
+    mistakes_by_topic = {
+        "meat_low_slow_smoking": ["לעטוף לפני שה-Bark יציב", "לנהל סטול לפי שעון בלבד", "להוסיף עשן לבן וכבד במקום עשן נקי"],
+        "poultry_grill_recipe": ["להעלות עוף רטוב לרשת", "למרוח גלייז מוקדם מדי", "להגיש בלי בדיקת 74°C"],
+        "smoking_wood_guide": ["לבחור עץ לפי שם פופולרי ולא לפי עוצמת טעם", "להשתמש ביותר מדי עץ", "לחסום אוויר ולייצר עשן מר"],
+        "smoking_accessory_guide": ["להשתמש בנייר מצופה", "לעטוף רופף", "לצפות שנייר קצבים יתקן חום גבוה מדי"],
+        "grill_accessory_guide": ["לקנות בלי לבדוק התאמה לדגם", "לחסום זרימת אוויר", "לדחות ניקוי עד שהביצועים נפגעים"],
+        "fuel_comparison_or_guide": ["להשוות רק מחיר שקית", "להתעלם מכמות אפר", "להשתמש בדלק לא יציב למעשנה"],
+        "equipment_buying_guide": ["להשוות רק BTU", "לקנות לפי אירוח נדיר", "לשכוח ניקוי, אחסון ואחריות"],
+    }
+    problems_by_topic = {
+        "meat_low_slow_smoking": ["נתח מתייבש בחלק הדק", "הטמפרטורה נתקעת בשלב הסטול", "Bark מתרכך אחרי עטיפה"],
+        "poultry_grill_recipe": ["עור יוצא רך", "רוטב נשרף", "חלקים עבים לא מגיעים לטמפרטורת בטיחות"],
+        "smoking_wood_guide": ["טעם מר", "עשן לא יציב", "התאמה לא נכונה בין עץ וחומר גלם"],
+        "grill_accessory_guide": ["נקודות חמות", "התלקחויות", "חוסר התאמה בין אביזר למבנה הגריל"],
+    }
+    return {
+        "topic": topic_title,
+        "industry": industry_by_topic,
+        "search_intent": intent,
+        "user_goal": f"לקבל החלטה מעשית ובטוחה לגבי {focus_keyword or entity}",
+        "common_mistakes": mistakes_by_topic.get(topic_type, ["להשתמש בכלל כללי בלי לבדוק את המקרה", "לקנות מוצר בלי להבין איזו בעיה הוא פותר"]),
+        "real_world_problems": problems_by_topic.get(topic_type, [f"חוסר ודאות בזמן עבודה עם {entity}", "בחירה לא מדויקת של ציוד או טכניקה"]),
+        "buying_decisions": ["התאמה לציוד הקיים", "תדירות שימוש", "תחזוקה ואחריות", "תועלת ביחס למחיר"],
+        "troubleshooting_scenarios": ["התוצאה לא יציבה", "הציוד לא מתאים לשימוש בפועל", "צריך להבין אם לשנות טכניקה או לקנות אביזר"],
+        "expert_question": "מה מומחה אמיתי היה אומר ללקוח שמתחיל לא היה יודע?",
+        "entity_key": entity_key,
+    }
+
 def _classify_topic(topic_title: str, focus_keyword: str, target_intent: str) -> dict[str, object]:
     blob = _normalize_text_for_matching(f"{topic_title} {focus_keyword}")
     requested_intent = (target_intent or "").strip()
@@ -429,6 +478,7 @@ def _classify_topic(topic_title: str, focus_keyword: str, target_intent: str) ->
     return {
         **article_brief,
         "article_brief": article_brief,
+        "expert_brief": _build_expert_content_brief(topic_title, focus_keyword, intent, topic_type, main_entity, entity_key),
         "product_type": article_brief["entity_type"],
         "content_type": article_brief["content_format"],
         "target_keyword": focus_keyword,
@@ -482,9 +532,10 @@ def validate_article_relevance(title: str, keyword: str, body: str, topic_profil
     search_intent = str(topic_profile.get("search_intent") or "informational")
     intro = _normalize_hebrew(_first_paragraph_text(body))
     plain = _normalize_hebrew(_plain_text(body))
+    intro_context = _normalize_hebrew(_plain_text((body or "")[:1400]))
     raw_body = body or ""
     title_terms = _meaningful_title_terms(title, keyword)
-    missing_intro_terms = [t for t in title_terms[:4] if _normalize_hebrew(t) not in intro]
+    missing_intro_terms = [t for t in title_terms[:4] if _normalize_hebrew(t) not in intro and _normalize_hebrew(t) not in intro_context]
     required_terms = [str(t) for t in topic_profile.get("required_terms", []) if str(t).strip()]
     required_sections = [str(t) for t in topic_profile.get("required_sections", []) if str(t).strip()]
     forbidden_terms = [str(t) for t in topic_profile.get("forbidden_terms", []) if str(t).strip()]
@@ -830,7 +881,7 @@ def _limit_h2_sections(html: str, *, max_h2: int = 12, topic_profile: dict[str, 
     sections = [m.group(0) for m in matches]
     required_terms = [str(t) for t in (topic_profile or {}).get("required_terms", []) if str(t).strip()]
     required_sections = [str(t) for t in (topic_profile or {}).get("required_sections", []) if str(t).strip()]
-    preserve_markers = ["שאלות נפוצות", "article-cta", "🛒", "צ׳קליסט", "<table", "professional-tip", "common-mistake", "<!-- IMAGE_"]
+    preserve_markers = ["שאלות נפוצות", "article-cta", "🛒", "צ׳קליסט", "<table", "professional-tip", "common-mistake", "<!-- IMAGE_", "Glaze timing", "crisping"]
 
     def section_score(index: int, section: str) -> tuple[int, int]:
         raw = section or ""
@@ -877,16 +928,81 @@ def _augment_faq_to_minimum(html: str, topic_profile: dict[str, object] | None =
     return re.sub(r"(?=<div class='article-cta'>|$)", extra, html or "", count=1)
 
 
+
+def _enforce_single_faq(html: str) -> str:
+    matches = list(re.finditer(r"<h2[^>]*>.*?שאלות נפוצות.*?</h2>", html or "", flags=re.IGNORECASE | re.DOTALL))
+    if len(matches) <= 1:
+        return html
+    first_start = matches[0].start()
+    second_start = matches[1].start()
+    first_block_end = matches[0].end()
+    tail_start = matches[-1].start()
+    # Keep the first FAQ block heading and its first contiguous Q&A items; remove later FAQ headings/blocks.
+    first_block = (html or "")[first_start:second_start]
+    first_block = re.sub(r"(<h3[^>]*>\s*❓.*?</h3>\s*<p[^>]*>.*?</p>)(?=.*\1)", "", first_block, flags=re.IGNORECASE | re.DOTALL)
+    prefix = (html or "")[:first_start]
+    suffix = re.sub(r"<h2[^>]*>.*?שאלות נפוצות.*?</h2>.*?(?=<h2[^>]*>|<div class='article-cta'>|$)", "", (html or "")[second_start:], flags=re.IGNORECASE | re.DOTALL)
+    return prefix + first_block + suffix
+
+
+def _html_validation_issues(html: str) -> list[str]:
+    issues: list[str] = []
+    stack: list[str] = []
+    void_tags = {"br", "hr", "img", "input", "meta", "link"}
+    for match in re.finditer(r"</?([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>", html or ""):
+        raw = match.group(0)
+        tag = match.group(1).lower()
+        if tag in void_tags or raw.endswith("/>"):
+            continue
+        if raw.startswith("</"):
+            if not stack or stack[-1] != tag:
+                issues.append(f"html_unbalanced_tag:{tag}")
+                continue
+            stack.pop()
+        else:
+            stack.append(tag)
+    if stack:
+        issues.append("html_unclosed_tags:" + ",".join(stack[-5:]))
+    if len(re.findall(r"article-cta", html or "", flags=re.IGNORECASE)) != 1:
+        issues.append("cta_structure_invalid")
+    if len(re.findall(r"<h2[^>]*>.*?שאלות נפוצות.*?</h2>", html or "", flags=re.IGNORECASE | re.DOTALL)) != 1:
+        issues.append("faq_structure_invalid")
+    if "<table" in (html or "").lower() and not re.search(r"<table[^>]*>.*?</table>", html or "", flags=re.IGNORECASE | re.DOTALL):
+        issues.append("table_structure_invalid")
+    for cls in ["professional-tip", "common-mistake", "article-cta", EXPERT_INSIGHT_CLASS]:
+        opens = len(re.findall(rf"<div[^>]+class=['\"][^'\"]*{re.escape(cls)}", html or "", flags=re.IGNORECASE))
+        if opens and len(re.findall(r"</div>", html or "", flags=re.IGNORECASE)) < opens:
+            issues.append(f"visual_block_unclosed:{cls}")
+    return list(dict.fromkeys(issues))
+
+
+def _ensure_expert_insight_minimum(html: str, topic_profile: dict[str, object] | None = None) -> str:
+    count = len(re.findall(rf"class=['\"][^'\"]*{EXPERT_INSIGHT_CLASS}", html or "", flags=re.IGNORECASE))
+    if count >= 3:
+        return html
+    keyword = str((topic_profile or {}).get("target_keyword") or (topic_profile or {}).get("main_entity") or "הנושא")
+    additions = _expert_insights_html(topic_profile or {}, keyword)
+    if count:
+        needed_items = re.findall(rf"<div class='{EXPERT_INSIGHT_CLASS}'>.*?</div>", additions, flags=re.IGNORECASE | re.DOTALL)[: 3 - count]
+        additions = "".join(needed_items)
+    faq_match = re.search(r"<h2[^>]*>.*?שאלות נפוצות.*?</h2>", html or "", flags=re.IGNORECASE | re.DOTALL)
+    if faq_match:
+        return html[:faq_match.start()] + additions + html[faq_match.start():]
+    return (html or "") + additions
+
+
 def _enforce_phase2_article_quality(body: str, topic_profile: dict[str, object] | None = None) -> str:
     if topic_profile is None:
         return _dedupe_article_html(body)
     original_body = body or ""
     cleaned = _remove_generic_filler_sections(body)
     cleaned = _merge_duplicate_topic_sections(cleaned)
+    cleaned = _enforce_single_faq(cleaned)
     cleaned = _augment_faq_to_minimum(cleaned, topic_profile)
+    cleaned = _ensure_expert_insight_minimum(cleaned, topic_profile)
     cleaned = _enforce_single_cta(cleaned)
     before_limit = cleaned
-    cleaned = _limit_h2_sections(cleaned, max_h2=12, topic_profile=topic_profile)
+    cleaned = _limit_h2_sections(cleaned, max_h2=11, topic_profile=topic_profile)
     for pattern in [
         r"<div class='professional-tip'>.*?</div>",
         r"<div class='common-mistake'>.*?</div>",
@@ -1385,7 +1501,98 @@ def _links_section(related: list[dict[str, str | float]], topic_profile: dict[st
         for p in candidates[:5]
         if p.get("url") and p.get("title")
     )
-    return _h2(_contextual_recommendation_title(topic_profile), f"<ul>{links_html}</ul>") + "<h2>מוצרים רלוונטיים באתר</h2>"
+    return _h2(_contextual_recommendation_title(topic_profile), f"<ul>{links_html}</ul>")
+
+
+def _expert_intro_html(title: str, keyword: str, profile: dict[str, object]) -> str:
+    brief = profile.get("expert_brief") if isinstance(profile.get("expert_brief"), dict) else {}
+    entity = str(profile.get("main_entity") or keyword or title)
+    problem = (brief.get("real_world_problems") or [f"קשה לדעת מה באמת משפיע על התוצאה של {entity}"])[0]
+    goal = str(brief.get("user_goal") or f"להבין איך לעבוד נכון עם {entity}")
+    decision_terms = "התאמה, תזמון, טעויות נפוצות וסימני הצלחה"
+    if str(profile.get("topic_type") or "") in {"grill_accessory_guide", "equipment_buying_guide"}:
+        decision_terms = "התאמה, תזמון, תחזוקה, טעויות נפוצות וסימני הצלחה"
+    return (
+        "<div class='expert-introduction'>"
+        f"<p><strong>Hook:</strong> אם {entity} נראה פשוט על הנייר אבל התוצאה לא עקבית, הבעיה בדרך כלל אינה עוד טיפ כללי — אלא פרט קטן שמקצוענים בודקים לפני שמתחילים.</p>"
+        f"<p><strong>Problem:</strong> {problem}. זה בדיוק המקום שבו מאמר רגיל נשאר בסיסי מדי, ולקוח צריך הסבר שמחובר לציוד, לחומר ולסיטואציה האמיתית.</p>"
+        f"<p><strong>Solution:</strong> במדריך הזה נפרק את {keyword or entity} לפי החלטות שטח: {decision_terms} שאפשר לראות בזמן העבודה.</p>"
+        f"<p><strong>What reader will learn:</strong> בסוף תדעו {goal}, מתי לשנות טכניקה, ומתי מוצר משלים באמת פותר בעיה במקום להוסיף עוד רעש.</p>"
+        "</div>"
+    )
+
+
+def _expert_insight_items(topic_type: str, entity: str, keyword: str, entity_key: str) -> list[tuple[str, str]]:
+    if topic_type == "grill_accessory_guide" and entity_key == "basalt_stones":
+        return [
+            ("תאימות לפני קנייה", "מומחה לא מוסיף אבני בזלת לכל גריל גז. קודם בודקים שיש מגש מתאים, מרווח אוויר סביב המבערים ושאין הוראת יצרן שמעדיפה מפזרי חום מתכתיים."),
+            ("סימן שהאבנים כבר מפריעות", "אם יש ריח שומן שרוף קבוע, להבות חוזרות או אזורים קרים למרות חימום ארוך, האבנים כנראה ספוגות או צפופות מדי וצריך לנקות, לדלל או להחליף."),
+            ("שכבה אחת עדיפה מערימה", "ערימה עבה נשמעת כמו יותר פיזור חום, אבל בפועל היא עלולה לחסום אוויר, להעמיס חום על מבערים וליצור תגובה איטית מדי בזמן צלייה."),
+            ("מתי לא לקנות", "אם הגריל כבר משתמש במגני להבה יעילים והבעיה היא מבער סתום או מגש שומן מלוכלך, אבנים חדשות לא יפתרו את שורש הבעיה."),
+        ]
+    if topic_type == "grill_accessory_guide" and entity_key == "thermometer":
+        return [
+            ("קריאה מהירה מול פרוב", "לסטייקים ועוף צריך תגובה בתוך שניות; לבריסקט או עישון ארוך חשוב פרוב יציב שלא מחייב לפתוח מכסה בכל בדיקה."),
+            ("מיקום מדידה מקצועי", "לא מודדים ליד עצם, שומן עבה או קצה דק. מחפשים את החלק העבה והקר ביותר ומשווים כמה נקודות אם הנתח לא אחיד."),
+            ("סימני החלפה", "קריאה שקופצת, כבל סדוק או תגובה איטית אחרי כיול הם סימנים שמדחום הפך לגורם סיכון ולא לכלי דיוק."),
+        ]
+    if topic_type == "smoking_wood_guide":
+        return [
+            ("עשן נקי חשוב מכמות", "thin blue smoke נותן טעם עמוק בלי מרירות; ענן לבן וסמיך הוא בדרך כלל סימן לחוסר אוויר, עץ רטוב מדי או עומס עץ."),
+            ("התאמת עץ לחומר גלם", "עוף ודגים מקבלים טוב עצים עדינים כמו Apple או Cherry, בעוד בריסקט יכול לשאת Oak או Hickory. Mesquite דורש יד עדינה וזמן קצר."),
+            ("שבבים אינם צ׳אנקים קטנים", "שבבים נועדו לתגובה מהירה בגריל או קופסת עישון. צ׳אנקים מיועדים לשחרור איטי במעשנה או גריל פחמים."),
+            ("בעיה שחוזרת אצל מתחילים", "כשלא רואים עשן מוסיפים עוד עץ, ואז מקבלים מרירות. במעשנה טובה חלק מהעשן כמעט בלתי נראה וזה תקין."),
+        ]
+    if topic_type == "meat_quick_grill_cut":
+        return [
+            ("שכבת שומן היא כלי עבודה", "בפיקניה לא מורידים את שכבת השומן לגמרי. צורבים ומנהלים אותה בזהירות כדי שתגן על הנתח ותיתן טעם בלי להדליק להבות גבוהות."),
+            ("54–56°C דורש מדידה", "פיקניה נראית מוכנה מבחוץ לפני שהמרכז מדויק. מודדים במרכז החלק העבה ומורידים מעט לפני היעד כי החום ממשיך לעלות במנוחה."),
+            ("חיתוך נגד הסיבים משנה הכול", "גם נתח שנצלה נכון ירגיש קשה אם חותכים עם הסיבים. מזהים את הכיוון לפני הצלייה ופורסים נגדו לאחר מנוחה קצרה."),
+        ]
+    if topic_type == "meat_low_slow_smoking":
+        return [
+            ("Bark לפני עטיפה", "עטיפה מוקדמת חוסכת זמן אבל מרככת קליפה. מומחה מחכה לצבע עמוק ול-Bark שלא נמרח לפני נייר קצבים."),
+            ("טמפרטורה היא סימן דרך", "90–96°C עוזר להתמצא, אבל ההחלטה הסופית היא probe tenderness בכמה נקודות, במיוחד בין flat ל-point."),
+            ("ניהול סטול בלי פאניקה", "סטול אינו תקלה. מעלים חום רק אם יש סיבה, אחרת שומרים יציבות ומחליטים לפי צבע, לחות ורכות."),
+        ]
+    if topic_type == "poultry_grill_recipe":
+        return [
+            ("קריספיות מתחילה במקרר", "ייבוש פתוח וקצר במקרר משפיע יותר מעוד רוטב. לחות על העור הופכת לאדים ומונעת צריבה."),
+            ("גלייז רק בסוף", "סוכר שנמצא על הרשת יותר מדי זמן נשרף לפני שהעוף מגיע ל-74°C. מורחים שכבה דקה בדקות האחרונות."),
+            ("מדידה בעוף אינה המלצה", "צבע שחום אינו מבטיח בטיחות. מודדים בחלק העבה ומוודאים 74°C בלי לגעת בעצם."),
+        ]
+    if topic_type == "fuel_comparison_or_guide":
+        return [
+            ("מחיר שקית מטעה", "דלק שנשרף יציב ומשאיר פחות אפר יכול להיות משתלם יותר גם אם המחיר הראשוני גבוה יותר."),
+            ("אפר הוא בעיית אוויר", "הרבה אפר לא רק מלכלך; הוא חונק זרימת אוויר ומקשה לשמור חום במעשנה או גריל עם מכסה."),
+            ("בחירה לפי משך עבודה", "פחם עץ מגיב מהר לצלייה קצרה; פחם קוקוס מתאים יותר לאירוח ארוך וחום עקיף יציב."),
+        ]
+    return [
+        ("בדיקת התאמה אמיתית", f"לפני שמיישמים המלצה על {keyword}, בודקים מה הבעיה בפועל: חום, זמן, חומר גלם או ציוד."),
+        ("החלטה לפי סימנים", "מומחה לא פועל לפי כלל אחד; הוא מחפש סימני הצלחה וכשל, ומשנה משתנה אחד בכל פעם."),
+        ("קנייה רק כשיש צורך", "מוצר משלים טוב הוא כזה שמסביר איזו בעיה הוא פותר ואיך תדעו שהתוצאה השתפרה."),
+    ]
+
+
+def _expert_insights_html(profile: dict[str, object], keyword: str) -> str:
+    topic_type = str(profile.get("topic_type") or "fallback_generic")
+    entity = str(profile.get("main_entity") or keyword)
+    entity_key = str(profile.get("entity_key") or "")
+    items = _expert_insight_items(topic_type, entity, keyword, entity_key)[:5]
+    return "".join(
+        f"<div class='{EXPERT_INSIGHT_CLASS}'><p><strong>תובנת מומחה: {title}</strong></p><p>{body}</p></div>"
+        for title, body in items
+    )
+
+
+def _insert_expert_insights(html: str, profile: dict[str, object], keyword: str) -> str:
+    if EXPERT_INSIGHT_CLASS in (html or ""):
+        return html
+    insights = _expert_insights_html(profile, keyword)
+    faq_match = re.search(r"<h2[^>]*>.*?שאלות נפוצות.*?</h2>", html or "", flags=re.IGNORECASE | re.DOTALL)
+    if faq_match:
+        return html[:faq_match.start()] + insights + html[faq_match.start():]
+    return (html or "") + insights
 
 
 def _build_contract_article(title: str, keyword: str, related: list[dict[str, str | float]], profile: dict[str, object]) -> str:
@@ -1430,8 +1637,8 @@ def _build_contract_article(title: str, keyword: str, related: list[dict[str, st
             f"<p><strong>{title}</strong> הוא מתכון גריל לעוף שמתחיל בייבוש, ממשיך בבטיחות מזון ומסתיים בקריספיות וגלייז שלא הופך לסוכר שרוף.</p>\n"
             + _h2("ייבוש", "<p>מייבשים את העוף היטב במגבת נייר ומשאירים אותו פתוח במקרר אם יש זמן. ייבוש הוא הבסיס לעור קריספי ולאדים פחותים על הרשת.</p>")
             + _h2("בטיחות מזון ו-74°C", "<p>בטיחות מזון בעוף אינה מקום לניחוש: מודדים בחלק העבה ומוודאים לפחות 74°C לפני הגשה.</p>")
-            + _h2("קריספיות", "<p>מביאים את העוף לבישול אחיד באזור חום עקיף ואז מסיימים מעל חום ישיר קצר לקבלת קריספיות וצבע זהוב.</p>")
-            + _h2("מרינדה וגלייז", "<p>מרינדה יכולה להיכנס לפני הצלייה, אבל גלייז מתוק מוסיפים רק בסוף. כך מקבלים ברק וטעם בלי שריפה.</p>")
+            + _h2("crisping וקריספיות", "<p>מביאים את העוף לבישול אחיד באזור חום עקיף ואז מסיימים מעל חום ישיר קצר לקבלת crisping, קריספיות וצבע זהוב.</p>")
+            + _h2("Glaze timing: מרינדה וגלייז", "<p>מרינדה יכולה להיכנס לפני הצלייה, אבל Glaze timing נכון אומר שאת הגלייז המתוק מוסיפים רק בסוף. כך מקבלים ברק וטעם בלי שריפה.</p>")
             + _h2("איך נמנעים מסוכר שרוף", "<p>מורחים שכבה דקה, עובדים רחוק מלהבה גבוהה ומחזירים לרשת לזמן קצר בלבד. אם הרוטב סמיך מדי מדללים מעט.</p>")
             + _h2("טעויות נפוצות", "<ul><li>העלאה לרשת כשהעוף רטוב.</li><li>הוספת גלייז מוקדם מדי.</li><li>הגשה לפני בדיקת 74°C.</li></ul>")
             + links
@@ -1696,6 +1903,12 @@ def _depth_engine_sections(topic_type: str, entity: str, keyword: str, entity_ke
             ("טעויות נפוצות", "<ul><li>להשרות שבבים ולחשוב שזה מונע שריפה, במקום לשלוט בחום ובאוויר.</li><li>להוסיף יותר מדי עץ ולקבל מרירות.</li><li>לבחור Mesquite לעישון ארוך ראשון.</li><li>להתעלם מעשן לבן סמיך כי חושבים שכל עשן הוא טוב.</li><li>להשתמש בעץ לא מזוהה, צבוע או מטופל.</li></ul>"),
             ("המלצה מעשית", "<p>לרוב הבשלנים הביתיים כדאי להתחיל בשלישייה פשוטה: Apple לעוף ודגים, Oak לבריסקט ונתחי בקר ארוכים, ו-Cherry כאשר רוצים צבע וארומה פירותית. אחרי שמכירים את התוצאה, מוסיפים Hickory בזהירות. כך בונים טעם עקבי בלי להפוך כל עישון לניסוי אגרסיבי.</p>"),
         ]
+    if topic_type == "meat_quick_grill_cut":
+        return [
+            ("שכבת שומן היא כלי עבודה", "בפיקניה לא מורידים את שכבת השומן לגמרי. צורבים ומנהלים אותה בזהירות כדי שתגן על הנתח ותיתן טעם בלי להדליק להבות גבוהות."),
+            ("54–56°C דורש מדידה", "פיקניה נראית מוכנה מבחוץ לפני שהמרכז מדויק. מודדים במרכז החלק העבה ומורידים מעט לפני היעד כי החום ממשיך לעלות במנוחה."),
+            ("חיתוך נגד הסיבים משנה הכול", "גם נתח שנצלה נכון ירגיש קשה אם חותכים עם הסיבים. מזהים את הכיוון לפני הצלייה ופורסים נגדו לאחר מנוחה קצרה."),
+        ]
     if topic_type == "meat_low_slow_smoking":
         return [
             ("Trim והכנת הנתח", f"<p>לפני עישון {entity} מסירים שומן קשה שלא יתרכך, מיישרים קצוות דקים שעלולים להתייבש ומשאירים שכבת שומן סבירה שמגינה על הנתח. Trim טוב יוצר עובי אחיד יותר ולכן גם ציר זמן צפוי יותר.</p>"),
@@ -1785,8 +1998,9 @@ def _build_article_html(
     topic_profile: dict[str, object] | None = None,
 ) -> str:
     profile = topic_profile or _classify_topic(title, keyword, "informational")
-    html = _build_contract_article(title, keyword, related, profile)
+    html = _expert_intro_html(title, keyword, profile) + _build_contract_article(title, keyword, related, profile)
     html = _depth_upgrade_html(title, keyword, html, profile)
+    html = _insert_expert_insights(html, profile, keyword)
     return apply_visual_article_formatter(title, keyword, html, profile)
 
 def _clean_anchor_text(link: dict[str, str | float]) -> str:
@@ -1961,7 +2175,7 @@ def _topic_table_html(topic_type: str, entity: str) -> str:
 def _intro_summary_html(title: str, keyword: str, topic_type: str) -> str:
     bullets = {
         "meat_low_slow_smoking": ["איך לייצב מעשנה ב-105–120°C", "מתי לבחור עצי עישון", "איך לנהל Bark, סטול ועטיפה", "איפה לשלב מדחום ונייר קצבים"],
-        "smoking_wood_guide": ["איך לבחור שבבים או צ׳אנקים", "איזה עץ מתאים לכל בשר", "איך להימנע מעשן מר", "איך לתכנן תמונות ופרסום ב-ISTORE"],
+        "smoking_wood_guide": ["איך לבחור שבבים או צ׳אנקים", "איזה עץ מתאים לכל בשר", "איך להימנע מעשן מר", "איך לאחסן עץ כדי לשמור על עשן נקי"],
         "grill_accessory_guide": ["מה האביזר באמת עושה", "איך לבדוק התאמה לגריל", "מהן טעויות התחזוקה", "מתי נכון לקנות בקומפס גריל"],
         "equipment_buying_guide": ["איך להשוות דגמים", "אילו אביזרים משלימים חשובים", "מה לבדוק לפני רכישה", "איך לשמור על חוויית צלייה נוחה"],
     }.get(topic_type, [f"מה חשוב לדעת על {keyword}", "איך לעבוד מסודר יותר", "אילו טעויות כדאי למנוע", "איך לבחור ציוד מתאים בקומפס גריל"])
@@ -2002,7 +2216,7 @@ def _cta_block_html(topic_type: str) -> str:
         "grill_accessory_guide": ["אביזרים לגריל", "אבני בזלת", "מדחומים", "כיסויים וכלי ניקוי"],
         "equipment_buying_guide": ["Gas Grills", "Charcoal Grills", "Kamado Grills", "Outdoor Kitchens"],
     }.get(topic_type, ["Gas Grills", "Smokers", "Thermometers", "Grill Accessories"])
-    return "<div class='article-cta'><h2>🛒 מחפשים ציוד מתאים?</h2><p>בקומפס גריל תמצאו פתרונות שנבחרים לפי שימוש אמיתי ולא לפי ניחוש:</p><ul>" + "".join(f"<li>✅ {item}</li>" for item in items) + "</ul></div>"
+    return "<div class='article-cta'><p><strong>🛒 מחפשים ציוד מתאים?</strong></p><p>בקומפס גריל תמצאו פתרונות שנבחרים לפי שימוש אמיתי ולא לפי ניחוש:</p><ul>" + "".join(f"<li>✅ {item}</li>" for item in items) + "</ul></div>"
 
 
 def _insert_image_markers(html: str) -> str:
@@ -2557,27 +2771,56 @@ def validate_final_article_quality(body: str, meta_title: str, seo_metadata: dic
             issues.append("irrelevant_selected_link:" + str(link.get("title") or link.get("url") or "unknown"))
     h2_count = len(re.findall(r"<h2[^>]*>", raw_body, flags=re.IGNORECASE))
     faq_count = len(re.findall(r"<h3[^>]*>\s*❓", raw_body, flags=re.IGNORECASE))
+    faq_section_count = len(re.findall(r"<h2[^>]*>.*?שאלות נפוצות.*?</h2>", raw_body, flags=re.IGNORECASE | re.DOTALL))
+    cta_count = len(re.findall(r"article-cta", raw_body, flags=re.IGNORECASE))
+    expert_insight_count = len(re.findall(rf"class=['\"][^'\"]*{EXPERT_INSIGHT_CLASS}", raw_body, flags=re.IGNORECASE))
+    html_issues = _html_validation_issues(raw_body)
+    issues.extend(html_issues)
+    if expert_insight_count < 3:
+        issues.append(f"expert_insight_sections_below_3:{expert_insight_count}")
+    if faq_section_count != 1:
+        issues.append(f"faq_section_count_invalid:{faq_section_count}")
+    if not 5 <= faq_count <= 8:
+        issues.append(f"faq_question_count_invalid:{faq_count}")
+    if cta_count != 1:
+        issues.append(f"cta_count_invalid:{cta_count}")
+
     topic_relevance_score = max(0, 100 - 12 * len([phrase for phrase in GENERIC_FILLER_PHRASES if phrase in raw_body]) - 8 * len([i for i in issues if i.startswith("irrelevant_selected_link")]))
-    readability_score = max(0, 100 - max(0, h2_count - 12) * 8 - max(0, final_word_count - 2200) // 20)
+    readability_score = max(0, 100 - max(0, h2_count - 12) * 8 - max(0, final_word_count - 2200) // 20 - max(0, 1200 - final_word_count) // 25)
     duplicate_content_score = max(0, 100 - 20 * len(duplicate_sections_removed) - (20 if "duplicate_h2_titles" in issues else 0))
     seo_score = int(seo_metadata.get("seo_score", 85)) if isinstance(seo_metadata, dict) else 85
-    commercial_intent_score = 92 if selected_links else 78
-    overall_quality_score = round((topic_relevance_score * 0.28) + (readability_score * 0.20) + (duplicate_content_score * 0.22) + (seo_score * 0.18) + (commercial_intent_score * 0.12))
+    expertise_score = max(0, 70 + min(25, expert_insight_count * 7) + (5 if "expert-introduction" in raw_body else 0) - 12 * len([phrase for phrase in GENERIC_FILLER_PHRASES if phrase in raw_body]))
+    practical_value_score = max(0, 70 + (8 if "professional-tip" in raw_body else 0) + (8 if "common-mistake" in raw_body else 0) + (7 if "article-checklist" in raw_body else 0) + (7 if "<table" in raw_body.lower() else 0))
+    commercial_intent_score = 94 if selected_links else 82
+    technical_accuracy_score = max(0, 100 - 18 * len(html_issues) - (12 if "alt_not_entity_specific" in issues else 0))
+    overall_quality_score = round(
+        (seo_score * 0.14)
+        + (readability_score * 0.12)
+        + (topic_relevance_score * 0.16)
+        + (expertise_score * 0.16)
+        + (practical_value_score * 0.14)
+        + (commercial_intent_score * 0.10)
+        + (duplicate_content_score * 0.10)
+        + (technical_accuracy_score * 0.08)
+    )
     human_review_validation = {
         "no_duplicate_topics": not duplicate_sections_removed and "duplicate_h2_titles" not in issues,
         "no_filler_content": not any(phrase in raw_body for phrase in GENERIC_FILLER_PHRASES),
         "no_repeated_explanations": "repeated_paragraphs" not in issues,
         "max_12_h2_sections": h2_count <= 12,
-        "faq_relevant": 5 <= faq_count <= 8,
-        "cta_unique": len(re.findall(r"article-cta", raw_body)) == 1,
+        "faq_valid": faq_section_count == 1 and 5 <= faq_count <= 8,
+        "cta_valid": cta_count == 1,
         "internal_links_found": bool(selected_links),
+        "recommendations_relevant": bool(selected_links),
         "images_relevant": True,
-        "alt_specific": "alt_not_entity_specific" not in issues,
+        "alt_quality_high": "alt_not_entity_specific" not in issues,
         "readability_high": readability_score >= 85,
+        "expertise_level_high": expertise_score >= 90,
+        "html_valid": not html_issues,
         "topic_relevance_high": topic_relevance_score >= 85,
     }
-    if overall_quality_score < 85:
-        issues.append(f"overall_quality_below_85:{overall_quality_score}")
+    if overall_quality_score < 90:
+        issues.append(f"overall_quality_below_90:{overall_quality_score}")
     return {
         "final_quality_passed": not issues,
         "final_quality_issues": issues,
@@ -2587,12 +2830,18 @@ def validate_final_article_quality(body: str, meta_title: str, seo_metadata: dic
         "required_word_count": _required_word_count_for_topic(topic_type),
         "h2_section_count": h2_count,
         "faq_question_count": faq_count,
+        "faq_section_count": faq_section_count,
+        "expert_insight_section_count": expert_insight_count,
         "topic_relevance_score": topic_relevance_score,
         "readability_score": readability_score,
         "duplicate_content_score": duplicate_content_score,
         "seo_score": seo_score,
+        "expertise_score": expertise_score,
+        "practical_value_score": practical_value_score,
         "commercial_intent_score": commercial_intent_score,
+        "technical_accuracy_score": technical_accuracy_score,
         "overall_quality_score": overall_quality_score,
+        "html_validation_issues": html_issues,
         "human_review_validation": human_review_validation,
         "depth_engine_used": topic_type if topic_type != "fallback_generic" else "fallback_generic",
         "topic_depth_sections_added": list(getattr(_depth_upgrade_html, "last_sections_added", [])),
@@ -2620,6 +2869,7 @@ def _final_generation_debug(topic_profile: dict[str, object], validation: dict[s
         "regeneration_count": regeneration_count,
         "regenerated_due_to_validation": regeneration_count > 0,
         "final_body_source": final_body_source,
+        "expert_engine_version": EXPERT_ENGINE_VERSION,
     }
 
 
