@@ -38,7 +38,7 @@ REGRESSION_CASES = [
     ("בריסקט", "בריסקט", "how-to", "meat_low_slow_smoking", ["105–120°C", "Bark", "סטול", "נייר קצבים", "90–96°C"], ["74°C", "54–57°C", "גלייז", "אפר"], ["smoker", "bark"]),
     ("כנפיים קריספיות", "כנפיים קריספיות", "how-to", "poultry_grill_recipe", ["ייבוש", "בטיחות מזון", "74°C", "גלייז", "סוכר שרוף"], ["54–57°C", "סטול", "Bark", "אפר"], ["chicken", "wings"]),
     ("פחם / פחם קוקוס", "פחם / פחם קוקוס", "comparison", "fuel_comparison_or_guide", ["זמן בעירה", "יציבות חום", "רמת עשן", "אפר", "עלות מול ביצועים"], ["74°C", "54–57°C", "גלייז", "סטול"], ["charcoal", "fuel"]),
-    ("שבבי עץ לעישון", "שבבי עץ לעישון", "commercial", "smoking_wood_guide", ["פרופיל טעם", "שבבים", "צ׳אנקים", "השריה", "thin blue smoke"], ["74°C", "54–57°C", "גלייז", "אפר"], ["wood", "smoke"]),
+    ("שבבי עץ לעישון", "שבבי עץ לעישון", "commercial", "smoking_wood_guide", ["פרופיל טעם", "שבבים", "צ׳אנקים", "השריה", "עשן כחול דק"], ["74°C", "54–57°C", "גלייז", "אפר"], ["wood", "smoke"]),
     ("אבני בזלת לגריל", "אבני בזלת לגריל", "commercial", "grill_accessory_guide", ["מה זה", "איך זה עובד", "התקנה", "ניקוי", "תחזוקה", "שיקולי קנייה"], ["74°C", "54–57°C", "גלייז", "סטול"], ["accessory", "grill"]),
     ("גריל גז", "גריל גז", "commercial", "equipment_buying_guide", ["תרחיש שימוש", "גודל", "BTU", "איכות חומר", "תחזוקה", "למי זה מתאים"], ["74°C", "54–57°C", "גלייז", "סטול"], ["equipment", "buying"]),
 ]
@@ -352,7 +352,7 @@ def test_butcher_paper_uses_smoking_accessory_contract(db_session: Session) -> N
 
     assert profile["topic_type"] == "smoking_accessory_guide"
     assert draft.status == "READY_FOR_REVIEW"
-    for term in ["סטול", "בריסקט", "Bark", "butcher paper vs foil", "מתי לעטוף"]:
+    for term in ["סטול", "בריסקט", "Bark", "נייר קצבים מול נייר כסף", "מתי לעטוף"]:
         assert term in body
     for forbidden in ["התקנה", "חוסם אוויר", "מבערים", "החלפת אביזר שחוק"]:
         assert forbidden not in body
@@ -410,7 +410,7 @@ def test_smoking_wood_depth_links_and_alt_regression(db_session: Session, monkey
     selected = service.json.loads(draft.internal_links_json)
 
     assert service._classify_topic(draft.topic_title, draft.focus_keyword, draft.target_intent)["topic_type"] == "smoking_wood_guide"
-    for term in ["Apple", "Cherry", "Oak", "Hickory", "Thin Blue Smoke", "שבבים", "צ׳אנקים", "בריסקט", "עוף", "דגים"]:
+    for term in ["Apple", "Cherry", "Oak", "Hickory", "עשן כחול דק", "שבבים", "צ׳אנקים", "בריסקט", "עוף", "דגים"]:
         assert term in body
     assert "<table" in body and "עוצמת טעם" in body and "מתאים ל" in body
     assert any("שבבי עץ" in link["title"] or "צ׳אנקים" in link["title"] for link in selected)
@@ -432,7 +432,7 @@ def test_brisket_depth_minimum_and_required_low_slow_terms(db_session: Session, 
     debug = draft.link_match_debug
 
     assert debug["final_word_count"] >= debug["required_word_count"]
-    for term in ["סטול", "Bark", "נייר קצבים", "105–120°C", "90–96°C", "probe tenderness", "מנוחה ארוכה"]:
+    for term in ["סטול", "Bark", "נייר קצבים", "105–120°C", "90–96°C", "בדיקת רכות עם פרוב", "מנוחה ארוכה"]:
         assert term in draft.article_body
     assert "בריסקט" in draft.internal_links_json and "נייר קצבים" in draft.internal_links_json and "מדחום" in draft.internal_links_json
     assert draft.status == "READY_FOR_REVIEW"
@@ -450,7 +450,7 @@ def test_wings_depth_no_duplicate_sections_and_no_unrelated_links(db_session: Se
     h2_titles = [_normalized_html_text(match) for match in re.findall(r"<h2[^>]*>(.*?)</h2>", draft.article_body)]
 
     assert len(h2_titles) == len(set(h2_titles))
-    for term in ["ייבוש", "74°C", "Glaze timing", "crisping"]:
+    for term in ["ייבוש", "74°C", "זמן מריחת גלייז", "שלב הקריספיות"]:
         assert term in draft.article_body
     for forbidden in ["קבב", "טופרי דוב", "נייר קצבים", "gas burner"]:
         assert forbidden not in draft.article_body + draft.internal_links_json

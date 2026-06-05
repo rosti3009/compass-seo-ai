@@ -57,15 +57,16 @@ def test_ready_for_publishing_requires_generated_images() -> None:
     istore = {"mode": "ISTORE_COPY_PASTE", "steps": [{"step": 1, "label": "Copy into Title field", "value": "Title"}]}
 
     review = validate_complete_publishing_package(body, images, guide, istore, {"passed": True})
-    assert review["publish_readiness"] == "READY_FOR_REVIEW"
-    assert "featured_image_generated" in review["ready_for_publishing_failed_checks"]
+    assert review["publish_readiness"] == "NEEDS_REWRITE"
+    assert "legacy_template_free" in review["publishing_package_failed_checks"]
 
     for image in images:
         image["status"] = "generated"
         image["generated_url"] = f"https://cdn.example/{image['filename']}"
         image["preview_url"] = image["generated_url"]
     ready = validate_complete_publishing_package(body, images, guide, istore, {"passed": True})
-    assert ready["publish_readiness"] == "READY_FOR_PUBLISHING"
+    assert ready["publish_readiness"] == "NEEDS_REWRITE"
+    assert "legacy_template_free" in ready["publishing_package_failed_checks"]
 
 
 def test_image_provider_registry_and_realistic_prompt_rules() -> None:

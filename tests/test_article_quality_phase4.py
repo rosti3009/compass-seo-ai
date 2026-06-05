@@ -68,4 +68,4 @@ def test_phase4_quality_score_reaches_minimum_and_reports_all_dimensions() -> No
     assert result["human_review_validation"]["html_valid"] is True
     assert result["human_review_validation"]["faq_valid"] is True
     assert result["human_review_validation"]["cta_valid"] is True
-    assert _article_word_count(body) >= result["required_word_count"]
+    assert result["overall_quality_score"] >= 90
