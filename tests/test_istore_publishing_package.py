@@ -67,10 +67,10 @@ def test_topic_articles_include_visual_formatter_and_istore_package(client: Test
     metadata = draft["image_generation_metadata"]
 
     assert "intro-summary" in body
-    assert "professional-tip" in body
-    assert "common-mistake" in body
-    assert "article-checklist" in body
-    assert "<table" in body
+    assert "professional-tip" not in body
+    assert "common-mistake" not in body
+    assert "article-checklist" not in body
+    assert metadata["final_qa_validation"]["publishing_package_checks"]["legacy_template_free"] is True
     assert "article-cta" in body
     assert "❓" in body
     for marker in ["<!-- IMAGE_1 -->", "<!-- IMAGE_2 -->", "<!-- IMAGE_3 -->", "<!-- IMAGE_4 -->"]:
@@ -118,7 +118,7 @@ def test_diversity_scoring_detects_repeated_structure() -> None:
 
 
 def test_final_qa_validation_requires_complete_package() -> None:
-    body = "<div class='intro-summary'></div><p>Article body with enough Hebrew תוכן מקצועי לצלייה ועישון Article body with enough Hebrew תוכן מקצועי לצלייה ועישון Article body with enough Hebrew תוכן מקצועי לצלייה ועישון Article body with enough Hebrew תוכן מקצועי לצלייה ועישון Article body with enough Hebrew תוכן מקצועי לצלייה ועישון Article body with enough Hebrew תוכן מקצועי לצלייה ועישון Article body with enough Hebrew תוכן מקצועי לצלייה ועישון Article body with enough Hebrew תוכן מקצועי לצלייה ועישון Article body with enough Hebrew תוכן מקצועי לצלייה ועישון Article body with enough Hebrew תוכן מקצועי לצלייה ועישון Article body with enough Hebrew תוכן מקצועי לצלייה ועישון Article body with enough Hebrew תוכן מקצועי לצלייה ועישון</p><!-- IMAGE_1 --><!-- IMAGE_2 --><!-- IMAGE_3 --><!-- IMAGE_4 --><div class='professional-tip'>טיפ מקצועי</div><div class='common-mistake'>טעות נפוצה</div><ul class='article-checklist'><li>✅ ציוד</li></ul><table><tr><td>x</td></tr></table><h2>❓ שאלות נפוצות</h2><div class='article-cta'>CTA</div>"
+    body = "<div class='intro-summary'></div><p>תוכן מקצועי בעברית לצלייה ועישון תוכן מקצועי בעברית לצלייה ועישון תוכן מקצועי בעברית לצלייה ועישון תוכן מקצועי בעברית לצלייה ועישון תוכן מקצועי בעברית לצלייה ועישון תוכן מקצועי בעברית לצלייה ועישון תוכן מקצועי בעברית לצלייה ועישון תוכן מקצועי בעברית לצלייה ועישון תוכן מקצועי בעברית לצלייה ועישון תוכן מקצועי בעברית לצלייה ועישון תוכן מקצועי בעברית לצלייה ועישון Article body with enough Hebrew תוכן מקצועי לצלייה ועישון</p><!-- IMAGE_1 --><!-- IMAGE_2 --><!-- IMAGE_3 --><!-- IMAGE_4 --><h2>מוצרים וקטגוריות שיעזרו ליישם את המדריך</h2><ul><li>ציוד גריל מתאים</li></ul><h2>❓ שאלות נפוצות</h2><h3>❓ שאלה ראשונה?</h3><p>✅ תשובה מקצועית.</p><h3>❓ שאלה שנייה?</h3><p>✅ תשובה מקצועית.</p><h3>❓ שאלה שלישית?</h3><p>✅ תשובה מקצועית.</p><h3>❓ שאלה רביעית?</h3><p>✅ תשובה מקצועית.</p><h3>❓ שאלה חמישית?</h3><p>✅ תשובה מקצועית.</p><div class='article-cta'>CTA</div>"
     images = [{"key": f"image_{i}", "filename": f"{i}.jpg", "alt": f"תיאור ייחודי לתמונה {i}", "caption": "caption", "prompt": "prompt", "image_url": ""} for i in range(5)]
     images[0]["key"] = "featured_image"
     guide = [{"image": image["key"], "instruction": "Place", "section": "section"} for image in images]

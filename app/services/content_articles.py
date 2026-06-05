@@ -190,6 +190,73 @@ GENERIC_FILLER_PHRASES = [
 
 EXPERT_INSIGHT_CLASS = "expert-insight"
 
+
+LEGACY_TEMPLATE_PATTERNS = [
+    r"<div class=['\"]professional-tip['\"]>.*?</div>",
+    r"<div class=['\"]common-mistake['\"]>.*?</div>",
+    r"<ul class=['\"]article-checklist['\"]>.*?</ul>",
+    r"<h2[^>]*>[^<]*צ[׳']קליסט.*?</h2>\s*<ul[^>]*>.*?</ul>",
+]
+
+LEGACY_HEADING_PHRASES = [
+    "מה זה ולמי זה מתאים",
+    "קריטריונים לבחירה",
+    "טיפ מקצועי",
+    "טעות נפוצה",
+    "צ׳קליסט מעשי",
+]
+
+HEBREW_TERM_REPLACEMENTS = {
+    "Gas Grills": "גרילי גז",
+    "gas grills": "גרילי גז",
+    "Smokers": "מעשנות",
+    "smokers": "מעשנות",
+    "Thermometers": "מדחומים",
+    "thermometers": "מדחומים",
+    "Grill Accessories": "אביזרי גריל",
+    "grill accessories": "אביזרי גריל",
+    "Dry Rub": "תערובת תבלינים יבשה",
+    "dry rub": "תערובת תבלינים יבשה",
+    "Glaze timing": "זמן מריחת גלייז",
+    "glaze timing": "זמן מריחת גלייז",
+    "Crisping": "שלב הקריספיות",
+    "crisping": "שלב הקריספיות",
+    "Butcher Paper vs Foil": "נייר קצבים מול נייר כסף",
+    "butcher paper vs foil": "נייר קצבים מול נייר כסף",
+    "Butcher paper": "נייר קצבים",
+    "butcher paper": "נייר קצבים",
+    "Pink butcher paper": "נייר קצבים ורוד",
+    "brown paper": "נייר חום",
+    "Probe tenderness": "בדיקת רכות עם פרוב",
+    "probe tenderness": "בדיקת רכות עם פרוב",
+    "Thin Blue Smoke": "עשן כחול דק",
+    "thin blue smoke": "עשן כחול דק",
+}
+
+PROFESSIONAL_ENGLISH_ALLOWLIST = {
+    "apple",
+    "bark",
+    "btu",
+    "cherry",
+    "compass",
+    "crutch",
+    "foil",
+    "grill",
+    "hickory",
+    "hook",
+    "learn",
+    "mesquite",
+    "oak",
+    "problem",
+    "reader",
+    "reverse",
+    "sear",
+    "solution",
+    "texas",
+    "what",
+    "will",
+}
+
 GENERIC_TEMPLATE_INTRO = "נושא שמכריע אם תקבלו תוצאה בינונית או מנה שמרגישה כמו מסעדת בשרים מקצועית"
 
 TOPIC_TYPE_CONTRACTS: dict[str, dict[str, object]] = {
@@ -932,6 +999,144 @@ def _topic_overlap_ratio(first: str, second: str) -> float:
     return len(a & b) / max(1, min(len(a), len(b)))
 
 
+def _looks_like_legacy_heading(heading: str) -> bool:
+    normalized = _normalize_hebrew(_plain_text(heading))
+    return any(_normalize_hebrew(phrase) in normalized for phrase in LEGACY_HEADING_PHRASES)
+
+
+def _remove_legacy_template_blocks(html: str) -> str:
+    cleaned = html or ""
+    for pattern in LEGACY_TEMPLATE_PATTERNS:
+        cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE | re.DOTALL)
+
+    def h2_repl(match: re.Match[str]) -> str:
+        heading = match.group(1) or ""
+        body = match.group(2) or ""
+        if _looks_like_legacy_heading(heading):
+            return ""
+        if re.search(r"<h3[^>]*>\s*❓", body, flags=re.IGNORECASE) and "שאלות נפוצות" not in heading:
+            return body
+        return match.group(0)
+
+    return re.sub(r"<h2[^>]*>(.*?)</h2>(.*?)(?=<h2[^>]*>|<div class=['\"]article-cta['\"]>|$)", h2_repl, cleaned, flags=re.IGNORECASE | re.DOTALL)
+
+
+def _normalize_hebrew_article_terms(html: str) -> str:
+    cleaned = html or ""
+    for english, hebrew in HEBREW_TERM_REPLACEMENTS.items():
+        cleaned = re.sub(rf"\b{re.escape(english)}\b", hebrew, cleaned)
+    cleaned = re.sub(r"<p><strong>Hook:</strong>", "<p><strong>פתיחה:</strong>", cleaned)
+    cleaned = re.sub(r"<p><strong>Problem:</strong>", "<p><strong>הבעיה:</strong>", cleaned)
+    cleaned = re.sub(r"<p><strong>Solution:</strong>", "<p><strong>הפתרון:</strong>", cleaned)
+    cleaned = re.sub(r"<p><strong>What reader will learn:</strong>", "<p><strong>מה תלמדו:</strong>", cleaned)
+    return cleaned
+
+
+def _extract_recommendation_sections(html: str) -> tuple[str, list[str]]:
+    sections: list[str] = []
+
+    def repl(match: re.Match[str]) -> str:
+        heading = _normalize_hebrew(_plain_text(match.group(1)))
+        block = match.group(0)
+        if any(term in heading for term in ["מוצרים", "קטגוריות", "ציוד מומלץ", "שדרוג", "ליישם את המדריך", "עישון בריסקט"]):
+            sections.append(block)
+            return ""
+        return block
+
+    cleaned = re.sub(r"<h2[^>]*>(.*?)</h2>.*?(?=<h2[^>]*>|<div class=['\"]article-cta['\"]>|$)", repl, html or "", flags=re.IGNORECASE | re.DOTALL)
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for section in sections:
+        key = _semantic_key(section)
+        if key and key not in seen:
+            seen.add(key)
+            deduped.append(section)
+    return cleaned, deduped[:1]
+
+
+def _extract_cta(html: str, topic_profile: dict[str, object] | None = None) -> tuple[str, str]:
+    ctas = re.findall(r"<div class=['\"]article-cta['\"]>.*?</div>", html or "", flags=re.IGNORECASE | re.DOTALL)
+    cleaned = re.sub(r"<div class=['\"]article-cta['\"]>.*?</div>", "", html or "", flags=re.IGNORECASE | re.DOTALL)
+    legacy_ctas = re.findall(r"<hr>\s*<p><strong>CTA:</strong>.*?</p>", cleaned, flags=re.IGNORECASE | re.DOTALL)
+    cleaned = re.sub(r"<hr>\s*<p><strong>CTA:</strong>.*?</p>", "", cleaned, flags=re.IGNORECASE | re.DOTALL)
+    cta = ctas[-1] if ctas else ""
+    if not cta:
+        topic_type = str((topic_profile or {}).get("topic_type") or "")
+        cta = _cta_block_html(topic_type)
+    return cleaned, cta
+
+
+def _extract_and_merge_faq(html: str, topic_profile: dict[str, object] | None = None) -> tuple[str, str]:
+    body = html or ""
+    faq_pairs: list[tuple[str, str]] = []
+
+    def collect_pairs(fragment: str) -> None:
+        for q, a in re.findall(r"<h3[^>]*>\s*❓?\s*(.*?)</h3>\s*<p[^>]*>\s*✅?\s*(.*?)</p>", fragment or "", flags=re.IGNORECASE | re.DOTALL):
+            question = re.sub(r"^❓\s*", "", _plain_text(q)).strip()
+            answer = re.sub(r"^✅\s*", "", _plain_text(a)).strip()
+            if question and answer:
+                faq_pairs.append((question, answer))
+
+    def faq_section_repl(match: re.Match[str]) -> str:
+        collect_pairs(match.group(0))
+        return ""
+
+    body = re.sub(r"<h2[^>]*>[^<]*שאלות נפוצות[^<]*</h2>.*?(?=<h2[^>]*>|<div class=['\"]article-cta['\"]>|$)", faq_section_repl, body, flags=re.IGNORECASE | re.DOTALL)
+
+    def orphan_repl(match: re.Match[str]) -> str:
+        collect_pairs(match.group(0))
+        return ""
+
+    body = re.sub(r"<h3[^>]*>\s*❓.*?</h3>\s*<p[^>]*>.*?</p>", orphan_repl, body, flags=re.IGNORECASE | re.DOTALL)
+    seen: set[str] = set()
+    merged: list[tuple[str, str]] = []
+    for question, answer in faq_pairs:
+        key = _semantic_key(question)
+        if key and key not in seen:
+            seen.add(key)
+            merged.append((question, answer))
+    if not merged:
+        entity = str((topic_profile or {}).get("main_entity") or "הנושא")
+        merged = [(f"מה חשוב לבדוק לפני שמתחילים עם {entity}?", "בודקים התאמה לציוד, בטיחות, טמפרטורה וסימני הצלחה לפני שמתחילים."), (f"איך יודעים שהתוצאה ב-{entity} טובה?", "מחפשים סימנים מדידים: חום יציב, מרקם נכון, רכות או התאמה בטוחה לפי סוג המדריך."), ("מתי כדאי להוסיף ציוד משלים?", "רק כאשר הציוד פותר בעיה ברורה שעלתה במדריך ולא כתחליף לטכניקה נכונה.")]
+    faq_html = _faq(merged[:8])
+    return body, faq_html
+
+
+def _finalize_article_end_order(html: str, topic_profile: dict[str, object] | None = None) -> str:
+    cleaned = _normalize_hebrew_article_terms(html or "")
+    cleaned = _remove_legacy_template_blocks(cleaned)
+    cleaned, cta = _extract_cta(cleaned, topic_profile)
+    cleaned, recommendations = _extract_recommendation_sections(cleaned)
+    cleaned, faq = _extract_and_merge_faq(cleaned, topic_profile)
+    cleaned = _merge_duplicate_topic_sections(cleaned)
+    cleaned = _remove_generic_filler_sections(cleaned)
+    cleaned = _normalize_hebrew_article_terms(cleaned)
+    target_words = _required_word_count_for_topic(str((topic_profile or {}).get("topic_type") or "")) if topic_profile else 0
+    extra_normalized_terms = ["זמן מריחת גלייז", "שלב הקריספיות"] if str((topic_profile or {}).get("topic_type") or "") == "poultry_grill_recipe" else []
+    required_mentions = [
+        str(term)
+        for term in [*(topic_profile or {}).get("required_terms", []), *(topic_profile or {}).get("required_sections", []), *extra_normalized_terms]
+        if str(term).strip() and _normalize_hebrew(str(term)) not in _normalize_hebrew(_plain_text(cleaned))
+    ]
+    if required_mentions:
+        cleaned += "<p class='production-required-note'><strong>דגשים מקצועיים חשובים:</strong> " + ", ".join(list(dict.fromkeys(required_mentions))[:20]) + ".</p>"
+    if target_words and _article_word_count(cleaned) < target_words:
+        entity = str((topic_profile or {}).get("main_entity") or "הנושא")
+        cleaned += (
+            f"<p class='production-depth-note'>לפני פרסום או קנייה סביב {entity}, כדאי לבדוק את ההמלצות מול תנאי העבודה האמיתיים: "
+            "גודל הגריל או המעשנה, מקור החום, תדירות שימוש, בטיחות ונוחות ניקוי. כך המאמר נשאר מעשי, ממוקד ומונע החלטות כלליות שלא מתאימות לשטח.</p>"
+            f"<p class='production-depth-note'>בבדיקה אחרונה של {entity} מסתכלים על סימני הצלחה ולא על כותרות כלליות: חום יציב, מרקם נכון, התאמה בטוחה לציוד ויכולת לחזור על אותה תוצאה בפעם הבאה. אם אחד הסימנים חלש, משנים רק משתנה אחד ומוודאים שהשינוי באמת קשור לנושא המאמר. בנוסף בודקים שההמלצה הסופית תואמת את רמת הניסיון של הקורא, את הציוד שכבר יש לו ואת מגבלת הזמן באירוח אמיתי.</p>"
+        )
+    if topic_profile and EXPERT_INSIGHT_CLASS not in cleaned:
+        cleaned += _expert_insights_html(topic_profile, str((topic_profile or {}).get("target_keyword") or (topic_profile or {}).get("main_entity") or ""))
+    for marker_no in range(1, 5):
+        marker = f"<!-- IMAGE_{marker_no} -->"
+        if marker not in cleaned:
+            cleaned += "\n" + marker
+    pieces = [cleaned.strip(), *(section.strip() for section in recommendations if section.strip()), faq.strip(), cta.strip()]
+    return "\n".join(piece for piece in pieces if piece).strip()
+
+
 def _remove_generic_filler_sections(html: str) -> str:
     filler = tuple(_normalize_hebrew(phrase) for phrase in GENERIC_FILLER_PHRASES)
 
@@ -974,7 +1179,7 @@ def _limit_h2_sections(html: str, *, max_h2: int = 12, topic_profile: dict[str, 
     sections = [m.group(0) for m in matches]
     required_terms = [str(t) for t in (topic_profile or {}).get("required_terms", []) if str(t).strip()]
     required_sections = [str(t) for t in (topic_profile or {}).get("required_sections", []) if str(t).strip()]
-    preserve_markers = ["שאלות נפוצות", "article-cta", "🛒", "צ׳קליסט", "<table", "professional-tip", "common-mistake", "<!-- IMAGE_", "Glaze timing", "crisping"]
+    preserve_markers = ["שאלות נפוצות", "article-cta", "🛒", "<table", "<!-- IMAGE_", "זמן מריחת גלייז", "שלב הקריספיות"]
 
     def section_score(index: int, section: str) -> tuple[int, int]:
         raw = section or ""
@@ -994,11 +1199,12 @@ def _limit_h2_sections(html: str, *, max_h2: int = 12, topic_profile: dict[str, 
 
 
 def _enforce_single_cta(html: str) -> str:
-    matches = list(re.finditer(r"<div class='article-cta'>.*?</div>", html or "", flags=re.IGNORECASE | re.DOTALL))
+    matches = list(re.finditer(r"<div class=['\"]article-cta['\"]>.*?</div>", html or "", flags=re.IGNORECASE | re.DOTALL))
+    cleaned = re.sub(r"<hr>\s*<p><strong>CTA:</strong>.*?</p>", "", html or "", flags=re.IGNORECASE | re.DOTALL)
     if len(matches) <= 1:
-        return html
+        return cleaned
     last = matches[-1].group(0)
-    cleaned = re.sub(r"<div class='article-cta'>.*?</div>", "", html or "", flags=re.IGNORECASE | re.DOTALL)
+    cleaned = re.sub(r"<div class=['\"]article-cta['\"]>.*?</div>", "", cleaned, flags=re.IGNORECASE | re.DOTALL)
     return cleaned.rstrip() + "\n" + last
 
 
@@ -1023,7 +1229,7 @@ def _augment_faq_to_minimum(html: str, topic_profile: dict[str, object] | None =
 
 
 def _enforce_single_faq(html: str) -> str:
-    matches = list(re.finditer(r"<h2[^>]*>.*?שאלות נפוצות.*?</h2>", html or "", flags=re.IGNORECASE | re.DOTALL))
+    matches = list(re.finditer(r"<h2[^>]*>[^<]*שאלות נפוצות[^<]*</h2>", html or "", flags=re.IGNORECASE | re.DOTALL))
     if len(matches) <= 1:
         return html
     first_start = matches[0].start()
@@ -1034,7 +1240,7 @@ def _enforce_single_faq(html: str) -> str:
     first_block = (html or "")[first_start:second_start]
     first_block = re.sub(r"(<h3[^>]*>\s*❓.*?</h3>\s*<p[^>]*>.*?</p>)(?=.*\1)", "", first_block, flags=re.IGNORECASE | re.DOTALL)
     prefix = (html or "")[:first_start]
-    suffix = re.sub(r"<h2[^>]*>.*?שאלות נפוצות.*?</h2>.*?(?=<h2[^>]*>|<div class='article-cta'>|$)", "", (html or "")[second_start:], flags=re.IGNORECASE | re.DOTALL)
+    suffix = re.sub(r"<h2[^>]*>[^<]*שאלות נפוצות[^<]*</h2>.*?(?=<h2[^>]*>|<div class='article-cta'>|$)", "", (html or "")[second_start:], flags=re.IGNORECASE | re.DOTALL)
     return prefix + first_block + suffix
 
 
@@ -1043,7 +1249,7 @@ def _enforce_single_content_blocks(html: str, topic_profile: dict[str, object] |
     cleaned = _augment_faq_to_minimum(cleaned, topic_profile)
     cleaned = _enforce_single_faq(cleaned)
     cleaned = _enforce_single_cta(cleaned)
-    return cleaned
+    return _finalize_article_end_order(cleaned, topic_profile)
 
 
 def _html_validation_issues(html: str) -> list[str]:
@@ -1066,7 +1272,7 @@ def _html_validation_issues(html: str) -> list[str]:
         issues.append("html_unclosed_tags:" + ",".join(stack[-5:]))
     if len(re.findall(r"article-cta", html or "", flags=re.IGNORECASE)) != 1:
         issues.append("cta_structure_invalid")
-    if len(re.findall(r"<h2[^>]*>.*?שאלות נפוצות.*?</h2>", html or "", flags=re.IGNORECASE | re.DOTALL)) != 1:
+    if len(re.findall(r"<h2[^>]*>[^<]*שאלות נפוצות[^<]*</h2>", html or "", flags=re.IGNORECASE | re.DOTALL)) != 1:
         issues.append("faq_structure_invalid")
     if "<table" in (html or "").lower() and not re.search(r"<table[^>]*>.*?</table>", html or "", flags=re.IGNORECASE | re.DOTALL):
         issues.append("table_structure_invalid")
@@ -1086,7 +1292,7 @@ def _ensure_expert_insight_minimum(html: str, topic_profile: dict[str, object] |
     if count:
         needed_items = re.findall(rf"<div class='{EXPERT_INSIGHT_CLASS}'>.*?</div>", additions, flags=re.IGNORECASE | re.DOTALL)[: 3 - count]
         additions = "".join(needed_items)
-    faq_match = re.search(r"<h2[^>]*>.*?שאלות נפוצות.*?</h2>", html or "", flags=re.IGNORECASE | re.DOTALL)
+    faq_match = re.search(r"<h2[^>]*>[^<]*שאלות נפוצות[^<]*</h2>", html or "", flags=re.IGNORECASE | re.DOTALL)
     if faq_match:
         return html[:faq_match.start()] + additions + html[faq_match.start():]
     return (html or "") + additions
@@ -1105,9 +1311,6 @@ def _enforce_phase2_article_quality(body: str, topic_profile: dict[str, object] 
     before_limit = cleaned
     cleaned = _limit_h2_sections(cleaned, max_h2=11, topic_profile=topic_profile)
     for pattern in [
-        r"<div class='professional-tip'>.*?</div>",
-        r"<div class='common-mistake'>.*?</div>",
-        r"<ul class='article-checklist'>.*?</ul>",
         r"<table.*?</table>",
         r"<div class='article-cta'>.*?</div>",
     ]:
@@ -1120,15 +1323,15 @@ def _enforce_phase2_article_quality(body: str, topic_profile: dict[str, object] 
         if flavor_table:
             cleaned += "\n" + flavor_table.group(0)
     topic_type_for_preserve = str((topic_profile or {}).get("topic_type") or "")
-    if topic_type_for_preserve == "meat_low_slow_smoking" and "probe tenderness" not in cleaned and "Probe tenderness" not in cleaned:
-        cleaned += "<p class='topic-quality-terms'><strong>probe tenderness:</strong> בדיקת רכות עם פרוב חשובה יותר משעה קבועה.</p>"
+    if topic_type_for_preserve == "meat_low_slow_smoking" and "בדיקת רכות עם פרוב" not in cleaned:
+        cleaned += "<p class='topic-quality-terms'><strong>בדיקת רכות עם פרוב:</strong> בדיקת רכות עם פרוב חשובה יותר משעה קבועה.</p>"
     if "<h2>מוצרים רלוונטיים באתר</h2>" in original_body and "<h2>מוצרים רלוונטיים באתר</h2>" not in cleaned:
         cleaned += "<h2>מוצרים רלוונטיים באתר</h2>"
     if topic_type_for_preserve == "smoking_wood_guide" and "עוצמת טעם" not in cleaned:
         cleaned += "<table><thead><tr><th>עץ</th><th>עוצמת טעם</th><th>מתאים ל</th></tr></thead><tbody><tr><td>Apple</td><td>עדינה</td><td>עוף ודגים</td></tr><tr><td>Cherry</td><td>עדינה-בינונית</td><td>עוף ובריסקט עדין</td></tr><tr><td>Oak</td><td>בינונית</td><td>בריסקט</td></tr><tr><td>Hickory</td><td>חזקה</td><td>בקר וצלעות</td></tr></tbody></table>"
     missing_terms = [str(t) for t in (topic_profile or {}).get("required_terms", []) if str(t).strip() and str(t) not in cleaned]
     missing_sections = [str(t) for t in (topic_profile or {}).get("required_sections", []) if str(t).strip() and _normalize_hebrew(str(t)) not in _normalize_hebrew(_plain_text(cleaned))]
-    carry_over_terms = [term for term in ["Butcher Paper vs Foil", "Glaze timing", "crisping", "thin blue smoke", "Apple / Cherry / Oak / Hickory / Mesquite", "probe tenderness", "Probe tenderness"] if term in original_body and term not in cleaned]
+    carry_over_terms = [term for term in ["נייר קצבים מול נייר כסף", "זמן מריחת גלייז", "שלב הקריספיות", "עשן כחול דק", "Apple / Cherry / Oak / Hickory / Mesquite", "בדיקת רכות עם פרוב"] if term in original_body and term not in cleaned]
     required_mentions = list(dict.fromkeys(missing_terms + missing_sections + carry_over_terms))[:8]
     if required_mentions:
         cleaned += "<p class='topic-quality-terms'><strong>דגשים מקצועיים שלא מדלגים עליהם:</strong> " + ", ".join(required_mentions) + ".</p>"
@@ -1145,6 +1348,7 @@ def _enforce_phase2_article_quality(body: str, topic_profile: dict[str, object] 
         if marker not in cleaned:
             cleaned += "\n" + marker
     cleaned = _enforce_single_content_blocks(cleaned, topic_profile)
+    cleaned = _finalize_article_end_order(cleaned, topic_profile)
     return _dedupe_article_html(cleaned)
 
 
@@ -1566,6 +1770,11 @@ def _fallback_internal_links_for_topic(topic_profile: dict[str, object] | None =
             {"title": "נייר קצבים", "url": "https://compassgrill.co.il/categories/butcher-paper", "reason": "לעטיפה מאוזנת בשלב הסטול", "relevance_score": 80},
             {"title": "שבבי עץ וצ׳אנקים", "url": "https://compassgrill.co.il/categories/smoking-woods", "reason": "לבניית שכבת עשן נקייה", "relevance_score": 76},
         ],
+        "poultry_grill_recipe": [
+            {"title": "מדחום לבשר", "url": "https://compassgrill.co.il/categories/meat-thermometers", "reason": "לוודא 74°C בכנפיים בלי לייבש את העור", "relevance_score": 84},
+            {"title": "רשת צלייה וכלי גריל", "url": "https://compassgrill.co.il/categories/grill-accessories", "reason": "להפיכה נקייה ולשמירה על עור קריספי", "relevance_score": 78},
+            {"title": "רטבים ותבלינים לגריל", "url": "https://compassgrill.co.il/categories/bbq-sauces-rubs", "reason": "לגלייז ותיבול יבש שמוסיפים רק בזמן הנכון", "relevance_score": 74},
+        ],
         "equipment_buying_guide": [
             {"title": "גרילי גז", "url": "https://compassgrill.co.il/categories/gas-grills", "reason": "לבחירת גודל, מבערים וחומרי בנייה", "relevance_score": 82},
             {"title": "מטבחי חוץ", "url": "https://compassgrill.co.il/categories/outdoor-kitchens", "reason": "למי שמתכנן אזור אירוח מלא", "relevance_score": 74},
@@ -1691,7 +1900,7 @@ def _insert_expert_insights(html: str, profile: dict[str, object], keyword: str)
     if EXPERT_INSIGHT_CLASS in (html or ""):
         return html
     insights = _expert_insights_html(profile, keyword)
-    faq_match = re.search(r"<h2[^>]*>.*?שאלות נפוצות.*?</h2>", html or "", flags=re.IGNORECASE | re.DOTALL)
+    faq_match = re.search(r"<h2[^>]*>[^<]*שאלות נפוצות[^<]*</h2>", html or "", flags=re.IGNORECASE | re.DOTALL)
     if faq_match:
         return html[:faq_match.start()] + insights + html[faq_match.start():]
     return (html or "") + insights
@@ -2451,12 +2660,13 @@ def validate_complete_publishing_package(body: str, image_package: list[dict[str
     checks = {
         "article_generated": bool(body and _article_word_count(body) > 50),
         "diversity_score_passed": bool((diversity or {}).get("passed", True)),
-        "table_exists": "<table" in (body or "").lower(),
+        "article_structure_clean": bool(body and _article_word_count(body) > 50),
         "faq_exists": "שאלות נפוצות" in (body or "") or "FAQ" in (body or ""),
         "cta_exists": "article-cta" in (body or "") or "🛒" in (body or ""),
-        "checklist_exists": "article-checklist" in (body or "") or "צ׳קליסט" in (body or ""),
-        "tip_block_exists": "professional-tip" in (body or "") or "טיפ מקצועי" in (body or ""),
-        "warning_block_exists": "common-mistake" in (body or "") or "טעות נפוצה" in (body or ""),
+        "legacy_template_free": not _article_end_validation_flags(body).get("legacy_template_detected", False),
+        "single_faq_section": not _article_end_validation_flags(body).get("duplicate_faq_detected", False),
+        "single_cta_last": not _article_end_validation_flags(body).get("duplicate_cta_detected", False) and not _article_end_validation_flags(body).get("content_after_cta_detected", False),
+        "minimal_english_leakage": not _article_end_validation_flags(body).get("mixed_language_detected", False),
         "five_image_package_exists": len(image_package) == 5,
         "image_placement_guide_exists": len(placement_guide) >= 5,
         "image_markers_exist": all(f"<!-- IMAGE_{i} -->" in (body or "") for i in range(1,5)),
@@ -2792,6 +3002,32 @@ def _generate_image_alt_text(title: str, keyword: str, topic_profile: dict[str, 
     entity = str(topic_profile.get("main_entity") or keyword or title).strip()
     return f"{entity} בהכנה מעשית על גריל או מעשנה של קומפס גריל", "entity_fallback"
 
+def _english_leakage_tokens(body: str) -> list[str]:
+    text = re.sub(r"https?://\S+", " ", _plain_text(body or ""))
+    tokens = re.findall(r"\b[A-Za-z][A-Za-z-]{2,}\b", text)
+    return [token for token in tokens if token.lower() not in PROFESSIONAL_ENGLISH_ALLOWLIST]
+
+
+def _article_end_validation_flags(body: str) -> dict[str, bool]:
+    raw = body or ""
+    faq_sections = len(re.findall(r"<h2[^>]*>[^<]*שאלות נפוצות[^<]*</h2>", raw, flags=re.IGNORECASE | re.DOTALL))
+    faq_orphans = len(re.findall(r"<h3[^>]*>\s*❓", raw, flags=re.IGNORECASE))
+    cta_matches = list(re.finditer(r"<div class=['\"]article-cta['\"]>.*?</div>", raw, flags=re.IGNORECASE | re.DOTALL))
+    legacy_detected = any(re.search(pattern, raw, flags=re.IGNORECASE | re.DOTALL) for pattern in LEGACY_TEMPLATE_PATTERNS) or any(phrase in raw for phrase in LEGACY_HEADING_PHRASES)
+    issues, duplicates = _html_duplicate_issues(raw)
+    after_cta = raw[cta_matches[-1].end():].strip() if cta_matches else ""
+    after_cta_without_metadata = re.sub(r"<!--.*?-->", "", after_cta, flags=re.DOTALL).strip()
+    english_leakage = _english_leakage_tokens(raw)
+    return {
+        "legacy_template_detected": legacy_detected,
+        "duplicate_section_detected": bool(duplicates or any(issue in issues for issue in ["duplicate_h2_titles", "duplicate_list_blocks", "repeated_paragraphs"])),
+        "duplicate_faq_detected": faq_sections != 1 or faq_orphans < 5 or faq_orphans > 8 or "duplicate_faq_blocks" in issues,
+        "duplicate_cta_detected": len(cta_matches) != 1,
+        "mixed_language_detected": len(english_leakage) > 10,
+        "content_after_cta_detected": bool(after_cta_without_metadata),
+    }
+
+
 def _html_duplicate_issues(body: str) -> tuple[list[str], list[str]]:
     issues: list[str] = []
     duplicates: list[str] = []
@@ -2876,7 +3112,7 @@ def validate_final_article_quality(body: str, meta_title: str, seo_metadata: dic
             issues.append("irrelevant_selected_link:" + str(link.get("title") or link.get("url") or "unknown"))
     h2_count = len(re.findall(r"<h2[^>]*>", raw_body, flags=re.IGNORECASE))
     faq_count = len(re.findall(r"<h3[^>]*>\s*❓", raw_body, flags=re.IGNORECASE))
-    faq_section_count = len(re.findall(r"<h2[^>]*>.*?שאלות נפוצות.*?</h2>", raw_body, flags=re.IGNORECASE | re.DOTALL))
+    faq_section_count = len(re.findall(r"<h2[^>]*>[^<]*שאלות נפוצות[^<]*</h2>", raw_body, flags=re.IGNORECASE | re.DOTALL))
     cta_count = len(re.findall(r"article-cta", raw_body, flags=re.IGNORECASE))
     expert_insight_count = len(re.findall(rf"class=['\"][^'\"]*{EXPERT_INSIGHT_CLASS}", raw_body, flags=re.IGNORECASE))
     html_issues = _html_validation_issues(raw_body)
@@ -2889,13 +3125,19 @@ def validate_final_article_quality(body: str, meta_title: str, seo_metadata: dic
         issues.append(f"faq_question_count_invalid:{faq_count}")
     if cta_count != 1:
         issues.append(f"cta_count_invalid:{cta_count}")
+    production_flags = _article_end_validation_flags(raw_body)
+    for flag_name, detected in production_flags.items():
+        if detected:
+            issues.append(flag_name)
 
-    topic_relevance_score = max(0, 100 - 12 * len([phrase for phrase in GENERIC_FILLER_PHRASES if phrase in raw_body]) - 8 * len([i for i in issues if i.startswith("irrelevant_selected_link")]))
+    production_penalty = 12 * sum(1 for detected in production_flags.values() if detected)
+    topic_relevance_score = max(0, 100 - 12 * len([phrase for phrase in GENERIC_FILLER_PHRASES if phrase in raw_body]) - 8 * len([i for i in issues if i.startswith("irrelevant_selected_link")]) - production_penalty)
     readability_score = max(0, 100 - max(0, h2_count - 12) * 8 - max(0, final_word_count - 2200) // 20 - max(0, 1200 - final_word_count) // 25)
     duplicate_content_score = max(0, 100 - 20 * len(duplicate_sections_removed) - (20 if "duplicate_h2_titles" in issues else 0))
     seo_score = int(seo_metadata.get("seo_score", 85)) if isinstance(seo_metadata, dict) else 85
-    expertise_score = max(0, 70 + min(25, expert_insight_count * 7) + (5 if "expert-introduction" in raw_body else 0) - 12 * len([phrase for phrase in GENERIC_FILLER_PHRASES if phrase in raw_body]))
-    practical_value_score = max(0, 70 + (8 if "professional-tip" in raw_body else 0) + (8 if "common-mistake" in raw_body else 0) + (7 if "article-checklist" in raw_body else 0) + (7 if "<table" in raw_body.lower() else 0))
+    expertise_score = max(0, 70 + min(25, expert_insight_count * 7) + (5 if "expert-introduction" in raw_body else 0) - 12 * len([phrase for phrase in GENERIC_FILLER_PHRASES if phrase in raw_body]) - production_penalty)
+    recommendations_present = bool(re.search(r"<h2[^>]*>.*?(מוצרים|קטגוריות|ציוד מומלץ|שדרוג|ליישם את המדריך).*?</h2>", raw_body, flags=re.IGNORECASE | re.DOTALL))
+    practical_value_score = max(0, 75 + min(15, expert_insight_count * 3) + (8 if recommendations_present else 0) + (8 if "<table" in raw_body.lower() else 0) + (5 if "טעויות" in raw_body else 0) - production_penalty)
     commercial_intent_score = 94 if selected_links else 82
     technical_accuracy_score = max(0, 100 - 18 * len(html_issues) - (12 if "alt_not_entity_specific" in issues else 0))
     overall_quality_score = round(
@@ -2914,7 +3156,11 @@ def validate_final_article_quality(body: str, meta_title: str, seo_metadata: dic
         "no_repeated_explanations": "repeated_paragraphs" not in issues,
         "max_12_h2_sections": h2_count <= 12,
         "faq_valid": faq_section_count == 1 and 5 <= faq_count <= 8,
-        "cta_valid": cta_count == 1,
+        "cta_valid": cta_count == 1 and not production_flags["content_after_cta_detected"],
+        "legacy_template_free": not production_flags["legacy_template_detected"],
+        "single_end_order_valid": not production_flags["content_after_cta_detected"],
+        "mixed_language_low": not production_flags["mixed_language_detected"],
+        "duplicate_faq_free": not production_flags["duplicate_faq_detected"],
         "internal_links_found": bool(selected_links),
         "recommendations_relevant": bool(selected_links),
         "images_relevant": True,
@@ -2947,6 +3193,7 @@ def validate_final_article_quality(body: str, meta_title: str, seo_metadata: dic
         "technical_accuracy_score": technical_accuracy_score,
         "overall_quality_score": overall_quality_score,
         "html_validation_issues": html_issues,
+        **production_flags,
         "human_review_validation": human_review_validation,
         "depth_engine_used": topic_type if topic_type != "fallback_generic" else "fallback_generic",
         "topic_depth_sections_added": list(getattr(_depth_upgrade_html, "last_sections_added", [])),

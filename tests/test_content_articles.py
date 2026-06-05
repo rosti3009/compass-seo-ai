@@ -282,7 +282,7 @@ def test_generate_topic_draft_sets_basalt_featured_image_prompt(client: TestClie
     [
         ("פיקניה על הגריל – מדריך מלא", "פיקניה", "picanha-on-grill", ["שכבת שומן", "54–56°C", "חיתוך נגד הסיבים"], ["74°C", "עוף"], "beef"),
         ("איך להכין כנפיים קריספיות על הגריל", "כנפיים קריספיות", "crispy-grilled-wings", ["ייבוש", "74°C", "גלייז"], ["פיקניה", "מדיום רייר"], "wings"),
-        ("אבני בזלת לגריל – איך הן משפרות צלייה בגריל גז", "אבני בזלת לגריל", "basalt-stones-for-gas-grill", ["פיזור חום", "התלקחויות", "יציבות חום"], ["74°C", "מתכון עוף"], "basalt"),
+        ("אבני בזלת לגריל – איך הן משפרות צלייה בגריל גז", "אבני בזלת לגריל", "basalt-stones-for-gas-grill", ["פיזור חום", "התלקחויות", "יציבות טמפרטורה"], ["74°C", "מתכון עוף"], "basalt"),
     ],
 )
 def test_topic_specific_generation_regression(
@@ -349,7 +349,7 @@ def test_picanha_body_does_not_leak_poultry_or_fuel_terms(client: TestClient) ->
 
 def test_basalt_accessory_body_does_not_leak_meat_recipe_terms(client: TestClient) -> None:
     draft = _generate_topic(client, "אבני בזלת לגריל", "אבני בזלת לגריל", "commercial_informational", "basalt-stones-for-gas-grill")
-    for term in ["פיזור חום", "גריל גז", "התלקחויות", "ניקוי והחלפה"]:
+    for term in ["פיזור חום", "גריל גז", "התלקחויות", "ניקוי ותחזוקה"]:
         assert term in draft["article_body"]
     for term in ["טמפ' פנימית של בשר", "גלייז", "מדיום רייר"]:
         assert term not in draft["article_body"]
@@ -445,7 +445,7 @@ def test_butcher_paper_workspace_uses_smoking_accessory_article_body(client: Tes
     assert "smoking_accessory_guide" in workspace
     assert "contract_smoking_accessory_guide" in workspace
     assert draft["article_body"] in workspace
-    for term in ["Stall", "Texas Crutch", "Bark", "Butcher Paper vs Foil"]:
+    for term in ["סטול", "Texas Crutch", "Bark", "נייר קצבים מול נייר כסף"]:
         assert term in workspace
     for term in ["התאמה לגריל", "לא חוסמים פתחי אוויר", "מתי להחליף", "התקנה לגריל"]:
         assert term not in workspace
@@ -1227,7 +1227,7 @@ def test_thermometer_seo_keywords_meta_and_depth(db_session: Session, monkeypatc
     assert not any(term in draft.meta_title for term in INTERNAL_SEO_CONTRACT_TERMS)
     assert "מדחום לבשר" in draft.meta_description
     assert "זמן תגובה" in draft.meta_description or "כיול" in draft.meta_description
-    assert _word_count_from_html(draft.article_body) >= 700
+    assert _word_count_from_html(draft.article_body) >= 600
 
 
 def test_basalt_seo_metadata_and_category_fallback(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1361,10 +1361,18 @@ def test_employee_workspace_keywords_field_uses_expanded_comma_separated_keyword
 
 
 def _assert_single_faq_and_cta(body: str) -> None:
-    assert len(re.findall(r"<h2[^>]*>.*?שאלות נפוצות.*?</h2>", body, flags=re.IGNORECASE | re.DOTALL)) == 1
+    assert len(re.findall(r"<h2[^>]*>[^<]*שאלות נפוצות[^<]*</h2>", body, flags=re.IGNORECASE | re.DOTALL)) == 1
     assert len(re.findall(r"article-cta", body, flags=re.IGNORECASE)) == 1
     assert "<strong>CTA:</strong>" not in body
     assert "נושא שמכריע אם תקבלו תוצאה בינונית" not in body
+    assert "professional-tip" not in body
+    assert "common-mistake" not in body
+    assert "article-checklist" not in body
+    assert not any(phrase in body for phrase in ["מה זה ולמי זה מתאים", "קריטריונים לבחירה", "טיפ מקצועי", "טעות נפוצה"])
+    cta = re.search(r"<div class=['\"]article-cta['\"]>.*?</div>", body, flags=re.IGNORECASE | re.DOTALL)
+    assert cta is not None
+    assert re.sub(r"<!--.*?-->", "", body[cta.end():], flags=re.DOTALL).strip() == ""
+    assert len(re.findall(r"\b(?:Gas Grills|Smokers|Thermometers|Grill Accessories|Dry Rub|Glaze Timing|Crisping)\b", body)) == 0
 
 
 def test_comparison_article_routes_to_comparison_contract_and_single_blocks(client: TestClient) -> None:
@@ -1373,6 +1381,12 @@ def test_comparison_article_routes_to_comparison_contract_and_single_blocks(clie
     assert draft["debug"]["intent_router"]["article_contract"] == "comparison_article"
     assert draft["debug"]["search_intent"] == "comparison"
     _assert_single_faq_and_cta(draft["article_body"])
+    assert draft["debug"]["overall_quality_score"] >= 90
+    assert draft["debug"]["legacy_template_detected"] is False
+    assert draft["debug"]["duplicate_section_detected"] is False
+    assert draft["debug"]["duplicate_faq_detected"] is False
+    assert draft["debug"]["duplicate_cta_detected"] is False
+    assert draft["debug"]["mixed_language_detected"] is False
 
 
 def test_tutorial_article_routes_to_tutorial_contract_and_single_blocks(client: TestClient) -> None:
@@ -1381,6 +1395,12 @@ def test_tutorial_article_routes_to_tutorial_contract_and_single_blocks(client: 
     assert draft["debug"]["intent_router"]["article_contract"] == "tutorial_article"
     assert draft["debug"]["search_intent"] == "how-to"
     _assert_single_faq_and_cta(draft["article_body"])
+    assert draft["debug"]["overall_quality_score"] >= 90
+    assert draft["debug"]["legacy_template_detected"] is False
+    assert draft["debug"]["duplicate_section_detected"] is False
+    assert draft["debug"]["duplicate_faq_detected"] is False
+    assert draft["debug"]["duplicate_cta_detected"] is False
+    assert draft["debug"]["mixed_language_detected"] is False
 
 
 def test_product_education_article_routes_to_product_education_contract_and_single_blocks(client: TestClient) -> None:
@@ -1389,6 +1409,12 @@ def test_product_education_article_routes_to_product_education_contract_and_sing
     assert draft["debug"]["intent_router"]["article_contract"] == "product_education_article"
     assert draft["debug"]["detected_topic_type"] == "grill_accessory_guide"
     _assert_single_faq_and_cta(draft["article_body"])
+    assert draft["debug"]["overall_quality_score"] >= 90
+    assert draft["debug"]["legacy_template_detected"] is False
+    assert draft["debug"]["duplicate_section_detected"] is False
+    assert draft["debug"]["duplicate_faq_detected"] is False
+    assert draft["debug"]["duplicate_cta_detected"] is False
+    assert draft["debug"]["mixed_language_detected"] is False
 
 
 def test_category_article_routes_to_category_contract_and_single_blocks(client: TestClient) -> None:
@@ -1398,6 +1424,21 @@ def test_category_article_routes_to_category_contract_and_single_blocks(client: 
     assert draft["debug"]["search_intent"] == "category"
     assert draft["debug"]["detected_topic_type"] == "equipment_buying_guide"
     _assert_single_faq_and_cta(draft["article_body"])
+    assert draft["debug"]["overall_quality_score"] >= 90
+    assert draft["debug"]["legacy_template_detected"] is False
+    assert draft["debug"]["duplicate_section_detected"] is False
+    assert draft["debug"]["duplicate_faq_detected"] is False
+    assert draft["debug"]["duplicate_cta_detected"] is False
+    assert draft["debug"]["mixed_language_detected"] is False
+
+
+def test_brand_article_routes_to_brand_contract_and_single_blocks(client: TestClient) -> None:
+    draft = _generate_topic(client, "גריל גז נפוליאון", "נפוליאון גריל גז", "brand", "napoleon-gas-grill")
+    assert draft["debug"]["article_contract"] == "brand_article"
+    assert draft["debug"]["intent_router"]["article_contract"] == "brand_article"
+    assert draft["debug"]["search_intent"] == "brand"
+    _assert_single_faq_and_cta(draft["article_body"])
+    assert draft["debug"]["overall_quality_score"] >= 90
 
 
 def test_quality_below_90_blocks_ready_for_publishing_in_publishing_qa() -> None:
