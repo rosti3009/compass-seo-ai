@@ -1051,7 +1051,8 @@ def test_basalt_topic_matches_products_and_includes_links(client: TestClient, db
     draft = client.get(f"/content/articles/{payload['draft_id']}").json()["draft"]
     assert draft["internal_links"]
     assert draft["suggested_related_products"]
-    assert "<h2>מוצרים רלוונטיים באתר</h2>" in draft["article_body"]
+    assert "לתחזוקת אבני בזלת ושדרוג פיזור החום" in draft["article_body"]
+    assert "<h2>מוצרים רלוונטיים באתר</h2>" not in draft["article_body"]
 
 
 def test_basalt_synonyms_match_lava_terms(client: TestClient, db_session: Session) -> None:
