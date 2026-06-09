@@ -251,6 +251,46 @@ def _mock_link(title: str, url_slug: str, role: str, score: float = 86.0, page_t
     }
 
 
+def test_recommendation_block_renders_only_public_product_fields() -> None:
+    links = [
+        {
+            "title": "בריסקט מס' 3 אנגוס פידלוט",
+            "url": "https://compassgrill.co.il/products/brisket",
+            "type": "product",
+            "page_type": "product",
+            "link_role": "exact_entity",
+            "relevance_score": 96.0,
+            "entity_match_score": 38.0,
+            "keyword_match_score": 20.0,
+            "category_match_score": 8.0,
+            "page_type_priority_score": 34.0,
+            "reason": "exact_entity; התאמת ביטויי חיפוש: בריסקט; עדיפות סוג עמוד: product",
+        },
+        {
+            "title": "גליונות נייר קצבים חום לעישון בשר",
+            "url": "https://compassgrill.co.il/products/butcher-paper",
+            "type": "product",
+            "page_type": "product",
+            "link_role": "complementary",
+            "relevance_score": 88.0,
+            "reason": "complementary; התאמת קטגוריה/הקשר מוצר",
+        },
+    ]
+    profile = service._classify_topic("בריסקט", "בריסקט", "how-to")
+
+    html = service._links_section(links, profile)
+
+    assert "בריסקט מס&#x27; 3 אנגוס פידלוט" in html
+    assert "https://compassgrill.co.il/products/brisket" in html
+    assert "גליונות נייר קצבים חום לעישון בשר" in html
+    assert "מסייע לעבור את שלב הסטול" in html
+    for forbidden in ["exact_entity", "complementary", "התאמת ביטויי חיפוש", "עדיפות סוג עמוד", "התאמת קטגוריה/הקשר מוצר"]:
+        assert forbidden not in html
+    descriptions = re.findall(r"<span>(.*?)</span>", html)
+    assert descriptions
+    assert all(15 <= len(description.split()) <= 30 for description in descriptions)
+
+
 def test_brisket_final_quality_contextual_links_and_alt(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     links = [
         _mock_link("בריסקט פרימיום לעישון", "products/brisket", "exact_entity"),

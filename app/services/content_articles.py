@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from html import escape
 import random
 import re
 import time
@@ -1116,7 +1117,9 @@ def _finalize_article_end_order(html: str, topic_profile: dict[str, object] | No
     required_mentions = [
         str(term)
         for term in [*(topic_profile or {}).get("required_terms", []), *(topic_profile or {}).get("required_sections", []), *extra_normalized_terms]
-        if str(term).strip() and _normalize_hebrew(str(term)) not in _normalize_hebrew(_plain_text(cleaned))
+        if str(term).strip()
+        and _normalize_hebrew(str(term)) != _normalize_hebrew("שאלות נפוצות")
+        and _normalize_hebrew(str(term)) not in _normalize_hebrew(_plain_text(cleaned))
     ]
     if required_mentions:
         cleaned += "<p class='production-required-note'><strong>דגשים מקצועיים חשובים:</strong> " + ", ".join(list(dict.fromkeys(required_mentions))[:20]) + ".</p>"
@@ -1179,7 +1182,7 @@ def _limit_h2_sections(html: str, *, max_h2: int = 12, topic_profile: dict[str, 
     sections = [m.group(0) for m in matches]
     required_terms = [str(t) for t in (topic_profile or {}).get("required_terms", []) if str(t).strip()]
     required_sections = [str(t) for t in (topic_profile or {}).get("required_sections", []) if str(t).strip()]
-    preserve_markers = ["שאלות נפוצות", "article-cta", "🛒", "<table", "<!-- IMAGE_", "זמן מריחת גלייז", "שלב הקריספיות"]
+    preserve_markers = ["שאלות נפוצות", "article-cta", "🛒", "<table", "<!-- IMAGE_", "מוצרים", "קטגוריות", "ציוד מומלץ", "שדרוג", "ליישם את המדריך", "זמן מריחת גלייז", "שלב הקריספיות"]
 
     def section_score(index: int, section: str) -> tuple[int, int]:
         raw = section or ""
@@ -1803,12 +1806,59 @@ def _contextual_recommendation_title(topic_profile: dict[str, object] | None = N
     return "מוצרים וקטגוריות שיעזרו ליישם את המדריך"
 
 
+PUBLIC_RECOMMENDATION_FORBIDDEN_TERMS = {
+    "exact_entity",
+    "complementary",
+    "matching score",
+    "category score",
+    "entity score",
+    "keyword score",
+    "page type priority",
+    "recommendation diagnostics",
+    "התאמת ביטויי חיפוש",
+    "עדיפות סוג עמוד",
+    "התאמת קטגוריה/הקשר מוצר",
+}
+
+
+def _recommendation_public_description(link: dict[str, str | float], topic_profile: dict[str, object] | None = None) -> str:
+    title = _clean_anchor_text(link)
+    text = _normalize_hebrew(f"{title} {link.get('url', '')}")
+    topic_type = str((topic_profile or {}).get("topic_type") or "")
+    entity_key = str((topic_profile or {}).get("entity_key") or "")
+
+    if "נייר" in text or "קצבים" in text or "butcher" in text:
+        return "מסייע לעבור את שלב הסטול בעישון ארוך, תוך שמירה על קליפת עישון איכותית ועסיסיות טובה יותר בנתח."
+    if "בריסקט" in text or "brisket" in text:
+        return "נתח איכותי שמתאים לעישון ארוך, ומעניק בסיס מצוין לאיזון בין שומן, עסיסיות וטעם מעושן עמוק."
+    if "מדחום" in text or "thermometer" in text:
+        return "עוזר לבדוק טמפרטורה פנימית בזמן צלייה או עישון, כדי להוציא את הבשר בזמן הנכון ולמנוע ייבוש."
+    if "שבבי" in text or "צ׳אנקים" in text or "צאנקים" in text or "wood" in text or "chips" in text or "chunks" in text:
+        return "מוסיף שכבת עשן נקייה ומבוקרת, שימושי במיוחד כשמתאימים את עוצמת הטעם לסוג הבשר ולמשך הבישול."
+    if "מעשנה" in text or "smoker" in text:
+        return "מתאימה לבישול נמוך ואיטי לאורך שעות, ועוזרת לשמור על חום יציב, עשן נקי ותוצאה עסיסית."
+    if "בזלת" in text or "lava" in text or entity_key == "basalt_stones":
+        return "משפרות פיזור חום בגריל גז מתאים, מפחיתות נקודות חמות ועוזרות לקבל צלייה יציבה יותר לאורך הארוחה."
+    if "רוטב" in text or "גלייז" in text or "bbq" in text:
+        return "מוסיף שכבת טעם וברק בשלבי הסיום, שימושי במיוחד כשמורחים במידה כדי להימנע מסוכר שרוף."
+    if "גריל" in text or "accessor" in text or topic_type == "grill_accessory_guide":
+        return "עוזר לעבוד בצורה מסודרת ובטוחה יותר סביב הגריל, במיוחד כשצריך התאמה טובה לשיטת הצלייה ולציוד הקיים."
+    return "מוצר רלוונטי ליישום ההמלצות במדריך, שעוזר לפתור צורך מעשי ולבחור ציוד מתאים בזמן הקנייה או ההכנה."
+
+
+def _public_recommendation_item_html(link: dict[str, str | float], topic_profile: dict[str, object] | None = None) -> str:
+    title = escape(_clean_anchor_text(link))
+    url = escape(str(link.get("url") or "").strip(), quote=True)
+    description = escape(_recommendation_public_description(link, topic_profile))
+    return f"<li><strong>{title}</strong><br><a href='{url}'>{url}</a><br><span>{description}</span></li>"
+
+
 def _links_section(related: list[dict[str, str | float]], topic_profile: dict[str, object] | None = None) -> str:
     candidates = [p for p in related if p.get("url") and p.get("title") and float(p.get("relevance_score") or 0) >= 40]
     if len(candidates) < 2:
         candidates = (candidates + _fallback_internal_links_for_topic(topic_profile))[:5]
     links_html = "".join(
-        f"<li><strong>{p['title']}</strong> – <a href='{p['url']}'>{p['url']}</a><br><span>{p.get('reason') or 'רלוונטי לנושא המאמר'}</span></li>"
+        _public_recommendation_item_html(p, topic_profile)
         for p in candidates[:5]
         if p.get("url") and p.get("title")
     )
@@ -3082,6 +3132,9 @@ def validate_final_article_quality(body: str, meta_title: str, seo_metadata: dic
         issues.append("wrong_generic_filler_sections:" + ",".join(leaked))
     if any(phrase in raw_body for phrase in ["נמשיך לעדכן כאן", "למי שרוצה להמשיך מהתיאוריה לבחירה באתר"]):
         issues.append("placeholder_or_generic_system_wording")
+    public_recommendation_leaks = [term for term in PUBLIC_RECOMMENDATION_FORBIDDEN_TERMS if term and term in raw_body]
+    if public_recommendation_leaks:
+        issues.append("recommendation_metadata_visible:" + ",".join(sorted(public_recommendation_leaks)))
     keywords = seo_metadata.get("seo_keywords") if isinstance(seo_metadata, dict) else []
     if not isinstance(keywords, list) or len(keywords) < 8:
         issues.append("keywords_count_below_8")
