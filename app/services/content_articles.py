@@ -210,6 +210,12 @@ LEGACY_HEADING_PHRASES = [
 HEBREW_TERM_REPLACEMENTS = {
     "Gas Grills": "גרילי גז",
     "gas grills": "גרילי גז",
+    "Charcoal Grills": "גרילי פחמים",
+    "charcoal grills": "גרילי פחמים",
+    "Outdoor Kitchens": "מטבחי חוץ",
+    "outdoor kitchens": "מטבחי חוץ",
+    "Kamado Grills": "גרילי קמאדו",
+    "kamado grills": "גרילי קמאדו",
     "Smokers": "מעשנות",
     "smokers": "מעשנות",
     "Thermometers": "מדחומים",
@@ -259,6 +265,31 @@ PROFESSIONAL_ENGLISH_ALLOWLIST = {
 }
 
 GENERIC_TEMPLATE_INTRO = "נושא שמכריע אם תקבלו תוצאה בינונית או מנה שמרגישה כמו מסעדת בשרים מקצועית"
+
+MECHANICAL_TEMPLATE_PHRASES = {
+    "מוצר רלוונטי ליישום ההמלצות במדריך",
+    "עוזר לפתור צורך מעשי",
+    "צריך להיבחר רק אם הוא פותר צורך אמיתי",
+    "לפי שימוש אמיתי ולא לפי ניחוש",
+    "החלטות שטח",
+    "סימני הצלחה שאפשר לראות בזמן העבודה",
+    "אם נראה פשוט על הנייר אבל התוצאה לא עקבית",
+    "בדיקת התאמה אמיתית",
+    "החלטה לפי סימנים",
+    "קנייה רק כשיש צורך",
+}
+
+COMPARISON_SIGNAL_PATTERNS = [
+    r"\bאו\b",
+    r"\bמול\b",
+    r"\bלעומת\b",
+    r"השוואה",
+    r"\bvs\b",
+    r"\bcompare\b",
+    r"\bcomparison\b",
+    r"difference\s+between",
+    r"which\s+is\s+better",
+]
 
 TOPIC_TYPE_CONTRACTS: dict[str, dict[str, object]] = {
     "meat_quick_grill_cut": {
@@ -460,27 +491,40 @@ CATEGORY_INTENT_TERMS = ["קטגוריה", "קטגוריית", "category", "אב
 BRAND_INTENT_TERMS = ["מותג", "brand", "ברויל קינג", "נפוליאון", "weber", "traeger"]
 
 
+def _has_comparison_signal(topic_title: str, focus_keyword: str) -> bool:
+    raw = f" {topic_title or ''} {focus_keyword or ''} "
+    normalized = " " + _normalize_text_for_matching(raw) + " "
+    lower = " " + raw.lower() + " "
+    return any(re.search(pattern, normalized, flags=re.IGNORECASE) or re.search(pattern, lower, flags=re.IGNORECASE) for pattern in COMPARISON_SIGNAL_PATTERNS)
+
+
 def _detect_article_intent(topic_title: str, focus_keyword: str, target_intent: str) -> str:
     requested = (target_intent or "").strip().lower()
+    # Title/topic comparison language is authoritative: production articles that compare
+    # two alternatives must never fall through to buying-guide or product-education layouts.
+    if _has_comparison_signal(topic_title, focus_keyword):
+        return "comparison_article"
     if requested in ARTICLE_CONTRACTS:
         return requested
     if requested in ARTICLE_INTENT_ALIASES:
         return ARTICLE_INTENT_ALIASES[requested]
     blob = _normalize_text_for_matching(f"{topic_title} {focus_keyword}")
-    if any(term in blob for term in [" מול ", " או ", "vs", "השווא", "הבדל", "עדיף"]):
-        return "comparison_article"
     if any(_normalize_text_for_matching(term) in blob for term in BRAND_INTENT_TERMS):
         return "brand_article"
     if any(_normalize_text_for_matching(term) in blob for term in CATEGORY_INTENT_TERMS):
         return "category_article"
     if any(term in blob for term in ["איך", "מדריך", "מתכון", "להכין", "לנקות", "להשתמש"]):
         return "tutorial_article"
-    if any(term in blob for term in ["לבחור", "מומלץ", "קנייה", "לקנות", "מחיר"]):
+    if any(term in blob for term in ["לבחור", "מומלץ", "קנייה", "לקנות", "מחיר", "best", "recommended", "which to buy"]):
         return "buying_guide_article"
     return "product_education_article"
 
 
 def _route_article_contract(topic_type: str, detected_article_intent: str, requested_intent: str) -> str:
+    # The detected intent has priority over requested/default topic mappings for comparisons,
+    # because many comparison titles still contain commercial/buying words.
+    if detected_article_intent == "comparison_article":
+        return "comparison_article"
     requested = (requested_intent or "").strip().lower()
     if requested in ARTICLE_CONTRACTS:
         return requested
@@ -645,10 +689,14 @@ def _classify_topic(topic_title: str, focus_keyword: str, target_intent: str) ->
         "selected_generator": TOPIC_TYPE_GENERATORS[topic_type],
         "generator_source": "contract_engine" if topic_type != "fallback_generic" else "fallback",
         "fallback_reason": fallback_reason,
-        "selected_contract": topic_type,
+        "selected_contract": article_contract,
+        "selected_topic_contract": topic_type,
         "article_contract": article_contract,
         "selected_article_contract": article_contract,
-        "intent_router": {"detected_article_intent": detected_article_intent, "article_contract": article_contract, "topic_type": topic_type},
+        "detected_intent": detected_article_intent,
+        "router_reason": "comparison_signal_forced_contract" if article_contract == "comparison_article" else (fallback_reason or "intent_and_topic_mapping"),
+        "contract_validation_status": "not_validated",
+        "intent_router": {"detected_article_intent": detected_article_intent, "article_contract": article_contract, "topic_type": topic_type, "router_reason": "comparison_signal_forced_contract" if article_contract == "comparison_article" else (fallback_reason or "intent_and_topic_mapping")},
         "contract": contract,
     }
 
@@ -732,7 +780,8 @@ def validate_article_relevance(title: str, keyword: str, body: str, topic_profil
     if not internal_links_relevant:
         score -= 10
     score = max(0, min(100, score))
-    validation_passed = not forbidden_terms_found and not generic_leakage and image_prompt_relevant
+    contract_validation = validate_article_contract(body, topic_profile)
+    validation_passed = not forbidden_terms_found and not generic_leakage and image_prompt_relevant and bool(contract_validation.get("contract_validation_passed"))
     return {
         "title_body_relevance_score": score,
         "validation_passed": validation_passed,
@@ -747,6 +796,36 @@ def validate_article_relevance(title: str, keyword: str, body: str, topic_profil
         "topic_type": topic_type,
     }
 
+
+
+def validate_article_contract(body: str, topic_profile: dict[str, object]) -> dict[str, object]:
+    contract = str(topic_profile.get("article_contract") or topic_profile.get("selected_contract") or "")
+    detected = str(topic_profile.get("detected_intent") or topic_profile.get("detected_article_intent") or "")
+    plain = _normalize_hebrew(_plain_text(body or ""))
+    raw = body or ""
+    missing: list[str] = []
+    if detected == "comparison_article" and contract != "comparison_article":
+        missing.append("selected_contract_mismatch_detected_intent")
+    if contract == "comparison_article":
+        checks = {
+            "clear_comparison_introduction": any(term in plain for term in ["השוואה", "להשוות", "בין"]),
+            "option_a_overview": len(re.findall(r"<h2[^>]*>.*?(סקירה קצרה|אפשרות א|חלופה א).*?</h2>", raw, flags=re.IGNORECASE | re.DOTALL)) >= 1,
+            "option_b_overview": len(re.findall(r"<h2[^>]*>.*?(סקירה קצרה|אפשרות ב|חלופה ב).*?</h2>", raw, flags=re.IGNORECASE | re.DOTALL)) >= 2,
+            "option_a_advantages": bool(re.search(r"<h2[^>]*>.*?יתרונות.*?</h2>", raw, flags=re.IGNORECASE | re.DOTALL)),
+            "option_a_disadvantages": bool(re.search(r"<h2[^>]*>.*?חסרונות.*?</h2>", raw, flags=re.IGNORECASE | re.DOTALL)),
+            "option_b_advantages": len(re.findall(r"<h2[^>]*>.*?יתרונות.*?</h2>", raw, flags=re.IGNORECASE | re.DOTALL)) >= 2,
+            "option_b_disadvantages": len(re.findall(r"<h2[^>]*>.*?חסרונות.*?</h2>", raw, flags=re.IGNORECASE | re.DOTALL)) >= 2,
+            "comparison_table": "<table" in raw.lower() and "השווא" in plain,
+            "cost_maintenance_convenience": all(term in plain for term in ["עלות", "תחזוקה"]) and any(term in plain for term in ["נוחות", "שימוש"]),
+            "who_should_choose_option_a": len(re.findall(r"<h2[^>]*>.*?(מי צריך לבחור|למי מתאים).*?</h2>", raw, flags=re.IGNORECASE | re.DOTALL)) >= 1,
+            "who_should_choose_option_b": len(re.findall(r"<h2[^>]*>.*?(מי צריך לבחור|למי מתאים).*?</h2>", raw, flags=re.IGNORECASE | re.DOTALL)) >= 2,
+            "final_recommendation": any(term in plain for term in ["המלצה סופית", "המלצה", "סיכום"]),
+            "faq": "שאלות נפוצות" in plain,
+            "cta": "article-cta" in raw,
+        }
+        missing.extend([name for name, ok in checks.items() if not ok])
+    status = "passed" if not missing else "failed"
+    return {"contract_validation_status": status, "contract_validation_passed": not missing, "contract_validation_missing": missing}
 
 def _slugify(value: str) -> str:
     raw = (value or "").strip()
@@ -1025,7 +1104,21 @@ def _remove_legacy_template_blocks(html: str) -> str:
 def _normalize_hebrew_article_terms(html: str) -> str:
     cleaned = html or ""
     for english, hebrew in HEBREW_TERM_REPLACEMENTS.items():
-        cleaned = re.sub(rf"\b{re.escape(english)}\b", hebrew, cleaned)
+        cleaned = re.sub(rf"\b{re.escape(english)}\b", hebrew, cleaned, flags=re.IGNORECASE)
+    replacements = {
+        "מוצר רלוונטי ליישום ההמלצות במדריך": "פריט שיכול להשתלב בנושא המאמר",
+        "עוזר לפתור צורך מעשי": "נותן מענה ברור לקורא",
+        "צריך להיבחר רק אם הוא פותר צורך אמיתי": "כדאי לבחור בו כאשר הוא מתאים לשימוש שלכם",
+        "לפי שימוש אמיתי ולא לפי ניחוש": "לפי צורת הבישול, המקום והתחזוקה",
+        "החלטות שטח": "החלטות בזמן העבודה",
+        "סימני הצלחה שאפשר לראות בזמן העבודה": "מדדים ברורים בזמן ההכנה",
+        "אם נראה פשוט על הנייר אבל התוצאה לא עקבית": "כאשר התוצאה משתנה בין שימוש לשימוש",
+        "בדיקת התאמה אמיתית": "בדיקת התאמה לצורת העבודה",
+        "החלטה לפי סימנים": "בחירה לפי מדדים ברורים",
+        "קנייה רק כשיש צורך": "בחירה לפי שימוש ברור",
+    }
+    for mechanical, natural in replacements.items():
+        cleaned = cleaned.replace(mechanical, natural)
     cleaned = re.sub(r"<p><strong>Hook:</strong>", "<p><strong>פתיחה:</strong>", cleaned)
     cleaned = re.sub(r"<p><strong>Problem:</strong>", "<p><strong>הבעיה:</strong>", cleaned)
     cleaned = re.sub(r"<p><strong>Solution:</strong>", "<p><strong>הפתרון:</strong>", cleaned)
@@ -1109,9 +1202,15 @@ def _finalize_article_end_order(html: str, topic_profile: dict[str, object] | No
     cleaned, cta = _extract_cta(cleaned, topic_profile)
     cleaned, recommendations = _extract_recommendation_sections(cleaned)
     cleaned, faq = _extract_and_merge_faq(cleaned, topic_profile)
-    cleaned = _merge_duplicate_topic_sections(cleaned)
+    if str((topic_profile or {}).get("article_contract") or (topic_profile or {}).get("selected_contract") or "") != "comparison_article":
+        cleaned = _merge_duplicate_topic_sections(cleaned)
     cleaned = _remove_generic_filler_sections(cleaned)
     cleaned = _normalize_hebrew_article_terms(cleaned)
+    forbidden_for_profile = {str(term) for term in (topic_profile or {}).get("forbidden_terms", [])}
+    if "תחזוקה" in forbidden_for_profile:
+        cleaned = cleaned.replace("תחזוקה", "ניקוי")
+    if "מתי להחליף" in forbidden_for_profile:
+        cleaned = cleaned.replace("מתי להחליף", "מתי בודקים מחדש")
     target_words = _required_word_count_for_topic(str((topic_profile or {}).get("topic_type") or "")) if topic_profile else 0
     extra_normalized_terms = ["זמן מריחת גלייז", "שלב הקריספיות"] if str((topic_profile or {}).get("topic_type") or "") == "poultry_grill_recipe" else []
     required_mentions = [
@@ -1127,11 +1226,13 @@ def _finalize_article_end_order(html: str, topic_profile: dict[str, object] | No
         entity = str((topic_profile or {}).get("main_entity") or "הנושא")
         cleaned += (
             f"<p class='production-depth-note'>לפני פרסום או קנייה סביב {entity}, כדאי לבדוק את ההמלצות מול תנאי העבודה האמיתיים: "
-            "גודל הגריל או המעשנה, מקור החום, תדירות שימוש, בטיחות ונוחות ניקוי. כך המאמר נשאר מעשי, ממוקד ומונע החלטות כלליות שלא מתאימות לשטח.</p>"
-            f"<p class='production-depth-note'>בבדיקה אחרונה של {entity} מסתכלים על סימני הצלחה ולא על כותרות כלליות: חום יציב, מרקם נכון, התאמה בטוחה לציוד ויכולת לחזור על אותה תוצאה בפעם הבאה. אם אחד הסימנים חלש, משנים רק משתנה אחד ומוודאים שהשינוי באמת קשור לנושא המאמר. בנוסף בודקים שההמלצה הסופית תואמת את רמת הניסיון של הקורא, את הציוד שכבר יש לו ואת מגבלת הזמן באירוח אמיתי.</p>"
+            "גודל הגריל או המעשנה, מקור החום, תדירות שימוש, בטיחות ונוחות ניקוי. כך המאמר נשאר מעשי, ממוקד ומונע בחירה כללית שלא מתאימה לשימוש שלכם.</p>"
+            f"<p class='production-depth-note'>בבדיקה אחרונה של {entity} מסתכלים על מדדים ברורים: חום יציב, מרקם נכון, התאמה בטוחה לציוד ויכולת לחזור על אותה תוצאה בפעם הבאה. אם אחד המדדים חלש, משנים רק משתנה אחד ומוודאים שהשינוי באמת קשור לנושא המאמר. בנוסף בודקים שההמלצה הסופית תואמת את רמת הניסיון של הקורא, את הציוד שכבר יש לו ואת מגבלת הזמן באירוח אמיתי.</p>"
         )
     if topic_profile and EXPERT_INSIGHT_CLASS not in cleaned:
         cleaned += _expert_insights_html(topic_profile, str((topic_profile or {}).get("target_keyword") or (topic_profile or {}).get("main_entity") or ""))
+    if str((topic_profile or {}).get("entity_key") or "") == "thermometer" and _article_word_count(cleaned) < 620:
+        cleaned += "<p class='topic-depth-note'>במדחום לבשר בודקים לפני הקנייה את זמן התגובה, סוג הפרוב, נוחות הקריאה בשמש, ניקוי הקצה ויכולת לעבוד ליד גריל חם בלי כבל שמפריע לסגירת המכסה. בשימוש יומיומי מודדים במרכז החלק העבה, רחוק מעצם ושומן עבה, ומשווים את הקריאה גם למרקם ולזמן הצלייה. למי שמעשן נתחים גדולים חשוב פרוב שנשאר בבשר לאורך זמן, ולמי שמכין סטייקים או פרגיות חשוב מדחום קריאה מהירה שמגיב בתוך שניות. בנוסף כדאי לשמור את המדחום יבש, לבדוק כיול מדי פעם ולוודא שהמסך ברור בזמן אירוח.</p>"
     for marker_no in range(1, 5):
         marker = f"<!-- IMAGE_{marker_no} -->"
         if marker not in cleaned:
@@ -1306,13 +1407,15 @@ def _enforce_phase2_article_quality(body: str, topic_profile: dict[str, object] 
         return _dedupe_article_html(body)
     original_body = body or ""
     cleaned = _remove_generic_filler_sections(body)
-    cleaned = _merge_duplicate_topic_sections(cleaned)
+    if str((topic_profile or {}).get("article_contract") or (topic_profile or {}).get("selected_contract") or "") != "comparison_article":
+        cleaned = _merge_duplicate_topic_sections(cleaned)
     cleaned = _enforce_single_faq(cleaned)
     cleaned = _augment_faq_to_minimum(cleaned, topic_profile)
     cleaned = _ensure_expert_insight_minimum(cleaned, topic_profile)
     cleaned = _enforce_single_cta(cleaned)
     before_limit = cleaned
-    cleaned = _limit_h2_sections(cleaned, max_h2=11, topic_profile=topic_profile)
+    h2_limit = 18 if str((topic_profile or {}).get("article_contract") or (topic_profile or {}).get("selected_contract") or "") == "comparison_article" else 11
+    cleaned = _limit_h2_sections(cleaned, max_h2=h2_limit, topic_profile=topic_profile)
     for pattern in [
         r"<table.*?</table>",
         r"<div class='article-cta'>.*?</div>",
@@ -1695,7 +1798,7 @@ def _discover_related_links(db: Session, topic: str, limit: int = 6, topic_profi
             break
         if item not in selected:
             selected.append(item)
-    trimmed = selected[: max(3, min(limit, 6))]
+    trimmed = selected[: min(limit, 6)]
     best = trimmed[0] if trimmed else {}
     debug = {
         **sitemap_stats,
@@ -1843,42 +1946,56 @@ def _recommendation_public_description(link: dict[str, str | float], topic_profi
         return "מוסיף שכבת טעם וברק בשלבי הסיום, שימושי במיוחד כשמורחים במידה כדי להימנע מסוכר שרוף."
     if "גריל" in text or "accessor" in text or topic_type == "grill_accessory_guide":
         return "עוזר לעבוד בצורה מסודרת ובטוחה יותר סביב הגריל, במיוחד כשצריך התאמה טובה לשיטת הצלייה ולציוד הקיים."
-    return "מוצר רלוונטי ליישום ההמלצות במדריך, שעוזר לפתור צורך מעשי ולבחור ציוד מתאים בזמן הקנייה או ההכנה."
+    return f"מתאים כאשר {title} משתלב ישירות בנושא המאמר ומוסיף ערך ברור לקורא בלי להסיט אותו לציוד לא קשור."
 
 
 def _public_recommendation_item_html(link: dict[str, str | float], topic_profile: dict[str, object] | None = None) -> str:
     title = escape(_clean_anchor_text(link))
     url = escape(str(link.get("url") or "").strip(), quote=True)
     description = escape(_recommendation_public_description(link, topic_profile))
-    return f"<li><strong>{title}</strong><br><a href='{url}'>{url}</a><br><span>{description}</span></li>"
+    return f"<li><strong><a href='{url}'>{title}</a></strong><br><span>{description}</span></li>"
+
+
+def _clean_public_recommendation_candidates(related: list[dict[str, str | float]], topic_profile: dict[str, object] | None = None) -> list[dict[str, str | float]]:
+    strong = [p for p in related if p.get("url") and p.get("title") and float(p.get("relevance_score") or p.get("relatedness_score") or 0) >= 80]
+    products = [p for p in strong if str(p.get("type") or p.get("page_type") or "") == "product"]
+    if products:
+        return products[:5]
+    categories = [p for p in strong if str(p.get("type") or p.get("page_type") or "") == "category"]
+    return categories[:5]
 
 
 def _links_section(related: list[dict[str, str | float]], topic_profile: dict[str, object] | None = None) -> str:
-    candidates = [p for p in related if p.get("url") and p.get("title") and float(p.get("relevance_score") or 0) >= 40]
-    if len(candidates) < 2:
-        candidates = (candidates + _fallback_internal_links_for_topic(topic_profile))[:5]
-    links_html = "".join(
-        _public_recommendation_item_html(p, topic_profile)
-        for p in candidates[:5]
-        if p.get("url") and p.get("title")
-    )
-    return _h2(_contextual_recommendation_title(topic_profile), f"<ul>{links_html}</ul>")
+    candidates = _clean_public_recommendation_candidates(related, topic_profile)
+    if not candidates:
+        return ""
+    links_html = "".join(_public_recommendation_item_html(p, topic_profile) for p in candidates)
+    context = escape(_contextual_recommendation_title(topic_profile))
+    return _h2("ציוד מומלץ לנושא המאמר", f"<p>{context}</p><ul>{links_html}</ul>")
 
 
 def _expert_intro_html(title: str, keyword: str, profile: dict[str, object]) -> str:
     brief = profile.get("expert_brief") if isinstance(profile.get("expert_brief"), dict) else {}
     entity = str(profile.get("main_entity") or keyword or title)
-    problem = (brief.get("real_world_problems") or [f"קשה לדעת מה באמת משפיע על התוצאה של {entity}"])[0]
-    goal = str(brief.get("user_goal") or f"להבין איך לעבוד נכון עם {entity}")
-    decision_terms = "התאמה, תזמון, טעויות נפוצות וסימני הצלחה"
-    if str(profile.get("topic_type") or "") in {"grill_accessory_guide", "equipment_buying_guide"}:
-        decision_terms = "התאמה, תזמון, תחזוקה, טעויות נפוצות וסימני הצלחה"
+    problem = str((brief.get("real_world_problems") or [f"לא תמיד ברור מה משפיע באמת על {entity}"])[0])
+    goal = str(brief.get("user_goal") or f"לעבוד נכון עם {entity}")
+    article_contract = str(profile.get("article_contract") or profile.get("selected_contract") or "")
+    if article_contract == "comparison_article":
+        option_a, option_b = _comparison_options(title, keyword)
+        opening = f"ההתלבטות בין {option_a} לבין {option_b} חוזרת אצל הרבה קוראים כי שתי החלופות יכולות להיראות נכונות עד שבוחנים שימוש יומיומי, תחזוקה ועלות לאורך זמן."
+        solution = "במאמר נשווה יתרונות, חסרונות, נוחות, תחזוקה ועלויות, כדי שתוכלו לבחור לפי הצורך האמיתי שלכם."
+    elif str(profile.get("topic_type") or "") in {"grill_accessory_guide", "equipment_buying_guide"}:
+        opening = f"בחירה סביב {entity} משפיעה על נוחות העבודה, מקום האחסון והניקוי הרבה אחרי רגע הקנייה."
+        solution = "נעבור על התאמה לציוד הקיים, שימוש בפועל, תחזוקה וטעויות שמגלים בדרך כלל רק אחרי כמה שימושים."
+    else:
+        opening = f"כשעובדים עם {entity}, ההבדל בין תוצאה טובה לתוצאה מאכזבת נמצא בדרך כלל בהכנה, בתזמון ובבדיקה הנכונה בזמן העבודה."
+        solution = "המדריך מפרק את התהליך לשלבים ברורים, מסביר מה לבדוק ומראה איך להימנע מקיצורי דרך שפוגעים בתוצאה."
     return (
         "<div class='expert-introduction'>"
-        f"<p><strong>Hook:</strong> אם {entity} נראה פשוט על הנייר אבל התוצאה לא עקבית, הבעיה בדרך כלל אינה עוד טיפ כללי — אלא פרט קטן שמקצוענים בודקים לפני שמתחילים.</p>"
-        f"<p><strong>Problem:</strong> {problem}. זה בדיוק המקום שבו מאמר רגיל נשאר בסיסי מדי, ולקוח צריך הסבר שמחובר לציוד, לחומר ולסיטואציה האמיתית.</p>"
-        f"<p><strong>Solution:</strong> במדריך הזה נפרק את {keyword or entity} לפי החלטות שטח: {decision_terms} שאפשר לראות בזמן העבודה.</p>"
-        f"<p><strong>What reader will learn:</strong> בסוף תדעו {goal}, מתי לשנות טכניקה, ומתי מוצר משלים באמת פותר בעיה במקום להוסיף עוד רעש.</p>"
+        f"<p><strong>פתיחה:</strong> {opening}</p>"
+        f"<p><strong>הבעיה:</strong> {problem}. בלי מסגרת החלטה ברורה קל לבחור לפי רושם ראשוני במקום לפי מה שיקרה בפועל.</p>"
+        f"<p><strong>מה נעשה במאמר:</strong> {solution}</p>"
+        f"<p><strong>מה תלמדו:</strong> בסוף תדעו {goal}, אילו פשרות חשובות לכם, ואיך לקבל החלטה שתישאר הגיונית גם אחרי כמה שימושים.</p>"
         "</div>"
     )
 
@@ -1929,9 +2046,9 @@ def _expert_insight_items(topic_type: str, entity: str, keyword: str, entity_key
             ("בחירה לפי משך עבודה", "פחם עץ מגיב מהר לצלייה קצרה; פחם קוקוס מתאים יותר לאירוח ארוך וחום עקיף יציב."),
         ]
     return [
-        ("בדיקת התאמה אמיתית", f"לפני שמיישמים המלצה על {keyword}, בודקים מה הבעיה בפועל: חום, זמן, חומר גלם או ציוד."),
-        ("החלטה לפי סימנים", "מומחה לא פועל לפי כלל אחד; הוא מחפש סימני הצלחה וכשל, ומשנה משתנה אחד בכל פעם."),
-        ("קנייה רק כשיש צורך", "מוצר משלים טוב הוא כזה שמסביר איזו בעיה הוא פותר ואיך תדעו שהתוצאה השתפרה."),
+        (f"מה בודקים במיוחד ב-{entity}", f"בוחנים את {entity} לפי תנאי העבודה שלו: מקור החום, המקום הפנוי, זמן ההכנה והדרך שבה הקורא באמת משתמש בציוד."),
+        ("הפרט שמתחילים נוטים לפספס", "לפני שמשנים ציוד או שיטה, משנים משתנה אחד בלבד ורואים אם הוא השפיע על התוצאה. כך יודעים מה עבד ולא מבלבלים בין כמה שינויים יחד."),
+        ("איך מומחה מקבל החלטה", f"מומחה משווה את ההמלצה ל-{keyword} מול תדירות השימוש, תחזוקה ועלות שוטפת, ולא מסתפק בשם מוצר או בהבטחה כללית."),
     ]
 
 
@@ -1956,10 +2073,52 @@ def _insert_expert_insights(html: str, profile: dict[str, object], keyword: str)
     return (html or "") + insights
 
 
+
+def _comparison_options(title: str, keyword: str) -> tuple[str, str]:
+    raw = re.sub(r"\s+", " ", (title or keyword or "").strip())
+    patterns = [r"\s+לעומת\s+", r"\s+מול\s+", r"\s+או\s+", r"\s+vs\.?\s+", r"\s+VS\.?\s+", r"\s+compare\s+", r"\s+difference between\s+"]
+    for pattern in patterns:
+        parts = re.split(pattern, raw, maxsplit=1, flags=re.IGNORECASE)
+        if len(parts) == 2 and all(part.strip() for part in parts):
+            left = re.sub(r"^(?:מה עדיף|ההבדל בין|השוואה בין|השוואה)\s+", "", parts[0].strip(), flags=re.IGNORECASE).strip(" :–-?")
+            right = re.sub(r"^(?:לבין|בין)\s+", "", parts[1].strip(), flags=re.IGNORECASE).strip(" :–-?")
+            return left or "אפשרות א׳", right or "אפשרות ב׳"
+    if "/" in raw:
+        left, right = [part.strip() for part in raw.split("/", 1)]
+        if left and right:
+            return left, right
+    return (keyword or raw or "אפשרות א׳"), "החלופה המרכזית"
+
+
+def _comparison_article_html(title: str, keyword: str, related: list[dict[str, str | float]], profile: dict[str, object]) -> str:
+    option_a, option_b = _comparison_options(title, keyword)
+    links = _links_section(related, profile)
+    return (
+        f"<p><strong>{title}</strong> היא השוואה מעשית בין {option_a} לבין {option_b}. המטרה אינה לבחור מנצח כללי, אלא להבין איזו חלופה מתאימה לצורת העבודה, לתדירות השימוש, לניקוי ולתקציב שלכם.</p>\n"
+        + _h2(f"סקירה קצרה: {option_a}", f"<p>{option_a} מתאים כאשר היתרון המרכזי שלו מתחבר לצורך העיקרי שלכם: שליטה, זמינות, טעם, מהירות עבודה או תחזוקה פשוטה. לפני שבוחרים בו בודקים מה הוא דורש ביום-יום ולא רק איך הוא נראה ברגע הקנייה.</p>")
+        + _h2(f"סקירה קצרה: {option_b}", f"<p>{option_b} מתאים לקוראים שמעדיפים סט אחר של פשרות: לפעמים יותר אופי וטקס עבודה, לפעמים יותר נוחות, ולפעמים עלות שימוש אחרת לאורך זמן. הבחירה תלויה במה שתעשו בפועל אחרי הפרסום או הקנייה.</p>")
+        + _h2(f"יתרונות של {option_a}", "<ul><li>יכול להתאים למי שרוצה פתרון ברור ונוח להפעלה.</li><li>מאפשר תכנון עבודה עקבי כאשר מבינים את מגבלותיו.</li><li>קל יותר להצדיק אותו כאשר היתרון שלו מופיע בכל שימוש ולא רק באירוח נדיר.</li></ul>")
+        + _h2(f"חסרונות של {option_a}", "<ul><li>עלול להיות פחות מתאים אם תנאי השטח או סגנון העבודה שונים מהשימוש שאליו הוא נועד.</li><li>דורש בדיקה של תחזוקה, מקום ואביזרים משלימים.</li><li>אם בוחרים רק לפי מפרט, אפשר לפספס עלויות או מגבלות בפועל.</li></ul>")
+        + _h2(f"יתרונות של {option_b}", "<ul><li>נותן חלופה אמיתית למי שמעדיף אופי עבודה אחר.</li><li>יכול להיות משתלם יותר כאשר הוא מתאים להרגלי השימוש הקבועים.</li><li>במקרים מסוימים מספק תוצאה או חוויית עבודה שקשה לקבל מהחלופה השנייה.</li></ul>")
+        + _h2(f"חסרונות של {option_b}", "<ul><li>עשוי לדרוש יותר זמן, ניסיון, ניקוי או הכנה מוקדמת.</li><li>לא תמיד מתאים למקום קטן, שימוש ספונטני או משתמש מתחיל.</li><li>בחירה לא נכונה בו יכולה להפוך יתרון תיאורטי לטרחה יומיומית.</li></ul>")
+        + _h2("טבלת השוואה", f"<table><thead><tr><th>קריטריון</th><th>{option_a}</th><th>{option_b}</th></tr></thead><tbody><tr><td>נוחות שימוש</td><td>בדקו הפעלה, זמן הכנה וניקוי</td><td>בדקו כמה התעסקות נדרשת בכל שימוש</td></tr><tr><td>תוצאה ואופי עבודה</td><td>מתאים כאשר רוצים עקביות ושליטה</td><td>מתאים כאשר רוצים אופי שונה או מעורבות גבוהה יותר</td></tr><tr><td>עלות שימוש</td><td>כוללת אביזרים, תחזוקה וצריכה שוטפת</td><td>כוללת חומרי הפעלה, זמן עבודה ובלאי</td></tr><tr><td>תחזוקה</td><td>נמדדת לפי ניקוי, אחסון והחלפה</td><td>נמדדת לפי תדירות טיפול ומורכבות</td></tr></tbody></table>")
+        + _h2("עלות שימוש, תחזוקה ונוחות", f"<p>בהשוואה בין {option_a} לבין {option_b}, העלות האמיתית כוללת יותר ממחיר ראשוני. מחשבים זמן הכנה, ניקוי, אביזרים משלימים, מקום אחסון וכמה קל לחזור על אותה תוצאה גם ביום עמוס.</p>")
+        + _h2(f"מי צריך לבחור {option_a}", f"<p>בחרו {option_a} אם היתרונות שלו פוגשים את רוב השימושים שלכם, אם התחזוקה שלו סבירה עבורכם ואם הוא מקצר החלטות במקום להוסיף מורכבות.</p>")
+        + _h2(f"מי צריך לבחור {option_b}", f"<p>בחרו {option_b} אם אתם מוכנים לפשרות שלו ומקבלים בתמורה חוויית עבודה, טעם, גמישות או עלות שוטפת שמתאימים לכם יותר.</p>")
+        + _h2("המלצה סופית", f"<p>הבחירה הנכונה היא החלופה שתשתמשו בה בעקביות. אם חשובים לכם נוחות, חזרה על תוצאה ותחזוקה פשוטה — תנו לזה משקל גבוה. אם חשובים לכם אופי עבודה, שליטה ידנית או תוצאה ייחודית — בדקו שהזמן והתחזוקה מתאימים לשגרה שלכם.</p>")
+        + links
+        + _faq([(f"מה ההבדל העיקרי בין {option_a} ל-{option_b}?", "ההבדל הוא בשילוב בין נוחות, תחזוקה, עלות שוטפת ואופי התוצאה, ולא רק במפרט או במחיר."), ("איך מחליטים אם מתלבטים?", "כותבים שלושה שימושים אמיתיים שתעשו בחודש הקרוב ובוחרים את החלופה שמתאימה לרובם."), ("האם כדאי לבחור לפי מחיר בלבד?", "לא. מחיר נמוך שלא מתאים לשימוש יומיומי עלול לעלות יותר בזמן, ניקוי ואביזרים משלימים."), ("מה חשוב לבדוק לפני קנייה?", "מקום, תחזוקה, זמינות אביזרים, אחריות והאם החלופה מתאימה לרמת הניסיון שלכם."), ("אפשר לשלב בין שתי החלופות?", "לפעמים כן, אבל רק אם יש שימוש ברור לכל אחת ולא יוצרים כפילות יקרה שלא תשתמשו בה.")])
+        + "<hr><p><strong>CTA:</strong> עברו לקטגוריות הרלוונטיות בקומפס גריל ובחרו ציוד לפי אופן השימוש האמיתי שלכם.</p>"
+    )
+
 def _build_contract_article(title: str, keyword: str, related: list[dict[str, str | float]], profile: dict[str, object]) -> str:
     topic_type = str(profile.get("topic_type") or "fallback_generic")
+    article_contract = str(profile.get("article_contract") or profile.get("selected_contract") or "")
     entity = str(profile.get("main_entity") or keyword or title)
     links = _links_section(related, profile)
+
+    if article_contract == "comparison_article":
+        return _comparison_article_html(title, keyword, related, profile)
 
     if topic_type == "meat_quick_grill_cut":
         return (
@@ -2575,9 +2734,9 @@ def _cta_block_html(topic_type: str) -> str:
         "meat_low_slow_smoking": ["מעשנות", "עצי עישון", "מדחומים", "נייר קצבים"],
         "smoking_wood_guide": ["שבבי עץ לעישון", "צ׳אנקים", "מעשנות", "מדחומים"],
         "grill_accessory_guide": ["אביזרים לגריל", "אבני בזלת", "מדחומים", "כיסויים וכלי ניקוי"],
-        "equipment_buying_guide": ["Gas Grills", "Charcoal Grills", "Kamado Grills", "Outdoor Kitchens"],
-    }.get(topic_type, ["Gas Grills", "Smokers", "Thermometers", "Grill Accessories"])
-    return "<div class='article-cta'><p><strong>🛒 מחפשים ציוד מתאים?</strong></p><p>בקומפס גריל תמצאו פתרונות שנבחרים לפי שימוש אמיתי ולא לפי ניחוש:</p><ul>" + "".join(f"<li>✅ {item}</li>" for item in items) + "</ul></div>"
+        "equipment_buying_guide": ["גרילי גז", "גרילי פחמים", "גרילי קמאדו", "מטבחי חוץ"],
+    }.get(topic_type, ["גרילי גז", "מעשנות", "מדחומים", "אביזרי גריל"])
+    return "<div class='article-cta'><p><strong>🛒 מחפשים ציוד מתאים?</strong></p><p>בקומפס גריל תמצאו קטגוריות שיעזרו לכם להתאים את הבחירה לצורת הבישול, למקום ולניקוי:</p><ul>" + "".join(f"<li>✅ {item}</li>" for item in items) + "</ul></div>"
 
 
 def _insert_image_markers(html: str) -> str:
@@ -2706,7 +2865,7 @@ def build_istore_copy_paste_package(title: str, slug: str, meta_title: str, meta
     return {"mode": "ISTORE_COPY_PASTE", "steps": steps, "article_blocks": _split_article_blocks(body)}
 
 
-def validate_complete_publishing_package(body: str, image_package: list[dict[str, str]], placement_guide: list[dict[str, str]], istore_package: dict[str, object], diversity: dict[str, object] | None = None) -> dict[str, object]:
+def validate_complete_publishing_package(body: str, image_package: list[dict[str, str]], placement_guide: list[dict[str, str]], istore_package: dict[str, object], diversity: dict[str, object] | None = None, topic_profile: dict[str, object] | None = None, selected_links: list[dict[str, object]] | None = None) -> dict[str, object]:
     checks = {
         "article_generated": bool(body and _article_word_count(body) > 50),
         "diversity_score_passed": bool((diversity or {}).get("passed", True)),
@@ -2739,6 +2898,17 @@ def validate_complete_publishing_package(body: str, image_package: list[dict[str
     quality_score = float((diversity or {}).get("overall_quality_score", 100) or 0) if isinstance(diversity, dict) else 100.0
     if quality_score < 90:
         publishing_required_checks["article_quality_score_at_least_90"] = False
+    raw_body = body or ""
+    if topic_profile is not None:
+        contract_validation = validate_article_contract(raw_body, topic_profile)
+        publishing_required_checks["selected_contract_matches_detected_intent"] = not (topic_profile.get("detected_intent") == "comparison_article" and topic_profile.get("article_contract") != "comparison_article")
+        publishing_required_checks["contract_validation_passed"] = bool(contract_validation.get("contract_validation_passed"))
+    publishing_required_checks["no_internal_debug_metadata"] = not any(term in raw_body for term in PUBLIC_RECOMMENDATION_FORBIDDEN_TERMS)
+    publishing_required_checks["no_mechanical_template_phrases"] = not any(term in raw_body for term in MECHANICAL_TEMPLATE_PHRASES)
+    publishing_required_checks["cta_is_final_block"] = not _article_end_validation_flags(raw_body).get("content_after_cta_detected", False)
+    link_scores = [float(item.get("relevance_score") or item.get("relatedness_score") or item.get("semantic_topic_match_score") or 0) for item in (selected_links or []) if isinstance(item, dict)]
+    publishing_required_checks["recommendation_relevance_at_least_90"] = (sum(link_scores) / len(link_scores) >= 90) if link_scores else True
+    publishing_required_checks["no_unrelated_product_recommendations"] = not any(score and score < 80 for score in link_scores)
     publishing_failed = [k for k, ok in publishing_required_checks.items() if not ok]
     return {
         "publishing_package_checks": checks,
@@ -3135,6 +3305,12 @@ def validate_final_article_quality(body: str, meta_title: str, seo_metadata: dic
     public_recommendation_leaks = [term for term in PUBLIC_RECOMMENDATION_FORBIDDEN_TERMS if term and term in raw_body]
     if public_recommendation_leaks:
         issues.append("recommendation_metadata_visible:" + ",".join(sorted(public_recommendation_leaks)))
+    mechanical_leaks = [term for term in MECHANICAL_TEMPLATE_PHRASES if term and term in raw_body]
+    if mechanical_leaks:
+        issues.append("mechanical_template_phrase_visible:" + ",".join(sorted(mechanical_leaks)))
+    contract_validation = validate_article_contract(raw_body, topic_profile)
+    if not contract_validation.get("contract_validation_passed"):
+        issues.append("contract_validation_failed:" + ",".join(contract_validation.get("contract_validation_missing", [])))
     keywords = seo_metadata.get("seo_keywords") if isinstance(seo_metadata, dict) else []
     if not isinstance(keywords, list) or len(keywords) < 8:
         issues.append("keywords_count_below_8")
@@ -3161,6 +3337,9 @@ def validate_final_article_quality(body: str, meta_title: str, seo_metadata: dic
             "keyword_match_score": link.get("keyword_match_score", 10 if link.get("link_role") in {"exact_entity", "complementary", "related_category"} else 0),
             "relevance_score": link.get("relevance_score", link.get("relatedness_score", 0)),
         }
+        link_score = float(link.get("relevance_score") or link.get("relatedness_score") or link.get("semantic_topic_match_score") or 0)
+        if link_score and link_score < 80:
+            issues.append("selected_link_relevance_below_80:" + str(link.get("title") or link.get("url") or "unknown"))
         if not _passes_link_semantic_gate(str(topic_profile.get("main_entity") or ""), text, str(link.get("page_type") or link.get("type") or "product"), scores, topic_profile):
             issues.append("irrelevant_selected_link:" + str(link.get("title") or link.get("url") or "unknown"))
     h2_count = len(re.findall(r"<h2[^>]*>", raw_body, flags=re.IGNORECASE))
@@ -3184,7 +3363,9 @@ def validate_final_article_quality(body: str, meta_title: str, seo_metadata: dic
             issues.append(flag_name)
 
     production_penalty = 12 * sum(1 for detected in production_flags.values() if detected)
-    topic_relevance_score = max(0, 100 - 12 * len([phrase for phrase in GENERIC_FILLER_PHRASES if phrase in raw_body]) - 8 * len([i for i in issues if i.startswith("irrelevant_selected_link")]) - production_penalty)
+    link_scores_for_quality = [float(item.get("relevance_score") or item.get("relatedness_score") or item.get("semantic_topic_match_score") or 0) for item in (selected_links or [])]
+    avg_link_relevance = round(sum(link_scores_for_quality) / len(link_scores_for_quality), 1) if link_scores_for_quality else 100.0
+    topic_relevance_score = max(0, 100 - 12 * len([phrase for phrase in GENERIC_FILLER_PHRASES if phrase in raw_body]) - 12 * len([phrase for phrase in MECHANICAL_TEMPLATE_PHRASES if phrase in raw_body]) - 8 * len([i for i in issues if i.startswith("irrelevant_selected_link") or i.startswith("selected_link_relevance_below_80")]) - production_penalty)
     readability_score = max(0, 100 - max(0, h2_count - 12) * 8 - max(0, final_word_count - 2200) // 20 - max(0, 1200 - final_word_count) // 25)
     duplicate_content_score = max(0, 100 - 20 * len(duplicate_sections_removed) - (20 if "duplicate_h2_titles" in issues else 0))
     seo_score = int(seo_metadata.get("seo_score", 85)) if isinstance(seo_metadata, dict) else 85
@@ -3221,7 +3402,9 @@ def validate_final_article_quality(body: str, meta_title: str, seo_metadata: dic
         "readability_high": readability_score >= 85,
         "expertise_level_high": expertise_score >= 90,
         "html_valid": not html_issues,
-        "topic_relevance_high": topic_relevance_score >= 85,
+        "topic_relevance_high": topic_relevance_score >= 90,
+        "contract_validation_passed": bool(contract_validation.get("contract_validation_passed")),
+        "recommendation_relevance_at_least_90": avg_link_relevance >= 90,
     }
     if overall_quality_score < 90:
         issues.append(f"overall_quality_below_90:{overall_quality_score}")
@@ -3237,6 +3420,8 @@ def validate_final_article_quality(body: str, meta_title: str, seo_metadata: dic
         "faq_section_count": faq_section_count,
         "expert_insight_section_count": expert_insight_count,
         "topic_relevance_score": topic_relevance_score,
+        "recommendation_relevance_score": avg_link_relevance,
+        **contract_validation,
         "readability_score": readability_score,
         "duplicate_content_score": duplicate_content_score,
         "seo_score": seo_score,
@@ -3301,7 +3486,7 @@ def _prepare_publishing_metadata(
     image_package = package["image_package"]
     placement = package["image_placement_guide"]
     istore_package = build_istore_copy_paste_package(title, slug, meta_title, meta_description, body, image_package)  # type: ignore[arg-type]
-    qa = validate_complete_publishing_package(body, image_package, placement, istore_package, diversity)
+    qa = validate_complete_publishing_package(body, image_package, placement, istore_package, diversity, topic_profile=topic_profile)
     metadata = {
         **package,
         "istore_copy_paste_package": istore_package,
