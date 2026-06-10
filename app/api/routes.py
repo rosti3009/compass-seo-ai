@@ -36,6 +36,7 @@ from app.integrations.ga4 import GA4Client
 from app.integrations.ga4 import MissingGoogleCredentialsError as MissingGA4CredentialsError
 from app.integrations.google_auth import (
     GOOGLE_OAUTH_SCOPES,
+    google_auth_diagnostics,
     oauth_status,
     resolve_google_credentials,
     utc_expiry_from_seconds,
@@ -3536,6 +3537,12 @@ def gsc_runtime_diagnostics(db: DatabaseSession) -> dict[str, bool]:
         logger.exception("GSC diagnostic Search Console client creation failed")
 
     return diagnostics
+
+
+@router.get("/integrations/google/diagnostics")
+def google_integration_diagnostics(db: DatabaseSession) -> dict[str, object]:
+    """Return production-safe Google/GSC configuration diagnostics without exposing secrets."""
+    return google_auth_diagnostics(db)
 
 
 @router.get("/integrations/gsc/status")

@@ -31,6 +31,53 @@ class GoogleCredentials:
     credentials_file: str | None = None
 
 
+def _is_configured(value: str | None) -> bool:
+    """Return whether an environment-backed setting has a non-empty value."""
+    return bool(value and value.strip())
+
+
+def _redact_gsc_site_url(site_url: str | None) -> str | None:
+    """Return a safe, recognizable GSC property hint without exposing the full value."""
+    if not _is_configured(site_url):
+        return None
+    value = str(site_url).strip()
+    prefix = ""
+    remainder = value
+    if ":" in value:
+        prefix, remainder = value.split(":", 1)
+        prefix = f"{prefix}:"
+    if len(remainder) <= 4:
+        return f"{prefix}{'*' * len(remainder)}"
+    return f"{prefix}{remainder[:2]}{'*' * max(len(remainder) - 4, 3)}{remainder[-2:]}"
+
+
+def google_auth_diagnostics(db: Session | None = None) -> dict[str, object]:
+    """Return production-safe Google auth configuration diagnostics without secret values."""
+    gsc_site_url_configured = _is_configured(settings.gsc_site_url)
+    credentials_json_configured = _is_configured(settings.google_application_credentials_json)
+    service_account_file_configured = _is_configured(settings.google_service_account_file)
+    oauth_client_id_configured = _is_configured(settings.google_oauth_client_id)
+    oauth_redirect_uri_configured = _is_configured(settings.google_oauth_redirect_uri)
+
+    oauth_token_configured = latest_google_oauth_token(db) is not None
+    if oauth_token_configured:
+        resolved_auth_method = "oauth"
+    elif credentials_json_configured or service_account_file_configured:
+        resolved_auth_method = "service_account"
+    else:
+        resolved_auth_method = "none"
+
+    return {
+        "gsc_site_url_configured": gsc_site_url_configured,
+        "google_application_credentials_json_configured": credentials_json_configured,
+        "google_service_account_file_configured": service_account_file_configured,
+        "google_oauth_client_id_configured": oauth_client_id_configured,
+        "google_oauth_redirect_uri_configured": oauth_redirect_uri_configured,
+        "resolved_auth_method": resolved_auth_method,
+        "gsc_site_url_value_redacted": _redact_gsc_site_url(settings.gsc_site_url),
+    }
+
+
 def _service_account_json_path() -> Path:
     """Materialize Render-friendly JSON credentials from an environment variable."""
     credentials_json = settings.google_application_credentials_json
