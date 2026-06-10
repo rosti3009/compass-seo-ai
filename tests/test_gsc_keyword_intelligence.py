@@ -101,6 +101,36 @@ def test_gsc_sync_upserts_mocked_rows(client: TestClient, db_session: Session, m
     assert metric.impressions == 300
 
 
+def test_gsc_runtime_diagnostics_returns_non_secret_booleans(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class MockGSCClient:
+        @classmethod
+        def from_settings(cls, db: Session | None = None) -> "MockGSCClient":
+            assert db is not None
+            return cls()
+
+        def _service(self) -> object:
+            return object()
+
+    monkeypatch.setattr("app.api.routes.settings.gsc_site_url", "sc-domain:example.com")
+    monkeypatch.setattr("app.api.routes.settings.google_application_credentials_json", "{}")
+    monkeypatch.setattr("app.api.routes.settings.google_oauth_client_id", None)
+    monkeypatch.setattr("app.api.routes.resolve_google_credentials", lambda db, scopes: object())
+    monkeypatch.setattr("app.api.routes.GSCClient", MockGSCClient)
+
+    response = client.get("/diagnostics/gsc-runtime")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "gsc_site_url_configured": True,
+        "google_application_credentials_json_configured": True,
+        "google_oauth_client_id_configured": False,
+        "credential_resolution_success": True,
+        "search_console_client_created": True,
+    }
+
+
 def test_gsc_sync_handles_missing_credentials_gracefully(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     class MockGSCClient:
         @classmethod

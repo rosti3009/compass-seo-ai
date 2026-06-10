@@ -34,20 +34,28 @@ from app.db.models import (
 )
 from app.integrations.ga4 import GA4Client
 from app.integrations.ga4 import MissingGoogleCredentialsError as MissingGA4CredentialsError
-from app.integrations.google_auth import GOOGLE_OAUTH_SCOPES, oauth_status, utc_expiry_from_seconds
+from app.integrations.google_auth import (
+    GOOGLE_OAUTH_SCOPES,
+    oauth_status,
+    resolve_google_credentials,
+    utc_expiry_from_seconds,
+)
 from app.integrations.gsc import GSCAPIError, GSCClient
 from app.integrations.gsc import MissingGoogleCredentialsError as MissingGSCCredentialsError
+from app.integrations.gsc_client import GSC_SCOPES
 from app.integrations.istore import IStoreAPIError, IStoreClient, MissingIStoreSettingsError
 from app.integrations.openai_client import OpenAIClient
 from app.services.content_articles import (
-    GENERIC_FILLER_PHRASES,
     GENERATOR_VERSION,
-    _classify_topic as classify_topic,
+    GENERIC_FILLER_PHRASES,
     build_topic_seo_metadata,
-    validate_article_relevance,
     generate_daily_article_draft,
     generate_topic_article_draft,
     refresh_internal_link_index,
+    validate_article_relevance,
+)
+from app.services.content_articles import (
+    _classify_topic as classify_topic,
 )
 from app.services.crawler import SEOCrawler
 from app.services.hebrew_seo import analyze_page_hebrew_seo, israeli_seasonality, summarize_hebrew_insights
@@ -3387,6 +3395,32 @@ def preview_seo_task_article(task_id: int, db: DatabaseSession) -> HTMLResponse:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SEO task not found")
     _raise_if_url_excluded(task.page_url)
     return HTMLResponse(content=_task_article_preview_html(task))
+
+
+@router.get("/diagnostics/gsc-runtime")
+def gsc_runtime_diagnostics(db: DatabaseSession) -> dict[str, bool]:
+    """Return non-secret live-runtime diagnostics for Google Search Console configuration."""
+    diagnostics = {
+        "gsc_site_url_configured": bool(settings.gsc_site_url),
+        "google_application_credentials_json_configured": bool(settings.google_application_credentials_json),
+        "google_oauth_client_id_configured": bool(settings.google_oauth_client_id),
+        "credential_resolution_success": False,
+        "search_console_client_created": False,
+    }
+
+    try:
+        resolve_google_credentials(db, GSC_SCOPES)
+        diagnostics["credential_resolution_success"] = True
+    except Exception:  # noqa: BLE001 - diagnostic endpoint intentionally reduces all failures to booleans.
+        logger.exception("GSC diagnostic credential resolution failed")
+
+    try:
+        GSCClient.from_settings(db)._service()
+        diagnostics["search_console_client_created"] = True
+    except Exception:  # noqa: BLE001 - do not expose credential, dependency, or transport details.
+        logger.exception("GSC diagnostic Search Console client creation failed")
+
+    return diagnostics
 
 
 @router.get("/integrations/gsc/status")
