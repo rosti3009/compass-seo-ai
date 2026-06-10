@@ -84,14 +84,16 @@ class GSCClient:
         dimensions: list[str],
         limit: int,
         dimension_filter_groups: list[dict[str, object]] | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
     ) -> list[dict[str, object]]:
-        end_date = _today_utc() - timedelta(days=2)
-        start_date = end_date - timedelta(days=28)
+        query_end_date = end_date or (_today_utc() - timedelta(days=2))
+        query_start_date = start_date or (query_end_date - timedelta(days=28))
         body: dict[str, object] = {
-            "startDate": start_date.isoformat(),
-            "endDate": end_date.isoformat(),
+            "startDate": query_start_date.isoformat(),
+            "endDate": query_end_date.isoformat(),
             "dimensions": dimensions,
-            "rowLimit": max(1, limit),
+            "rowLimit": max(1, min(limit, 25000)),
             "searchType": "web",
         }
         if dimension_filter_groups:
@@ -131,6 +133,14 @@ class GSCClient:
     def fetch_top_queries(self, site_url: str, limit: int = 100) -> list[dict[str, object]]:
         """Fetch top query/page/date rows for a verified Search Console property."""
         return self._query(site_url, dimensions=["query", "page", "date"], limit=limit)
+
+    def fetch_query_page_date_rows(
+        self, site_url: str, *, start_date: date, end_date: date, limit: int = 25000
+    ) -> list[dict[str, object]]:
+        """Fetch query/page/date rows for an explicit Search Console date range."""
+        return self._query(
+            site_url, dimensions=["query", "page", "date"], limit=limit, start_date=start_date, end_date=end_date
+        )
 
     def fetch_page_queries(self, page_url: str, limit: int = 50) -> list[dict[str, object]]:
         """Fetch query rows for one page using the client's configured GSC property."""

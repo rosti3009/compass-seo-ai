@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     daily_article_generation_hour: int = Field(default=8, ge=0, le=23)
     daily_article_generation_timezone: str = "Asia/Jerusalem"
     image_provider: str | None = None
+    manual_action_token: str | None = None
 
 
 @lru_cache

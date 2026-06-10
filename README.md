@@ -43,6 +43,7 @@ Additional supported settings:
 | `CRAWLER_MAX_PAGES` | Maximum pages per crawl. | `25` |
 | `CRAWLER_TIMEOUT_SECONDS` | Per-request crawler timeout. | `10` |
 | `GOOGLE_SERVICE_ACCOUNT_FILE` | Optional local file-path alternative to `GOOGLE_APPLICATION_CREDENTIALS_JSON`. | Empty |
+| `MANUAL_ACTION_TOKEN` | Optional extra protection for manual write/sync endpoints; when set, send it as `X-Manual-Action-Token`. | Empty |
 | `ISTORE_TIMEOUT_SECONDS` | Timeout for ISTORE read-only API calls. | `10` |
 
 ## Local run instructions
@@ -138,6 +139,7 @@ Required OAuth scopes:
 | `GET` | `/auth/google/callback` | Store the Google OAuth token returned by Google. |
 | `GET` | `/auth/google/status` | Report whether Google OAuth is connected and list stored scopes. |
 | `GET` | `/integrations/gsc/status` | Validate Search Console configuration. |
+| `POST` | `/gsc/manual-sync` | Manually import the last 30 days of query/page/date Search Console rows for `sc-domain:compassgrill.co.il`; body confirmation must be `SYNC sc-domain:compassgrill.co.il`, and `X-Manual-Action-Token` is required when `MANUAL_ACTION_TOKEN` is configured. |
 | `GET` | `/integrations/ga4/status` | Validate GA4 configuration. |
 | `GET` | `/integrations/istore/status` | Validate ISTORE read-only configuration with token redacted. |
 | `GET` | `/integrations/istore/products` | Fetch ISTORE products with a GET-only read. |
