@@ -2,13 +2,13 @@ import hashlib
 import json
 import logging
 import re
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from html import escape
 from typing import Annotated
 from urllib.parse import urlencode
 
 import requests
-from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -117,6 +117,19 @@ from app.services.sitemap import discover_sitemap_urls
 from app.services.topical_clusters import build_cluster_summary
 
 logger = logging.getLogger(__name__)
+
+
+LIVE_GSC_SYNC_SITE_URL = "sc-domain:compassgrill.co.il"
+LIVE_GSC_SYNC_CONFIRMATION = f"SYNC {LIVE_GSC_SYNC_SITE_URL}"
+LIVE_GSC_SYNC_DAYS = 30
+LIVE_GSC_SYNC_ROW_LIMIT = 25000
+
+
+class ManualGSCSyncRequest(BaseModel):
+    """Confirmation payload for the manual live GSC sync endpoint."""
+
+    confirmation: str
+
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -500,6 +513,64 @@ def _upsert_gsc_metric(db: Session, row: dict[str, object]) -> bool:
     metric.ctr = float(row.get("ctr") or 0.0)
     metric.average_position = float(row.get("average_position") or 0.0)
     return True
+
+
+def _weighted_average_position(rows: list[GSCKeywordMetric]) -> float:
+    impression_total = sum(max(row.impressions, 0) for row in rows)
+    if impression_total > 0:
+        return sum(row.average_position * max(row.impressions, 0) for row in rows) / impression_total
+    if not rows:
+        return 0.0
+    return sum(row.average_position for row in rows) / len(rows)
+
+
+def _aggregate_gsc_metrics(rows: list[GSCKeywordMetric], group_field: str, limit: int = 10) -> list[dict[str, object]]:
+    grouped: dict[str, list[GSCKeywordMetric]] = {}
+    for row in rows:
+        key = str(getattr(row, group_field) or "").strip()
+        if key:
+            grouped.setdefault(key, []).append(row)
+
+    payloads = []
+    for key, group_rows in grouped.items():
+        clicks = sum(row.clicks for row in group_rows)
+        impressions = sum(row.impressions for row in group_rows)
+        payloads.append(
+            {
+                group_field: key,
+                "clicks": clicks,
+                "impressions": impressions,
+                "ctr": clicks / impressions if impressions else 0.0,
+                "average_position": _weighted_average_position(group_rows),
+                "row_count": len(group_rows),
+            }
+        )
+    sorted_payloads = sorted(
+        payloads, key=lambda item: (-int(item["impressions"]), -int(item["clicks"]), str(item[group_field]))
+    )
+    return sorted_payloads[:limit]
+
+
+def _safe_gsc_sync_error(exc: Exception) -> str:
+    logger.exception("Manual GSC sync failed")
+    if isinstance(exc, MissingGSCCredentialsError):
+        return "Google Search Console credentials are not configured."
+    if isinstance(exc, GSCAPIError):
+        return "Google Search Console API request failed."
+    return "Google Search Console sync failed."
+
+
+def _require_manual_gsc_sync_confirmation(
+    payload: ManualGSCSyncRequest, manual_action_token: str | None
+) -> None:
+    if payload.confirmation != LIVE_GSC_SYNC_CONFIRMATION:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Manual confirmation must be exactly: {LIVE_GSC_SYNC_CONFIRMATION}",
+        )
+    configured_token = settings.manual_action_token
+    if configured_token and manual_action_token != configured_token:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid manual action token.")
 
 
 def _payload_field_for_fix_type(fix_type: str) -> str:
@@ -2535,7 +2606,7 @@ def sync_gsc_keywords(db: DatabaseSession) -> dict[str, object]:
         client = GSCClient.from_settings(db)
         rows = client.fetch_top_queries(client.site_url, limit=250)
     except (MissingGSCCredentialsError, GSCAPIError, RuntimeError, ValueError) as exc:
-        return {"success": False, "rows_synced": 0, "top_queries": [], "error": str(exc)}
+        return {"success": False, "rows_synced": 0, "top_queries": [], "top_pages": [], "error": str(exc)}
 
     rows_synced = 0
     for row in rows:
@@ -2548,7 +2619,103 @@ def sync_gsc_keywords(db: DatabaseSession) -> dict[str, object]:
         .limit(10)
         .all()
     )
-    return {"success": True, "rows_synced": rows_synced, "top_queries": [_metric_payload(row) for row in top_queries]}
+    top_pages = (
+        db.query(GSCKeywordMetric)
+        .order_by(GSCKeywordMetric.impressions.desc(), GSCKeywordMetric.clicks.desc(), GSCKeywordMetric.id.desc())
+        .limit(10)
+        .all()
+    )
+    return {
+        "success": True,
+        "rows_synced": rows_synced,
+        "top_queries": [_metric_payload(row) for row in top_queries],
+        "top_pages": [_metric_payload(row) for row in top_pages],
+    }
+
+
+@router.post("/gsc/manual-sync")
+def manual_live_gsc_sync(
+    payload: ManualGSCSyncRequest,
+    db: DatabaseSession,
+    x_manual_action_token: Annotated[str | None, Header(alias="X-Manual-Action-Token")] = None,
+) -> dict[str, object]:
+    """Safely trigger a manual 30-day GSC sync for the live Compass Grill domain property."""
+    _require_manual_gsc_sync_confirmation(payload, x_manual_action_token)
+    end_date = date.today()
+    start_date = end_date - timedelta(days=LIVE_GSC_SYNC_DAYS - 1)
+
+    try:
+        client = GSCClient.from_settings(db)
+        fetch_rows = getattr(client, "fetch_query_page_date_rows", None)
+        if callable(fetch_rows):
+            rows = fetch_rows(
+                LIVE_GSC_SYNC_SITE_URL,
+                start_date=start_date,
+                end_date=end_date,
+                limit=LIVE_GSC_SYNC_ROW_LIMIT,
+            )
+        else:
+            rows = client.fetch_top_queries(LIVE_GSC_SYNC_SITE_URL, limit=LIVE_GSC_SYNC_ROW_LIMIT)
+    except (MissingGSCCredentialsError, GSCAPIError, RuntimeError, ValueError) as exc:
+        return {
+            "success": False,
+            "site_url": LIVE_GSC_SYNC_SITE_URL,
+            "date_range": {
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "days": LIVE_GSC_SYNC_DAYS,
+            },
+            "rows_imported": 0,
+            "top_queries": [],
+            "top_pages": [],
+            "error": _safe_gsc_sync_error(exc),
+        }
+
+    imported_metric_keys: set[tuple[str, str, date, str]] = set()
+    rows_imported = 0
+    for row in rows:
+        metric_date = _parse_metric_date(row.get("date"))
+        if metric_date < start_date or metric_date > end_date:
+            continue
+        if _upsert_gsc_metric(db, row):
+            rows_imported += 1
+            imported_metric_keys.add(
+                (
+                    str(row.get("page_url") or "").strip(),
+                    str(row.get("query") or "").strip(),
+                    metric_date,
+                    str(row.get("source") or "gsc"),
+                )
+            )
+    db.commit()
+
+    imported_rows = []
+    for page_url, query, metric_date, source in imported_metric_keys:
+        metric = (
+            db.query(GSCKeywordMetric)
+            .filter(
+                GSCKeywordMetric.page_url == page_url,
+                GSCKeywordMetric.query == query,
+                GSCKeywordMetric.date == metric_date,
+                GSCKeywordMetric.source == source,
+            )
+            .first()
+        )
+        if metric is not None:
+            imported_rows.append(metric)
+
+    return {
+        "success": True,
+        "site_url": LIVE_GSC_SYNC_SITE_URL,
+        "date_range": {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "days": LIVE_GSC_SYNC_DAYS,
+        },
+        "rows_imported": rows_imported,
+        "top_queries": _aggregate_gsc_metrics(imported_rows, "query", limit=10),
+        "top_pages": _aggregate_gsc_metrics(imported_rows, "page_url", limit=10),
+    }
 
 
 @router.get("/gsc/keywords")

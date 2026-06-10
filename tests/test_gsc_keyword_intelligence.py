@@ -101,6 +101,94 @@ def test_gsc_sync_upserts_mocked_rows(client: TestClient, db_session: Session, m
     assert metric.impressions == 300
 
 
+def test_manual_live_gsc_sync_imports_last_30_days_and_returns_top_queries_and_pages(
+    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class MockGSCClient:
+        @classmethod
+        def from_settings(cls, db: Session | None = None) -> "MockGSCClient":
+            assert db is not None
+            return cls()
+
+        def fetch_query_page_date_rows(
+            self, site_url: str, *, start_date: date, end_date: date, limit: int
+        ) -> list[dict[str, object]]:
+            assert site_url == "sc-domain:compassgrill.co.il"
+            assert (end_date - start_date).days == 29
+            assert limit == 25000
+            return [
+                {
+                    "page_url": "https://compassgrill.co.il/grill",
+                    "query": "גריל גז",
+                    "clicks": 4,
+                    "impressions": 400,
+                    "ctr": 0.01,
+                    "average_position": 6.0,
+                    "date": start_date.isoformat(),
+                    "source": "gsc",
+                },
+                {
+                    "page_url": "https://compassgrill.co.il/smoker",
+                    "query": "מעשנה",
+                    "clicks": 3,
+                    "impressions": 300,
+                    "ctr": 0.01,
+                    "average_position": 8.0,
+                    "date": end_date.isoformat(),
+                    "source": "gsc",
+                },
+                {
+                    "page_url": "https://compassgrill.co.il/grill",
+                    "query": "גריל גז",
+                    "clicks": 2,
+                    "impressions": 200,
+                    "ctr": 0.01,
+                    "average_position": 7.0,
+                    "date": end_date.isoformat(),
+                    "source": "gsc",
+                },
+            ]
+
+    monkeypatch.setattr("app.api.routes.GSCClient", MockGSCClient)
+    monkeypatch.setattr("app.api.routes.settings.manual_action_token", "manual-token")
+
+    response = client.post(
+        "/gsc/manual-sync",
+        json={"confirmation": "SYNC sc-domain:compassgrill.co.il"},
+        headers={"X-Manual-Action-Token": "manual-token"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["site_url"] == "sc-domain:compassgrill.co.il"
+    assert payload["date_range"]["days"] == 30
+    assert payload["rows_imported"] == 3
+    assert payload["top_queries"][0]["query"] == "גריל גז"
+    assert payload["top_queries"][0]["impressions"] == 600
+    assert payload["top_pages"][0]["page_url"] == "https://compassgrill.co.il/grill"
+    assert payload["top_pages"][0]["impressions"] == 600
+    assert db_session.query(GSCKeywordMetric).count() == 3
+
+
+def test_manual_live_gsc_sync_requires_confirmation(client: TestClient) -> None:
+    response = client.post("/gsc/manual-sync", json={"confirmation": "wrong"})
+
+    assert response.status_code == 400
+    assert "SYNC sc-domain:compassgrill.co.il" in response.json()["detail"]
+
+
+def test_manual_live_gsc_sync_requires_token_when_configured(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("app.api.routes.settings.manual_action_token", "manual-token")
+
+    response = client.post("/gsc/manual-sync", json={"confirmation": "SYNC sc-domain:compassgrill.co.il"})
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Invalid manual action token."
+
+
 def test_gsc_runtime_diagnostics_returns_non_secret_booleans(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -143,7 +231,13 @@ def test_gsc_sync_handles_missing_credentials_gracefully(client: TestClient, mon
     response = client.post("/gsc/sync")
 
     assert response.status_code == 200
-    assert response.json() == {"success": False, "rows_synced": 0, "top_queries": [], "error": "credentials missing"}
+    assert response.json() == {
+        "success": False,
+        "rows_synced": 0,
+        "top_queries": [],
+        "top_pages": [],
+        "error": "credentials missing",
+    }
 
 
 def test_gsc_keywords_filters(client: TestClient, db_session: Session) -> None:
