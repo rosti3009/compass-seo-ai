@@ -176,9 +176,10 @@ def test_gsc_opportunities_endpoint(client: TestClient, db_session: Session) -> 
     opportunities = response.json()["opportunities"]
     assert len(opportunities) == 1
     assert opportunities[0]["query"] == "low ctr keyword"
-    assert "internal links" in opportunities[0]["recommended_action"].lower() or "ctr" in opportunities[0][
-        "recommended_action"
-    ].lower()
+    assert (
+        "internal links" in opportunities[0]["recommended_action"].lower()
+        or "ctr" in opportunities[0]["recommended_action"].lower()
+    )
 
 
 def test_gsc_dashboard_views_render(client: TestClient, db_session: Session) -> None:

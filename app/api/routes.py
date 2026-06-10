@@ -1400,7 +1400,9 @@ def _simple_workspace_context(db: Session) -> dict[str, object]:
     invalidated_count = db.query(IStoreSEOApproval).filter(IStoreSEOApproval.status == "INVALIDATED").count()
     regenerated_count = db.query(IStoreSEOApproval).filter(IStoreSEOApproval.regenerated_from_id.is_not(None)).count()
     all_article_drafts = db.query(ContentArticleDraft).order_by(ContentArticleDraft.created_at.desc()).limit(20).all()
-    eligible_manual = [d for d in all_article_drafts if d.status in {"CONTENT_DRAFT", "READY_FOR_REVIEW", "NEEDS_REWRITE"}]
+    eligible_manual = [
+        d for d in all_article_drafts if d.status in {"CONTENT_DRAFT", "READY_FOR_REVIEW", "NEEDS_REWRITE"}
+    ]
     active_article = next((d for d in eligible_manual if d.is_active_manual_article), None)
     if active_article is None and eligible_manual:
         active_article = eligible_manual[0]
@@ -1408,7 +1410,9 @@ def _simple_workspace_context(db: Session) -> dict[str, object]:
         db.commit()
     active_id = active_article.id if active_article else None
     if active_article is not None:
-        _log_article_trace(active_article, "employee_workspace_article_rendering", endpoint_used="/seo/simple-workspace")
+        _log_article_trace(
+            active_article, "employee_workspace_article_rendering", endpoint_used="/seo/simple-workspace"
+        )
         _log_article_trace(active_article, "final_html_shown_to_user", endpoint_used="/seo/simple-workspace")
     return {
         "cards": cards,
@@ -1429,7 +1433,15 @@ def _simple_workspace_context(db: Session) -> dict[str, object]:
         },
         "primary_label": primary_label,
         "primary_href": primary_href,
-        "active_article": ({**active_article.to_dict(), **_article_quality_summary(active_article), "debug": _draft_debug(active_article, "title")} if active_article else None),
+        "active_article": (
+            {
+                **active_article.to_dict(),
+                **_article_quality_summary(active_article),
+                "debug": _draft_debug(active_article, "title"),
+            }
+            if active_article
+            else None
+        ),
         "archived_articles": [
             {**d.to_dict(), **_article_quality_summary(d), "debug": _draft_debug(d, "title")}
             for d in all_article_drafts
@@ -1438,9 +1450,10 @@ def _simple_workspace_context(db: Session) -> dict[str, object]:
     }
 
 
-
 def _set_active_manual_article(db: Session, active_draft: ContentArticleDraft) -> None:
-    db.query(ContentArticleDraft).update({ContentArticleDraft.is_active_manual_article: False}, synchronize_session=False)
+    db.query(ContentArticleDraft).update(
+        {ContentArticleDraft.is_active_manual_article: False}, synchronize_session=False
+    )
     active_draft.is_active_manual_article = True
     db.add(active_draft)
 
@@ -1458,7 +1471,9 @@ def _article_body_sha256(body: str | None) -> str:
     return hashlib.sha256((body or "").encode("utf-8")).hexdigest()
 
 
-def _article_trace_payload(draft: ContentArticleDraft, step: str, *, endpoint_used: str | None = None) -> dict[str, object]:
+def _article_trace_payload(
+    draft: ContentArticleDraft, step: str, *, endpoint_used: str | None = None
+) -> dict[str, object]:
     debug = _draft_debug(draft, "title")
     return {
         "step": step,
@@ -1476,7 +1491,8 @@ def _article_trace_payload(draft: ContentArticleDraft, step: str, *, endpoint_us
 def _log_article_trace(draft: ContentArticleDraft, step: str, *, endpoint_used: str | None = None) -> None:
     payload = _article_trace_payload(draft, step, endpoint_used=endpoint_used)
     logger.info(
-        "[ARTICLE_TRACE] step=%s draft_id=%s selected_topic_type=%s selected_contract=%s selected_generator=%s generator_version=%s draft_source=%s body_sha256=%s endpoint_used=%s",
+        "[ARTICLE_TRACE] step=%s draft_id=%s selected_topic_type=%s selected_contract=%s "
+        "selected_generator=%s generator_version=%s draft_source=%s body_sha256=%s endpoint_used=%s",
         payload["step"],
         payload["draft_id"],
         payload["selected_topic_type"],
@@ -1513,7 +1529,9 @@ def _article_generation_response(draft: ContentArticleDraft, endpoint_used: str)
         "topic_type": debug.get("topic_type"),
         "content_format": debug.get("content_format"),
         "detected_topic_type": debug.get("detected_topic_type"),
-        "selected_contract": debug.get("selected_topic_contract") or debug.get("topic_type") or debug.get("selected_topic_type"),
+        "selected_contract": debug.get("selected_topic_contract")
+        or debug.get("topic_type")
+        or debug.get("selected_topic_type"),
         "selected_article_contract": debug.get("selected_contract"),
         "article_contract": debug.get("article_contract"),
         "detected_intent": debug.get("detected_intent"),
@@ -1551,7 +1569,13 @@ def _article_generation_response(draft: ContentArticleDraft, endpoint_used: str)
         "final_body_source": debug.get("final_body_source"),
         "endpoint_used": endpoint_used,
     }
-    return {"success": True, "draft": {**draft.to_dict(), "debug": {**debug, "endpoint_used": endpoint_used}, "quality": quality}, "diagnostics": diagnostics}
+    return {
+        "success": True,
+        "draft": {**draft.to_dict(), "debug": {**debug, "endpoint_used": endpoint_used}, "quality": quality},
+        "diagnostics": diagnostics,
+    }
+
+
 def _strip_h1_tags(html: str) -> tuple[str, bool]:
     cleaned = re.sub(r"<h1[^>]*>.*?</h1>", "", html or "", flags=re.IGNORECASE | re.DOTALL)
     return cleaned, cleaned != (html or "")
@@ -1559,8 +1583,17 @@ def _strip_h1_tags(html: str) -> tuple[str, bool]:
 
 def _topic_keywords_detected(body: str) -> list[str]:
     checks = [
-        "hickory", "oak", "apple", "mesquite", "cherry",
-        "thin blue smoke", "bitter smoke", "soak", "smoker", "wood chips", "טמפרט"
+        "hickory",
+        "oak",
+        "apple",
+        "mesquite",
+        "cherry",
+        "thin blue smoke",
+        "bitter smoke",
+        "soak",
+        "smoker",
+        "wood chips",
+        "טמפרט",
     ]
     lowered = (body or "").lower()
     return [k for k in checks if k in lowered]
@@ -1572,8 +1605,14 @@ def _draft_debug(draft: ContentArticleDraft, slug_source: str = "title") -> dict
     link_debug = getattr(draft, "link_match_debug", {})
     topic_profile = classify_topic(draft.topic_title or "", draft.focus_keyword or "", draft.target_intent or "")
     internal_links = json.loads(draft.internal_links_json or "[]") if draft.internal_links_json else []
-    selected_products = json.loads(draft.suggested_related_products_json or "[]") if draft.suggested_related_products_json else []
-    link_scores = [float(item.get("relevance_score") or item.get("semantic_topic_match_score") or 0) for item in selected_products if isinstance(item, dict)]
+    selected_products = (
+        json.loads(draft.suggested_related_products_json or "[]") if draft.suggested_related_products_json else []
+    )
+    link_scores = [
+        float(item.get("relevance_score") or item.get("semantic_topic_match_score") or 0)
+        for item in selected_products
+        if isinstance(item, dict)
+    ]
     validation_debug = validate_article_relevance(
         draft.title or draft.topic_title or "",
         draft.focus_keyword or "",
@@ -1636,20 +1675,36 @@ def _draft_debug(draft: ContentArticleDraft, slug_source: str = "title") -> dict
                 "meta_description_score",
             }
         },
-        "article_template_used": "fallback_generic" if topic_profile.get("topic_type") == "fallback_generic" else "topic_type_contract",
+        "article_template_used": "fallback_generic"
+        if topic_profile.get("topic_type") == "fallback_generic"
+        else "topic_type_contract",
         "h1_cleanup_was_needed": removed,
-        "final_body_source": validation_debug.get("final_body_source", "contract_engine" if topic_profile.get("topic_type") != "fallback_generic" else "fallback_generic"),
+        "final_body_source": validation_debug.get(
+            "final_body_source",
+            "contract_engine" if topic_profile.get("topic_type") != "fallback_generic" else "fallback_generic",
+        ),
         "regeneration_count": validation_debug.get("regeneration_count", 0),
         **validation_debug,
         **(link_debug if isinstance(link_debug, dict) else {}),
     }
 
+
 def _article_quality_summary(draft: ContentArticleDraft) -> dict[str, float | str]:
     links = json.loads(draft.internal_links_json or "[]") if draft.internal_links_json else []
-    products = json.loads(draft.suggested_related_products_json or "[]") if draft.suggested_related_products_json else []
+    products = (
+        json.loads(draft.suggested_related_products_json or "[]") if draft.suggested_related_products_json else []
+    )
     body = draft.article_body or ""
-    semantic = round(sum(float(item.get("semantic_topic_match_score", 0)) for item in links) / len(links), 1) if links else 80.0
-    suggestion = round(sum(float(item.get("relatedness_score", 0)) for item in products) / len(products), 1) if products else 80.0
+    semantic = (
+        round(sum(float(item.get("semantic_topic_match_score", 0)) for item in links) / len(links), 1)
+        if links
+        else 80.0
+    )
+    suggestion = (
+        round(sum(float(item.get("relatedness_score", 0)) for item in products) / len(products), 1)
+        if products
+        else 80.0
+    )
     seo = 90.0 if len(draft.meta_title) <= 65 and 70 <= len(draft.meta_description) <= 160 else 72.0
     structure = 100.0
     if "<h1" in body.lower():
@@ -1665,7 +1720,9 @@ def _article_quality_summary(draft: ContentArticleDraft) -> dict[str, float | st
     repeated = ["במדריך הזה נסביר", "למה זה חשוב", "שלבים מעשיים"]
     repeated_penalty = 8 * sum(1 for t in repeated if t in body)
     structure = max(0.0, structure - repeated_penalty)
-    generic_slug_penalty = 18 if (draft.slug or "") in {"compass-grill-article", "bbq-hebrew-guide", "grill-smoking-guide"} else 0
+    generic_slug_penalty = (
+        18 if (draft.slug or "") in {"compass-grill-article", "bbq-hebrew-guide", "grill-smoking-guide"} else 0
+    )
     prompt_blob = ((draft.featured_image_prompt or "") + " " + (draft.section_image_prompts_json or "")).lower()
     wing_topic = "כנפיים" in ((draft.topic_title or "") + " " + (draft.focus_keyword or ""))
     wrong_prompt_penalty = 0
@@ -1673,7 +1730,9 @@ def _article_quality_summary(draft: ContentArticleDraft) -> dict[str, float | st
         wrong_prompt_penalty = 25
     generic_prompt_penalty = 15 if len(prompt_blob.strip()) < 25 else 0
     topic_profile = classify_topic(draft.topic_title or "", draft.focus_keyword or "", draft.target_intent or "")
-    relevance_validation = validate_article_relevance(draft.title or draft.topic_title or "", draft.focus_keyword or "", body, topic_profile)
+    relevance_validation = validate_article_relevance(
+        draft.title or draft.topic_title or "", draft.focus_keyword or "", body, topic_profile
+    )
     technical_bonus = 26 if len(_topic_keywords_detected(body)) >= 7 else 0
     if wing_topic and all(t in body for t in ["74", "גלייז", "קריספ"]):
         technical_bonus += 18
@@ -1682,13 +1741,37 @@ def _article_quality_summary(draft: ContentArticleDraft) -> dict[str, float | st
     forbidden_penalty = 15 * sum(1 for term in topic_profile.get("forbidden_terms", []) if term and term in body)
     required_miss_penalty = 7 * sum(1 for term in topic_profile.get("required_terms", []) if term and term not in body)
     faq_penalty = 12 if "שאלות נפוצות" not in body and "FAQ" not in body else 0
-    keyword_bonus = 10 if (draft.focus_keyword or "") in (draft.title or "") and (draft.focus_keyword or "") in (draft.meta_title or "") and (draft.focus_keyword or "") in body[:280] else 0
+    keyword_bonus = (
+        10
+        if (draft.focus_keyword or "") in (draft.title or "")
+        and (draft.focus_keyword or "") in (draft.meta_title or "")
+        and (draft.focus_keyword or "") in body[:280]
+        else 0
+    )
     relevance_penalty = max(0.0, (80.0 - float(relevance_validation["title_body_relevance_score"])) * 1.3)
     if not relevance_validation["validation_passed"]:
         relevance_penalty += 20
-    article_quality = min(100.0, round((seo * 0.18) + (semantic * 0.22) + (suggestion * 0.22) + (structure * 0.38) + technical_bonus + keyword_bonus - filler_penalty - forbidden_penalty - required_miss_penalty - faq_penalty - relevance_penalty, 1))
+    article_quality = min(
+        100.0,
+        round(
+            (seo * 0.18)
+            + (semantic * 0.22)
+            + (suggestion * 0.22)
+            + (structure * 0.38)
+            + technical_bonus
+            + keyword_bonus
+            - filler_penalty
+            - forbidden_penalty
+            - required_miss_penalty
+            - faq_penalty
+            - relevance_penalty,
+            1,
+        ),
+    )
     try:
-        metadata = json.loads(draft.image_generation_metadata_json or "{}") if draft.image_generation_metadata_json else {}
+        metadata = (
+            json.loads(draft.image_generation_metadata_json or "{}") if draft.image_generation_metadata_json else {}
+        )
     except (TypeError, json.JSONDecodeError):
         metadata = {}
     stored_diversity = metadata.get("diversity") if isinstance(metadata, dict) else {}
@@ -1696,7 +1779,11 @@ def _article_quality_summary(draft: ContentArticleDraft) -> dict[str, float | st
         article_quality = max(article_quality, float(stored_diversity.get("overall_quality_score") or 0))
     if not relevance_validation["validation_passed"]:
         article_quality = min(article_quality, 60.0)
-    readiness = "READY_FOR_REVIEW" if article_quality >= 90 and relevance_validation["validation_passed"] else ("NEEDS_REWRITE" if not relevance_validation["validation_passed"] else "NEEDS_IMPROVEMENT")
+    readiness = (
+        "READY_FOR_REVIEW"
+        if article_quality >= 90 and relevance_validation["validation_passed"]
+        else ("NEEDS_REWRITE" if not relevance_validation["validation_passed"] else "NEEDS_IMPROVEMENT")
+    )
     return {
         "seo_quality_score": seo,
         "semantic_relevance_score": semantic,
@@ -1755,6 +1842,7 @@ def _blog_publish_adapter_ready() -> bool:
     token = get_istore_token()
     project_or_company_id = getattr(settings, "istore_project_id", None) or getattr(settings, "istore_company_id", None)
     return bool(getattr(settings, "istore_base_url", None) and token and project_or_company_id)
+
 
 def _get_content_draft_or_404(db: Session, draft_id: int) -> ContentArticleDraft:
     draft = db.get(ContentArticleDraft, draft_id)
@@ -1901,12 +1989,11 @@ def seo_simple_bulk_approve(payload: SimpleBulkApprovalRequest, db: DatabaseSess
     return _bulk_approve_simple_safe_fixes(db, payload.fix_ids)
 
 
-
-
 @router.post("/content/articles/internal-links/refresh-index")
 def refresh_article_internal_link_index() -> dict[str, object]:
     stats = refresh_internal_link_index()
     return {"success": True, "message": "אינדקס קישורים רוענן", **stats}
+
 
 @router.post("/content/articles/generate-daily-draft")
 def generate_daily_content_article(db: DatabaseSession) -> dict[str, object]:
@@ -1915,7 +2002,13 @@ def generate_daily_content_article(db: DatabaseSession) -> dict[str, object]:
     db.commit()
     db.refresh(draft)
     response = _article_generation_response(draft, "/content/articles/generate-daily-draft")
-    response.update({"reused": reused, "last_generated_at": last_generated_at.isoformat() if last_generated_at else None, "auto_publish": False})
+    response.update(
+        {
+            "reused": reused,
+            "last_generated_at": last_generated_at.isoformat() if last_generated_at else None,
+            "auto_publish": False,
+        }
+    )
     return response
 
 
@@ -1926,7 +2019,16 @@ def generate_random_daily_content_article(db: DatabaseSession) -> dict[str, obje
     db.commit()
     db.refresh(draft)
     response = _article_generation_response(draft, "/content/articles/generate-random-daily-draft")
-    response.update({"selected_topic": draft.topic_title, "reused": reused, "draft_id": draft.id, "title": draft.title, "slug": draft.slug, "quality_score": response["draft"]["quality"].get("article_quality_score")})
+    response.update(
+        {
+            "selected_topic": draft.topic_title,
+            "reused": reused,
+            "draft_id": draft.id,
+            "title": draft.title,
+            "slug": draft.slug,
+            "quality_score": response["draft"]["quality"].get("article_quality_score"),
+        }
+    )
     return response
 
 
@@ -1971,8 +2073,17 @@ def generate_topic_content_article(payload: ManualTopicArticleRequest, db: Datab
 
 @router.get("/seo/content-articles/latest-debug")
 def latest_content_article_debug(db: DatabaseSession) -> dict[str, object]:
-    latest = db.query(ContentArticleDraft).order_by(ContentArticleDraft.created_at.desc(), ContentArticleDraft.id.desc()).first()
-    active = db.query(ContentArticleDraft).filter(ContentArticleDraft.is_active_manual_article.is_(True)).order_by(ContentArticleDraft.created_at.desc(), ContentArticleDraft.id.desc()).first()
+    latest = (
+        db.query(ContentArticleDraft)
+        .order_by(ContentArticleDraft.created_at.desc(), ContentArticleDraft.id.desc())
+        .first()
+    )
+    active = (
+        db.query(ContentArticleDraft)
+        .filter(ContentArticleDraft.is_active_manual_article.is_(True))
+        .order_by(ContentArticleDraft.created_at.desc(), ContentArticleDraft.id.desc())
+        .first()
+    )
     if latest is None:
         return {"latest_article_id": None, "active_article_id": None}
     debug = _draft_debug(latest, "title")
@@ -1985,7 +2096,9 @@ def latest_content_article_debug(db: DatabaseSession) -> dict[str, object]:
         "generator_source": debug.get("generator_source"),
         "selected_generator": debug.get("selected_generator"),
         "selected_topic_type": debug.get("selected_topic_type"),
-        "selected_contract": debug.get("selected_topic_contract") or debug.get("topic_type") or debug.get("selected_topic_type"),
+        "selected_contract": debug.get("selected_topic_contract")
+        or debug.get("topic_type")
+        or debug.get("selected_topic_type"),
         "selected_article_contract": debug.get("selected_contract"),
         "draft_source": debug.get("draft_source"),
         "article_body_sha256": debug.get("article_body_sha256"),
@@ -2026,7 +2139,9 @@ def list_content_drafts(db: DatabaseSession) -> dict[str, object]:
 def get_content_draft(draft_id: int, db: DatabaseSession) -> dict[str, object]:
     draft = _get_content_draft_or_404(db, draft_id)
     _log_article_trace(draft, "final_html_preview", endpoint_used=f"/content/articles/{draft_id}")
-    return {"draft": {**draft.to_dict(), "debug": _draft_debug(draft, "title"), "quality": _article_quality_summary(draft)}}
+    return {
+        "draft": {**draft.to_dict(), "debug": _draft_debug(draft, "title"), "quality": _article_quality_summary(draft)}
+    }
 
 
 @router.post("/content/articles/{draft_id}/edit")
@@ -2102,7 +2217,9 @@ def publish_content_draft(draft_id: int, db: DatabaseSession, dry_run: bool = Fa
         "allowed": allowed,
         "blocked_reason": blocked_reason,
         "publish_adapter": "istore_blog_content_adapter",
-        "destination_under_blog": bool(draft.target_url and draft.target_url.startswith("https://compassgrill.co.il/blog/")),
+        "destination_under_blog": bool(
+            draft.target_url and draft.target_url.startswith("https://compassgrill.co.il/blog/")
+        ),
     }
     if dry_run:
         contract: dict[str, object] | None = None
@@ -2170,20 +2287,19 @@ def publish_content_draft(draft_id: int, db: DatabaseSession, dry_run: bool = Fa
     }
 
 
-
-
-
-
 @router.get("/debug/internal-link-match")
 def debug_internal_link_match(query: str, db: DatabaseSession) -> dict[str, object]:
     from app.services.content_articles import _discover_related_links
 
     matches, debug = _discover_related_links(db, query, limit=10)
     return {"query": query, "debug": debug, "matches": matches}
+
+
 @router.get("/debug/istore/browser-status")
 def debug_istore_browser_status() -> dict[str, object]:
     """Run ISTORE admin browser session check without submitting forms."""
     return check_istore_browser_status().to_dict()
+
 
 @router.get("/debug/istore/create-dry-run")
 def debug_istore_create_dry_run(draft_id: int, db: DatabaseSession) -> dict[str, object]:
@@ -2237,8 +2353,7 @@ def debug_istore_browser_create_test(draft_id: int, db: DatabaseSession, dry_run
 def content_calendar(db: DatabaseSession) -> dict[str, object]:
     drafts = db.query(ContentArticleDraft).order_by(ContentArticleDraft.created_at.desc()).limit(60).all()
     history = [
-        {"date": d.created_at.date().isoformat(), "topic": d.topic_title, "keyword": d.focus_keyword}
-        for d in drafts
+        {"date": d.created_at.date().isoformat(), "topic": d.topic_title, "keyword": d.focus_keyword} for d in drafts
     ]
     return {"history": history}
 
@@ -3527,12 +3642,11 @@ async def sitemap_discover() -> dict:
     }
 
 
-
-
 def _provider_generate_article_image(provider: object, prompt: str, *, draft_slug: str, image_key: str):
     if hasattr(provider, "generate_image"):
         return provider.generate_image(prompt, draft_slug=draft_slug, image_key=image_key)
     return provider.generate_hero_image(prompt, draft_slug=draft_slug)
+
 
 @router.post("/content/articles/{draft_id}/generate-image-plan")
 def generate_article_image_plan(draft_id: int, db: DatabaseSession) -> dict[str, object]:
@@ -3562,9 +3676,17 @@ def generate_article_package_image(draft_id: int, image_key: str, db: DatabaseSe
     image_item = next((item for item in image_package if isinstance(item, dict) and item.get("key") == image_key), None)
     if not image_item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image package item not found")
-    prompt = build_realistic_hero_prompt(str(image_item.get("prompt") or draft.featured_image_prompt or "premium BBQ article image"))
-    result = _provider_generate_article_image(provider, prompt, draft_slug=f"{draft.slug}-{image_key}", image_key=image_key)
-    public_url = f"{public_base_url}{result.image_url}" if result.image_url and result.image_url.startswith("/") else result.image_url
+    prompt = build_realistic_hero_prompt(
+        str(image_item.get("prompt") or draft.featured_image_prompt or "premium BBQ article image")
+    )
+    result = _provider_generate_article_image(
+        provider, prompt, draft_slug=f"{draft.slug}-{image_key}", image_key=image_key
+    )
+    public_url = (
+        f"{public_base_url}{result.image_url}"
+        if result.image_url and result.image_url.startswith("/")
+        else result.image_url
+    )
     image_item["prompt"] = prompt
     image_item["image_url"] = public_url or ""
     image_item["generated_url"] = public_url or ""
@@ -3587,8 +3709,14 @@ def generate_article_package_image(draft_id: int, image_key: str, db: DatabaseSe
     }
     metadata["assets"] = assets
     metadata["image_package"] = image_package
-    metadata["generated_image_count"] = len([i for i in image_package if isinstance(i, dict) and (i.get("generated_url") or i.get("image_url"))])
-    metadata["image_generation_workflow"] = {"last_action": "generate_single", "last_image_key": image_key, "provider": result.provider}
+    metadata["generated_image_count"] = len(
+        [i for i in image_package if isinstance(i, dict) and (i.get("generated_url") or i.get("image_url"))]
+    )
+    metadata["image_generation_workflow"] = {
+        "last_action": "generate_single",
+        "last_image_key": image_key,
+        "provider": result.provider,
+    }
     if image_key == "featured_image":
         draft.featured_image_status = result.status
         draft.generated_image_url = public_url
@@ -3598,7 +3726,10 @@ def generate_article_package_image(draft_id: int, image_key: str, db: DatabaseSe
     db.commit()
     db.refresh(draft)
     if result.status == "failed":
-        return JSONResponse(status_code=status.HTTP_502_BAD_GATEWAY, content={"success": False, "error": result.error or "Image generation failed", "image_key": image_key})
+        return JSONResponse(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            content={"success": False, "error": result.error or "Image generation failed", "image_key": image_key},
+        )
     return {
         "success": True,
         "image_key": image_key,
@@ -3609,6 +3740,7 @@ def generate_article_package_image(draft_id: int, image_key: str, db: DatabaseSe
         "image_item": image_item,
         "draft": draft.to_dict(),
     }
+
 
 @router.post("/content/articles/{draft_id}/generate-image")
 def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, object]:
@@ -3625,8 +3757,12 @@ def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, obje
         f"wide premium BBQ banner, {draft.focus_keyword} on grill, dark elegant BBQ background, "
         "empty space for Hebrew text overlay, cinematic lighting, no text, no logos"
     )
-    hero_result = _provider_generate_article_image(provider, hero_prompt, draft_slug=f"{draft.slug}-hero", image_key="featured_image")
-    banner_result = _provider_generate_article_image(provider, banner_prompt, draft_slug=f"{draft.slug}-banner", image_key="general_banner_image")
+    hero_result = _provider_generate_article_image(
+        provider, hero_prompt, draft_slug=f"{draft.slug}-hero", image_key="featured_image"
+    )
+    banner_result = _provider_generate_article_image(
+        provider, banner_prompt, draft_slug=f"{draft.slug}-banner", image_key="general_banner_image"
+    )
     section_results: dict[str, object] = {}
     image_package = metadata.get("image_package") if isinstance(metadata.get("image_package"), list) else []
     for image_item in image_package:
@@ -3635,11 +3771,19 @@ def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, obje
         image_key = str(image_item.get("key") or "")
         if image_key not in {"image_1", "image_2", "image_3", "image_4"}:
             continue
-        section_prompt = build_realistic_hero_prompt(str(image_item.get("prompt") or draft.featured_image_prompt or hero_prompt))
-        section_results[image_key] = _provider_generate_article_image(provider, section_prompt, draft_slug=f"{draft.slug}-{image_key}", image_key=image_key)
+        section_prompt = build_realistic_hero_prompt(
+            str(image_item.get("prompt") or draft.featured_image_prompt or hero_prompt)
+        )
+        section_results[image_key] = _provider_generate_article_image(
+            provider, section_prompt, draft_slug=f"{draft.slug}-{image_key}", image_key=image_key
+        )
     result = hero_result
     image_file_path = None
-    image_public_url = f"{public_base_url}{result.image_url}" if result.image_url and result.image_url.startswith("/") else result.image_url
+    image_public_url = (
+        f"{public_base_url}{result.image_url}"
+        if result.image_url and result.image_url.startswith("/")
+        else result.image_url
+    )
     image_file_saved = False
     diagnostics = {
         "provider_name": result.provider,
@@ -3712,7 +3856,11 @@ def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, obje
     assets["article_hero_image"] = {
         "image_type": "article_hero_image",
         "public_url": image_public_url,
-        "local_path": (f"app{hero_result.image_url}" if hero_result.image_url and hero_result.image_url.startswith("/static/") else None),
+        "local_path": (
+            f"app{hero_result.image_url}"
+            if hero_result.image_url and hero_result.image_url.startswith("/static/")
+            else None
+        ),
         "prompt": hero_prompt,
         "alt_text": draft.image_alt_text,
         "width": hero_result.width,
@@ -3720,11 +3868,19 @@ def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, obje
         "created_at": hero_result.generated_at,
         "generation_status": hero_result.status,
     }
-    banner_public_url = f"{public_base_url}{banner_result.image_url}" if banner_result.image_url and banner_result.image_url.startswith("/") else banner_result.image_url
+    banner_public_url = (
+        f"{public_base_url}{banner_result.image_url}"
+        if banner_result.image_url and banner_result.image_url.startswith("/")
+        else banner_result.image_url
+    )
     assets["general_banner_image"] = {
         "image_type": "general_banner_image",
         "public_url": banner_public_url,
-        "local_path": (f"app{banner_result.image_url}" if banner_result.image_url and banner_result.image_url.startswith("/static/") else None),
+        "local_path": (
+            f"app{banner_result.image_url}"
+            if banner_result.image_url and banner_result.image_url.startswith("/static/")
+            else None
+        ),
         "prompt": banner_prompt,
         "alt_text": f"באנר כללי - {draft.focus_keyword}",
         "width": banner_result.width,
@@ -3734,8 +3890,12 @@ def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, obje
     }
     for image_key, section_result in section_results.items():
         section_url = getattr(section_result, "image_url", None)
-        section_public_url = f"{public_base_url}{section_url}" if section_url and str(section_url).startswith("/") else section_url
-        package_item = next((item for item in image_package if isinstance(item, dict) and item.get("key") == image_key), {})
+        section_public_url = (
+            f"{public_base_url}{section_url}" if section_url and str(section_url).startswith("/") else section_url
+        )
+        package_item = next(
+            (item for item in image_package if isinstance(item, dict) and item.get("key") == image_key), {}
+        )
         package_item["image_url"] = section_public_url or ""
         package_item["generated_url"] = section_public_url or ""
         package_item["preview_url"] = section_public_url or ""
@@ -3753,25 +3913,31 @@ def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, obje
             "created_at": getattr(section_result, "generated_at", None),
             "generation_status": getattr(section_result, "status", None),
         }
-    metadata.update({
-        "width": result.width,
-        "height": result.height,
-        "provider": result.provider,
-        "generated_at": result.generated_at,
-        "assets": assets,
-        "image_package": image_package,
-        "generated_image_count": len([a for a in assets.values() if isinstance(a, dict) and a.get("public_url")]),
-        "article_hero_image_status": hero_result.status,
-        "general_banner_image_status": banner_result.status,
-        "section_image_statuses": {key: getattr(value, "status", None) for key, value in section_results.items()},
-        "image_prompt_version": "v3-multi-image-section-aware",
-        "regeneration_count": regeneration_count,
-    })
+    metadata.update(
+        {
+            "width": result.width,
+            "height": result.height,
+            "provider": result.provider,
+            "generated_at": result.generated_at,
+            "assets": assets,
+            "image_package": image_package,
+            "generated_image_count": len([a for a in assets.values() if isinstance(a, dict) and a.get("public_url")]),
+            "article_hero_image_status": hero_result.status,
+            "general_banner_image_status": banner_result.status,
+            "section_image_statuses": {key: getattr(value, "status", None) for key, value in section_results.items()},
+            "image_prompt_version": "v3-multi-image-section-aware",
+            "regeneration_count": regeneration_count,
+        }
+    )
     draft.image_generation_metadata_json = json.dumps(metadata, ensure_ascii=False)
     diagnostics["image_storage_success"] = bool(result.image_url)
-    diagnostics["image_file_saved"] = bool(result.image_url and str(result.image_url).startswith("/static/generated-images/"))
+    diagnostics["image_file_saved"] = bool(
+        result.image_url and str(result.image_url).startswith("/static/generated-images/")
+    )
     diagnostics["image_public_url"] = image_public_url
-    diagnostics["image_file_path"] = (f"app{result.image_url}" if result.image_url and result.image_url.startswith("/static/") else None)
+    diagnostics["image_file_path"] = (
+        f"app{result.image_url}" if result.image_url and result.image_url.startswith("/static/") else None
+    )
     db.add(draft)
     db.commit()
     db.refresh(draft)
@@ -3788,7 +3954,9 @@ def generate_article_image(draft_id: int, db: DatabaseSession) -> dict[str, obje
         "copy_image_url": image_public_url,
         "article_hero_image": assets.get("article_hero_image"),
         "general_banner_image": assets.get("general_banner_image"),
-        "section_images": {key: assets.get(key) for key in ["image_1", "image_2", "image_3", "image_4"] if assets.get(key)},
+        "section_images": {
+            key: assets.get(key) for key in ["image_1", "image_2", "image_3", "image_4"] if assets.get(key)
+        },
         "image_package": image_package,
         "image_metadata": {
             "width": result.width,
