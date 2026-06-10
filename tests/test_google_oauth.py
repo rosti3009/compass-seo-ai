@@ -159,3 +159,64 @@ def test_dashboard_connect_google_link_exists(client: TestClient) -> None:
     assert response.status_code == 200
     assert 'href="/auth/google/start"' in response.text
     assert "Connect Google Account" in response.text
+
+
+def test_google_diagnostics_endpoint_returns_safe_configuration_booleans(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("app.integrations.google_auth.settings.gsc_site_url", "sc-domain:compassgrill.co.il")
+    monkeypatch.setattr(
+        "app.integrations.google_auth.settings.google_application_credentials_json", '{"type":"service_account"}'
+    )
+    monkeypatch.setattr("app.integrations.google_auth.settings.google_service_account_file", None)
+    monkeypatch.setattr("app.integrations.google_auth.settings.google_oauth_client_id", "client-id")
+    monkeypatch.setattr("app.integrations.google_auth.settings.google_oauth_redirect_uri", "https://example.com/callback")
+
+    response = client.get("/integrations/google/diagnostics")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload == {
+        "gsc_site_url_configured": True,
+        "google_application_credentials_json_configured": True,
+        "google_service_account_file_configured": False,
+        "google_oauth_client_id_configured": True,
+        "google_oauth_redirect_uri_configured": True,
+        "resolved_auth_method": "service_account",
+        "gsc_site_url_value_redacted": "sc-domain:co**************il",
+    }
+    assert "service_account" not in str(payload.get("gsc_site_url_value_redacted"))
+    assert "compassgrill.co.il" not in str(payload)
+
+
+def test_google_diagnostics_endpoint_prefers_connected_oauth_token(
+    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("app.integrations.google_auth.settings.gsc_site_url", None)
+    monkeypatch.setattr("app.integrations.google_auth.settings.google_application_credentials_json", None)
+    monkeypatch.setattr("app.integrations.google_auth.settings.google_service_account_file", "google-credentials.json")
+    monkeypatch.setattr("app.integrations.google_auth.settings.google_oauth_client_id", None)
+    monkeypatch.setattr("app.integrations.google_auth.settings.google_oauth_redirect_uri", None)
+    db_session.add(
+        GoogleOAuthToken(
+            provider="google",
+            access_token="oauth-access",  # noqa: S106
+            refresh_token="oauth-refresh",  # noqa: S106
+            token_uri="https://oauth2.googleapis.com/token",  # noqa: S106
+            client_id="client-id",
+            client_secret="client-secret",  # noqa: S106
+            scopes_json='["https://www.googleapis.com/auth/webmasters.readonly"]',
+        )
+    )
+    db_session.commit()
+
+    response = client.get("/integrations/google/diagnostics")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["resolved_auth_method"] == "oauth"
+    assert payload["google_service_account_file_configured"] is True
+    assert payload["gsc_site_url_value_redacted"] is None
+    assert "oauth-access" not in str(payload)
+    assert "oauth-refresh" not in str(payload)
+    assert "client-secret" not in str(payload)

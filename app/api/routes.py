@@ -34,20 +34,27 @@ from app.db.models import (
 )
 from app.integrations.ga4 import GA4Client
 from app.integrations.ga4 import MissingGoogleCredentialsError as MissingGA4CredentialsError
-from app.integrations.google_auth import GOOGLE_OAUTH_SCOPES, oauth_status, utc_expiry_from_seconds
+from app.integrations.google_auth import (
+    GOOGLE_OAUTH_SCOPES,
+    google_auth_diagnostics,
+    oauth_status,
+    utc_expiry_from_seconds,
+)
 from app.integrations.gsc import GSCAPIError, GSCClient
 from app.integrations.gsc import MissingGoogleCredentialsError as MissingGSCCredentialsError
 from app.integrations.istore import IStoreAPIError, IStoreClient, MissingIStoreSettingsError
 from app.integrations.openai_client import OpenAIClient
 from app.services.content_articles import (
-    GENERIC_FILLER_PHRASES,
     GENERATOR_VERSION,
-    _classify_topic as classify_topic,
+    GENERIC_FILLER_PHRASES,
     build_topic_seo_metadata,
-    validate_article_relevance,
     generate_daily_article_draft,
     generate_topic_article_draft,
     refresh_internal_link_index,
+    validate_article_relevance,
+)
+from app.services.content_articles import (
+    _classify_topic as classify_topic,
 )
 from app.services.crawler import SEOCrawler
 from app.services.hebrew_seo import analyze_page_hebrew_seo, israeli_seasonality, summarize_hebrew_insights
@@ -3387,6 +3394,12 @@ def preview_seo_task_article(task_id: int, db: DatabaseSession) -> HTMLResponse:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SEO task not found")
     _raise_if_url_excluded(task.page_url)
     return HTMLResponse(content=_task_article_preview_html(task))
+
+
+@router.get("/integrations/google/diagnostics")
+def google_integration_diagnostics(db: DatabaseSession) -> dict[str, object]:
+    """Return production-safe Google/GSC configuration diagnostics without exposing secrets."""
+    return google_auth_diagnostics(db)
 
 
 @router.get("/integrations/gsc/status")
