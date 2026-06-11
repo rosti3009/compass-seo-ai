@@ -549,6 +549,134 @@ def _aggregate_gsc_metrics(rows: list[GSCKeywordMetric], group_field: str, limit
     return sorted_payloads[:limit]
 
 
+def _format_article_recommendation_title(query: str) -> str:
+    """Build a readable content recommendation title without transliterating Hebrew queries."""
+    clean_query = " ".join((query or "").split())
+    if not clean_query:
+        return "Create or refresh a GSC-led article"
+    return f"Create or refresh an article targeting: {clean_query}"
+
+
+def _gsc_opportunities_dashboard(db: Session) -> dict[str, object]:
+    """Build the GSC Opportunities dashboard from imported gsc_keyword_metrics rows."""
+    rows = (
+        db.query(GSCKeywordMetric)
+        .order_by(GSCKeywordMetric.date.desc(), GSCKeywordMetric.impressions.desc(), GSCKeywordMetric.id.desc())
+        .limit(50000)
+        .all()
+    )
+
+    top_queries_by_impressions = _aggregate_gsc_metrics(rows, "query", limit=10)
+    top_queries_by_clicks = sorted(
+        _aggregate_gsc_metrics(rows, "query", limit=500),
+        key=lambda item: (-int(item["clicks"]), -int(item["impressions"]), str(item["query"])),
+    )[:10]
+    top_pages_by_impressions = _aggregate_gsc_metrics(rows, "page_url", limit=10)
+    low_ctr_mid_position = _gsc_opportunities(db, limit=25)
+
+    available_dates = sorted({row.date for row in rows if row.date})
+    declining_pages: list[dict[str, object]] = []
+    if available_dates:
+        latest_date = available_dates[-1]
+        current_start = latest_date - timedelta(days=29)
+        previous_start = current_start - timedelta(days=30)
+        previous_end = current_start - timedelta(days=1)
+        current_rows = [row for row in rows if row.date and current_start <= row.date <= latest_date]
+        previous_rows = [row for row in rows if row.date and previous_start <= row.date <= previous_end]
+
+        if not previous_rows and len(available_dates) > 1:
+            midpoint = max(1, len(available_dates) // 2)
+            previous_dates = set(available_dates[:midpoint])
+            current_dates = set(available_dates[midpoint:]) or {available_dates[-1]}
+            previous_rows = [row for row in rows if row.date in previous_dates]
+            current_rows = [row for row in rows if row.date in current_dates]
+
+        previous_by_page = {
+            item["page_url"]: item for item in _aggregate_gsc_metrics(previous_rows, "page_url", limit=500)
+        }
+        current_by_page = {
+            item["page_url"]: item for item in _aggregate_gsc_metrics(current_rows, "page_url", limit=500)
+        }
+        default_current = {"clicks": 0, "impressions": 0, "ctr": 0.0, "average_position": 0.0}
+        for page_url, previous in previous_by_page.items():
+            current = current_by_page.get(page_url, default_current)
+            impressions_delta = int(current["impressions"]) - int(previous["impressions"])
+            clicks_delta = int(current["clicks"]) - int(previous["clicks"])
+            if impressions_delta < 0 or clicks_delta < 0:
+                previous_impressions = int(previous["impressions"])
+                decline_pct = abs(impressions_delta) / previous_impressions if previous_impressions else 0.0
+                declining_pages.append(
+                    {
+                        "page_url": page_url,
+                        "current_clicks": int(current["clicks"]),
+                        "previous_clicks": int(previous["clicks"]),
+                        "clicks_delta": clicks_delta,
+                        "current_impressions": int(current["impressions"]),
+                        "previous_impressions": int(previous["impressions"]),
+                        "impressions_delta": impressions_delta,
+                        "impressions_decline_pct": decline_pct,
+                        "current_ctr": float(current["ctr"]),
+                        "previous_ctr": float(previous["ctr"]),
+                    }
+                )
+        declining_pages = sorted(
+            declining_pages,
+            key=lambda item: (
+                int(item["impressions_delta"]),
+                int(item["clicks_delta"]),
+                -int(item["previous_impressions"]),
+            ),
+        )[:10]
+
+    article_recommendations = []
+    seen_recommendations: set[tuple[str, str]] = set()
+    rows_by_page: dict[str, list[GSCKeywordMetric]] = {}
+    for row in rows:
+        rows_by_page.setdefault(row.page_url, []).append(row)
+    for opportunity in low_ctr_mid_position:
+        key = (str(opportunity["page_url"]), str(opportunity["query"]))
+        if key in seen_recommendations:
+            continue
+        seen_recommendations.add(key)
+        page_rows_by_impressions = sorted(
+            rows_by_page.get(str(opportunity["page_url"]), []),
+            key=lambda item: item.impressions,
+            reverse=True,
+        )
+        related_queries = [
+            row.query for row in page_rows_by_impressions if row.query and row.query != opportunity["query"]
+        ][:4]
+        article_recommendations.append(
+            {
+                "title": _format_article_recommendation_title(str(opportunity["query"])),
+                "primary_query": opportunity["query"],
+                "target_page": opportunity["page_url"],
+                "supporting_queries": related_queries,
+                "recommended_action": (
+                    "Build a dedicated article or refresh the target page section to answer this query, "
+                    "then link it from relevant commercial pages."
+                ),
+                "rationale": opportunity["opportunity_reason"],
+                "keyword_opportunity_score": opportunity["keyword_opportunity_score"],
+            }
+        )
+        if len(article_recommendations) >= 10:
+            break
+
+    return {
+        "top_queries_by_impressions": top_queries_by_impressions,
+        "top_queries_by_clicks": top_queries_by_clicks,
+        "low_ctr_mid_position_queries": low_ctr_mid_position,
+        "top_pages_by_impressions": top_pages_by_impressions,
+        "declining_pages": declining_pages,
+        "article_recommendations": article_recommendations,
+        "low_ctr_threshold": LOW_CTR_THRESHOLD,
+        "high_impressions_threshold": HIGH_IMPRESSIONS_THRESHOLD,
+        "weak_ranking_min": WEAK_RANKING_MIN,
+        "weak_ranking_max": WEAK_RANKING_MAX,
+    }
+
+
 def _safe_gsc_sync_error(exc: Exception) -> str:
     logger.exception("Manual GSC sync failed")
     if isinstance(exc, MissingGSCCredentialsError):
@@ -2749,8 +2877,21 @@ def list_gsc_keywords(
 
 @router.get("/gsc/opportunities")
 def gsc_opportunities(db: DatabaseSession) -> dict[str, object]:
-    """Return keyword opportunities from high-impression, low-CTR, mid-ranking GSC rows."""
-    return {"success": True, "opportunities": _gsc_opportunities(db)}
+    """Return a full GSC opportunities dashboard from imported keyword metrics."""
+    dashboard = _gsc_opportunities_dashboard(db)
+    return {
+        "success": True,
+        "opportunities": dashboard["low_ctr_mid_position_queries"],
+        "dashboard": dashboard,
+        **dashboard,
+    }
+
+
+@router.get("/gsc/opportunities-dashboard")
+def gsc_opportunities_dashboard(db: DatabaseSession) -> dict[str, object]:
+    """Return the GSC opportunities dashboard payload for API and PowerShell users."""
+    dashboard = _gsc_opportunities_dashboard(db)
+    return {"success": True, **dashboard}
 
 
 @router.get("/gsc/keywords-view", response_class=HTMLResponse)
@@ -2801,10 +2942,11 @@ def gsc_keywords_view(request: Request, db: DatabaseSession) -> HTMLResponse:
 @router.get("/gsc/opportunities-view", response_class=HTMLResponse)
 def gsc_opportunities_view(request: Request, db: DatabaseSession) -> HTMLResponse:
     """Render GSC opportunity recommendations for human review."""
+    dashboard = _gsc_opportunities_dashboard(db)
     return templates.TemplateResponse(
         request,
         "gsc_opportunities.html",
-        {"opportunities": _gsc_opportunities(db), "low_ctr_threshold": LOW_CTR_THRESHOLD},
+        {"opportunities": dashboard["low_ctr_mid_position_queries"], **dashboard},
     )
 
 

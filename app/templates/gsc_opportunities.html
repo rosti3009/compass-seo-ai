@@ -9,10 +9,59 @@
 <body>
   <main class="container">
     <h1>GSC Opportunities</h1>
-    <p>Pages with strong impressions, weak CTR, and rankings in positions 4-20.</p>
+    <p>Dashboard built from imported <code>gsc_keyword_metrics</code> rows, including query wins, page trends, and article recommendations.</p>
+
+    {% macro percent(value) -%}
+      {{ "%.2f"|format((value or 0) * 100) }}%
+    {%- endmacro %}
+
+    {% macro metric_table(title, rows, label_key, label_title) %}
+      <section class="card">
+        <h2>{{ title }}</h2>
+        {% if rows %}
+          <table>
+            <thead>
+              <tr>
+                <th>{{ label_title }}</th>
+                <th>Clicks</th>
+                <th>Impressions</th>
+                <th>CTR</th>
+                <th>Avg. position</th>
+                <th>Rows</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in rows %}
+                <tr>
+                  <td>
+                    {% if label_key == "page_url" %}
+                      <a href="{{ row[label_key] }}">{{ row[label_key] }}</a>
+                    {% else %}
+                      {{ row[label_key] }}
+                    {% endif %}
+                  </td>
+                  <td>{{ row.clicks }}</td>
+                  <td>{{ row.impressions }}</td>
+                  <td>{{ percent(row.ctr) }}</td>
+                  <td>{{ "%.1f"|format(row.average_position or 0) }}</td>
+                  <td>{{ row.row_count }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p>No GSC rows available yet. Import rows into <code>gsc_keyword_metrics</code> or run <code>POST /gsc/manual-sync</code>.</p>
+        {% endif %}
+      </section>
+    {% endmacro %}
+
+    {{ metric_table("1. Top queries by impressions", top_queries_by_impressions, "query", "Query") }}
+    {{ metric_table("2. Top queries by clicks", top_queries_by_clicks, "query", "Query") }}
+
     <section class="card">
-      <h2>Low CTR and internal link opportunities</h2>
-      {% if opportunities %}
+      <h2>3. Queries in positions 4-20 with high impressions and low CTR</h2>
+      <p>Thresholds: impressions ≥ {{ high_impressions_threshold }}, CTR &lt; {{ percent(low_ctr_threshold) }}, average position {{ weak_ranking_min }}-{{ weak_ranking_max }}.</p>
+      {% if low_ctr_mid_position_queries %}
         <table>
           <thead>
             <tr>
@@ -27,13 +76,13 @@
             </tr>
           </thead>
           <tbody>
-            {% for opportunity in opportunities %}
+            {% for opportunity in low_ctr_mid_position_queries %}
               <tr>
                 <td>{{ opportunity.query }}</td>
                 <td><a href="{{ opportunity.page_url }}">{{ opportunity.page_url }}</a></td>
                 <td>{{ opportunity.clicks }}</td>
                 <td>{{ opportunity.impressions }}</td>
-                <td>{{ "%.2f"|format(opportunity.ctr * 100) }}%</td>
+                <td>{{ percent(opportunity.ctr) }}</td>
                 <td>{{ "%.1f"|format(opportunity.average_position) }}</td>
                 <td>{{ opportunity.opportunity_reason }}</td>
                 <td>{{ opportunity.recommended_action }}</td>
@@ -42,8 +91,85 @@
           </tbody>
         </table>
       {% else %}
-        <p>No matching opportunities yet. Current low CTR threshold: {{ "%.2f"|format(low_ctr_threshold * 100) }}%.</p>
+        <p>No matching CTR opportunities yet.</p>
       {% endif %}
+    </section>
+
+    {{ metric_table("4. Top pages by impressions", top_pages_by_impressions, "page_url", "Page") }}
+
+    <section class="card">
+      <h2>5. Declining pages compared to previous period</h2>
+      {% if declining_pages %}
+        <table>
+          <thead>
+            <tr>
+              <th>Page</th>
+              <th>Current impressions</th>
+              <th>Previous impressions</th>
+              <th>Impressions Δ</th>
+              <th>Current clicks</th>
+              <th>Previous clicks</th>
+              <th>Clicks Δ</th>
+              <th>Current CTR</th>
+              <th>Previous CTR</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for page in declining_pages %}
+              <tr>
+                <td><a href="{{ page.page_url }}">{{ page.page_url }}</a></td>
+                <td>{{ page.current_impressions }}</td>
+                <td>{{ page.previous_impressions }}</td>
+                <td>{{ page.impressions_delta }}</td>
+                <td>{{ page.current_clicks }}</td>
+                <td>{{ page.previous_clicks }}</td>
+                <td>{{ page.clicks_delta }}</td>
+                <td>{{ percent(page.current_ctr) }}</td>
+                <td>{{ percent(page.previous_ctr) }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p>No declining pages found for the available imported periods.</p>
+      {% endif %}
+    </section>
+
+    <section class="card">
+      <h2>6. Article recommendations based on GSC queries</h2>
+      {% if article_recommendations %}
+        <table>
+          <thead>
+            <tr>
+              <th>Recommendation</th>
+              <th>Primary query</th>
+              <th>Target page</th>
+              <th>Supporting queries</th>
+              <th>Why</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for recommendation in article_recommendations %}
+              <tr>
+                <td>{{ recommendation.title }}</td>
+                <td>{{ recommendation.primary_query }}</td>
+                <td><a href="{{ recommendation.target_page }}">{{ recommendation.target_page }}</a></td>
+                <td>{{ recommendation.supporting_queries|join(", ") }}</td>
+                <td>{{ recommendation.rationale }}</td>
+                <td>{{ recommendation.recommended_action }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p>No article recommendations yet. Add high-impression, low-CTR queries ranking in positions 4-20.</p>
+      {% endif %}
+    </section>
+
+    <section class="card">
+      <h2>7. Hebrew API and PowerShell output</h2>
+      <p>API JSON is emitted as UTF-8 with unescaped Hebrew. In Windows PowerShell, prefer <code>chcp 65001</code> and <code>[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()</code> before calling the API.</p>
     </section>
   </main>
 </body>
