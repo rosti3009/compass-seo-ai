@@ -101,8 +101,9 @@ def test_gsc_sync_upserts_mocked_rows(client: TestClient, db_session: Session, m
     assert metric.impressions == 300
 
 
+@pytest.mark.parametrize("configured_site_url", ["sc-domain:compassgrill.co.il", "https://compassgrill.co.il/"])
 def test_manual_live_gsc_sync_imports_last_30_days_and_returns_top_queries_and_pages(
-    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch, configured_site_url: str
 ) -> None:
     class MockGSCClient:
         @classmethod
@@ -113,7 +114,7 @@ def test_manual_live_gsc_sync_imports_last_30_days_and_returns_top_queries_and_p
         def fetch_query_page_date_rows(
             self, site_url: str, *, start_date: date, end_date: date, limit: int
         ) -> list[dict[str, object]]:
-            assert site_url == "sc-domain:compassgrill.co.il"
+            assert site_url == configured_site_url
             assert (end_date - start_date).days == 29
             assert limit == 25000
             return [
@@ -150,18 +151,24 @@ def test_manual_live_gsc_sync_imports_last_30_days_and_returns_top_queries_and_p
             ]
 
     monkeypatch.setattr("app.api.routes.GSCClient", MockGSCClient)
+    monkeypatch.setattr("app.api.routes.settings.gsc_site_url", configured_site_url)
     monkeypatch.setattr("app.api.routes.settings.manual_action_token", "manual-token")
+
+    diagnostics_response = client.get("/integrations/google/diagnostics")
+    assert diagnostics_response.status_code == 200
+    assert diagnostics_response.json()["gsc_site_url_configured"] is True
+    assert diagnostics_response.json()["gsc_site_url_value_redacted"] is not None
 
     response = client.post(
         "/gsc/manual-sync",
-        json={"confirmation": "SYNC sc-domain:compassgrill.co.il"},
+        json={"confirmation": f"SYNC {configured_site_url}"},
         headers={"X-Manual-Action-Token": "manual-token"},
     )
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["success"] is True
-    assert payload["site_url"] == "sc-domain:compassgrill.co.il"
+    assert payload["site_url"] == configured_site_url
     assert payload["date_range"]["days"] == 30
     assert payload["rows_imported"] == 3
     assert payload["top_queries"][0]["query"] == "גריל גז"
@@ -171,19 +178,25 @@ def test_manual_live_gsc_sync_imports_last_30_days_and_returns_top_queries_and_p
     assert db_session.query(GSCKeywordMetric).count() == 3
 
 
-def test_manual_live_gsc_sync_requires_confirmation(client: TestClient) -> None:
+@pytest.mark.parametrize("configured_site_url", ["sc-domain:compassgrill.co.il", "https://compassgrill.co.il/"])
+def test_manual_live_gsc_sync_requires_runtime_site_url_confirmation(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, configured_site_url: str
+) -> None:
+    monkeypatch.setattr("app.api.routes.settings.gsc_site_url", configured_site_url)
+
     response = client.post("/gsc/manual-sync", json={"confirmation": "wrong"})
 
     assert response.status_code == 400
-    assert "SYNC sc-domain:compassgrill.co.il" in response.json()["detail"]
+    assert f"SYNC {configured_site_url}" in response.json()["detail"]
 
 
 def test_manual_live_gsc_sync_requires_token_when_configured(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr("app.api.routes.settings.gsc_site_url", "https://compassgrill.co.il/")
     monkeypatch.setattr("app.api.routes.settings.manual_action_token", "manual-token")
 
-    response = client.post("/gsc/manual-sync", json={"confirmation": "SYNC sc-domain:compassgrill.co.il"})
+    response = client.post("/gsc/manual-sync", json={"confirmation": "SYNC https://compassgrill.co.il/"})
 
     assert response.status_code == 403
     assert response.json()["detail"] == "Invalid manual action token."
