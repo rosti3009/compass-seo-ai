@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GSC SEO Tasks</title>
+  <style>
+    body{font-family:Arial,sans-serif;margin:2rem;background:#f7f8fb;color:#1f2937}
+    table{width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px #0001}
+    th,td{padding:.75rem;border-bottom:1px solid #e5e7eb;text-align:left;vertical-align:top}
+    th{background:#111827;color:#fff;font-size:.85rem;text-transform:uppercase}
+    .badge{display:inline-block;border-radius:999px;padding:.2rem .6rem;font-weight:700;font-size:.8rem}
+    .high{background:#fee2e2;color:#991b1b}.medium{background:#fef3c7;color:#92400e}.low{background:#dbeafe;color:#1e40af}
+    .actions form{display:inline-block;margin:.1rem}.actions button{border:0;border-radius:6px;padding:.45rem .65rem;cursor:pointer;background:#2563eb;color:white}
+    .actions form:nth-child(2) button{background:#16a34a}.actions form:nth-child(3) button{background:#7c3aed}.actions form:nth-child(4) button{background:#dc2626}
+    code{word-break:break-all}.muted{color:#6b7280}.toolbar{margin-bottom:1rem;padding:1rem;background:#fff;border-radius:12px}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>GSC → SEO Task → Article Generation → Publish</h1>
+    <div class="toolbar">
+      <strong>Publishing:</strong>
+      {% if publishing_mode.istore_publish_enabled %}live enabled{% else %}dry-run/protected; set ISTORE_PUBLISH_ENABLED=true for manual publish{% endif %}
+      <span class="muted"> | Auto-publish is disabled.</span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Priority</th>
+          <th>Status</th>
+          <th>Query</th>
+          <th>Impressions</th>
+          <th>Clicks</th>
+          <th>CTR</th>
+          <th>Avg position</th>
+          <th>Target page</th>
+          <th>Recommended action</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for task in tasks %}
+        <tr>
+          <td><span class="badge {{ task.priority }}">{{ task.priority }}</span></td>
+          <td>{{ task.status }}</td>
+          <td>{{ task.query }}</td>
+          <td>{{ task.impressions }}</td>
+          <td>{{ task.clicks }}</td>
+          <td>{{ "%.2f%%"|format(task.ctr * 100) }}</td>
+          <td>{{ "%.1f"|format(task.average_position) }}</td>
+          <td><code>{{ task.target_page }}</code></td>
+          <td>{{ task.recommended_action }}<br><span class="muted">{{ task.reason }}</span></td>
+          <td class="actions">
+            <form method="post" action="/gsc/seo-tasks/{{ task.task_id }}/generate-article"><button>Generate article</button></form>
+            <form method="post" action="/gsc/seo-tasks/{{ task.task_id }}/approve"><button>Approve</button></form>
+            <form method="post" action="/gsc/seo-tasks/{{ task.task_id }}/publish"><button>Publish</button></form>
+            <form method="post" action="/gsc/seo-tasks/{{ task.task_id }}/reject"><button>Reject</button></form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="10">No qualifying GSC SEO tasks yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </main>
+</body>
+</html>

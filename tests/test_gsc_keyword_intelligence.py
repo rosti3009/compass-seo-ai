@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db.database import Base, get_db
-from app.db.models import CrawlRun, GSCKeywordMetric, PageAudit, SEOTask
+from app.db.models import ContentArticleDraft, CrawlRun, GSCKeywordMetric, PageAudit, SEOTask
 from app.main import app
 
 
@@ -412,3 +412,139 @@ def test_seo_tasks_are_enriched_with_gsc_keyword_opportunity(client: TestClient,
     assert task.keyword == "gsc primary keyword"
     assert task.priority == "high"
     assert "keyword_opportunity_score" in task.recommendation_json
+
+
+def test_gsc_seo_tasks_group_duplicate_metrics_and_classify(client: TestClient, db_session: Session) -> None:
+    add_metric(
+        db_session,
+        page_url="https://example.com/blog/brisket-oven",
+        query="בריסקט בתנור",
+        clicks=4,
+        impressions=400,
+        ctr=0.01,
+        average_position=6.0,
+        metric_date=date(2026, 5, 1),
+    )
+    add_metric(
+        db_session,
+        page_url="https://example.com/blog/brisket-oven",
+        query="בריסקט בתנור",
+        clicks=2,
+        impressions=200,
+        ctr=0.01,
+        average_position=8.0,
+        metric_date=date(2026, 5, 2),
+    )
+    add_metric(
+        db_session,
+        page_url="https://example.com/product/pizza-stone",
+        query="pizza stone",
+        clicks=10,
+        impressions=600,
+        ctr=0.016,
+        average_position=5.0,
+    )
+    add_metric(db_session, query="too few impressions", impressions=20, clicks=0, ctr=0.0, average_position=9.0)
+
+    response = client.get("/gsc/seo-tasks")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["task_count"] == 2
+    brisket = next(task for task in payload["tasks"] if task["query"] == "בריסקט בתנור")
+    assert brisket["impressions"] == 600
+    assert brisket["clicks"] == 6
+    assert brisket["average_position"] == pytest.approx(6.666, rel=0.01)
+    assert brisket["priority"] == "high"
+    assert brisket["task_type"] in {"meta_title_update", "refresh_existing_article"}
+    assert brisket["source"] == "gsc"
+    assert db_session.query(SEOTask).count() == 2
+
+    second_response = client.get("/gsc/seo-tasks")
+    assert second_response.status_code == 200
+    assert second_response.json()["created_count"] == 0
+    assert db_session.query(SEOTask).count() == 2
+
+
+def test_gsc_seo_task_generation_creates_copy_paste_article(
+    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    add_metric(db_session, query="בריסקט", impressions=800, clicks=8, ctr=0.01, average_position=7.0)
+    task_id = client.get("/gsc/seo-tasks").json()["tasks"][0]["task_id"]
+
+    def fake_generate_topic_article_draft(
+        db: Session,
+        *,
+        topic_title: str,
+        focus_keyword: str,
+        target_intent: str,
+        preferred_slug: str | None = None,
+    ):
+        draft = ContentArticleDraft(
+            status="READY_FOR_REVIEW",
+            topic_title=topic_title,
+            title=topic_title,
+            slug=preferred_slug or "brisket-guide",
+            meta_title=f"{topic_title} | Compass Grill",
+            meta_description="מדריך בריסקט מלא עם טיפים לגריל ולתנור.",
+            focus_keyword=focus_keyword,
+            target_intent=target_intent,
+            article_body="<h2>בריסקט</h2><p>מדריך מעשי להכנת בריסקט.</p>",
+            faq_schema_json=(
+                '{"mainEntity":[{"name":"איך מכינים בריסקט?","acceptedAnswer":{"text":"לאט ובחום נמוך."}}]}'
+            ),
+            featured_image_prompt="Hero brisket image",
+            section_image_prompts_json='["Trim brisket", "Season brisket", "Slice brisket"]',
+            image_alt_text="בריסקט מוכן להגשה",
+            image_title="תמונת בריסקט",
+            image_caption="בריסקט עסיסי",
+            image_filename_slug="compass-grill-brisket-guide",
+            image_style_rules="realistic",
+            target_site_section="blog",
+            target_publish_type="article",
+            target_blog_base_url="https://compassgrill.co.il/blog/",
+            target_path="/blog/brisket-guide",
+            target_url="https://compassgrill.co.il/blog/brisket-guide",
+            publish_destination_status="ready",
+            featured_image_status="planned",
+        )
+        db.add(draft)
+        db.commit()
+        db.refresh(draft)
+        return draft
+
+    monkeypatch.setattr("app.api.routes.generate_topic_article_draft", fake_generate_topic_article_draft)
+    monkeypatch.setattr("app.api.routes._content_quality_gate_passed", lambda draft: True)
+
+    response = client.post(f"/gsc/seo-tasks/{task_id}/generate-article")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["auto_publish"] is False
+    assert payload["task"]["status"] == "draft_generated"
+    assert payload["article"]["hebrew_article_title"].startswith("מדריך")
+    assert payload["article"]["primary_keyword"] == "בריסקט"
+    assert len(payload["article"]["image_plan"]) == 4
+    assert payload["article"]["copy_paste_mode"]["mode"] == "copy_paste"
+
+    approve_response = client.post(f"/gsc/seo-tasks/{task_id}/approve")
+    assert approve_response.status_code == 200
+    assert approve_response.json()["task"]["status"] == "approved"
+
+    publish_response = client.post(f"/gsc/seo-tasks/{task_id}/publish")
+    assert publish_response.status_code == 403
+    assert publish_response.json()["detail"] == "ISTORE_PUBLISH_ENABLED=true is required"
+
+
+def test_gsc_seo_tasks_dashboard_renders_actions(client: TestClient, db_session: Session) -> None:
+    add_metric(db_session, query="פילה בקר", impressions=500, clicks=5, ctr=0.01, average_position=9.0)
+
+    response = client.get("/gsc/seo-tasks/dashboard")
+
+    assert response.status_code == 200
+    assert "פילה בקר" in response.text
+    assert "Generate article" in response.text
+    assert "Approve" in response.text
+    assert "Publish" in response.text
+    assert "Reject" in response.text
