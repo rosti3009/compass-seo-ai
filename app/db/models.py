@@ -313,7 +313,7 @@ class SEOTask(Base):
     __tablename__ = "seo_tasks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    page_url: Mapped[str] = mapped_column(String(1024), nullable=False, unique=True, index=True)
+    page_url: Mapped[str] = mapped_column(String(1024), nullable=False, index=True)
     keyword: Mapped[str | None] = mapped_column(String(255), nullable=True)
     priority: Mapped[str] = mapped_column(String(32), default="medium", index=True)
     status: Mapped[str] = mapped_column(String(32), default="open", index=True)

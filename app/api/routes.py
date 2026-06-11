@@ -263,6 +263,16 @@ HIGH_IMPRESSIONS_THRESHOLD = 50
 WEAK_RANKING_MIN = 4
 WEAK_RANKING_MAX = 20
 
+GSC_SEO_TASK_STATUSES = {"recommended", "draft_generated", "approved", "published", "rejected"}
+GSC_SEO_TASK_TYPES = {
+    "new_article",
+    "refresh_existing_article",
+    "internal_linking",
+    "meta_title_update",
+    "meta_description_update",
+}
+GSC_SEO_SEED_QUERIES = ["בריסקט", "בריסקט בתנור", "pizza stone", "פילה בקר", "מתכון לבריסקט בתנור"]
+
 
 def _raise_if_url_excluded(page_url: str) -> None:
     reason = get_url_exclusion_reason(page_url)
@@ -458,33 +468,260 @@ def _gsc_keyword_query(
 
 
 def _gsc_opportunities(db: Session, limit: int = 100) -> list[dict[str, object]]:
+    """Return GSC opportunities grouped by query and target page to avoid date/page duplicates."""
+    return _gsc_query_page_opportunity_rows(db)[:limit]
+
+
+def _gsc_query_page_opportunity_rows(db: Session) -> list[dict[str, object]]:
+    """Return de-duplicated GSC opportunities grouped by query and target page."""
     rows = (
         db.query(GSCKeywordMetric)
         .filter(
             GSCKeywordMetric.impressions >= HIGH_IMPRESSIONS_THRESHOLD,
-            GSCKeywordMetric.ctr < LOW_CTR_THRESHOLD,
             GSCKeywordMetric.average_position >= WEAK_RANKING_MIN,
             GSCKeywordMetric.average_position <= WEAK_RANKING_MAX,
+            GSCKeywordMetric.ctr <= LOW_CTR_THRESHOLD,
+            GSCKeywordMetric.clicks <= 20,
         )
         .order_by(GSCKeywordMetric.impressions.desc(), GSCKeywordMetric.average_position.asc())
-        .limit(limit)
+        .limit(50000)
         .all()
     )
+    grouped: dict[tuple[str, str], list[GSCKeywordMetric]] = {}
+    for row in rows:
+        key = (row.query.strip(), row.page_url.strip())
+        if key[0] and key[1]:
+            grouped.setdefault(key, []).append(row)
+
+    opportunities: list[dict[str, object]] = []
+    for (query, target_page), group_rows in grouped.items():
+        clicks = sum(row.clicks for row in group_rows)
+        impressions = sum(row.impressions for row in group_rows)
+        if impressions < HIGH_IMPRESSIONS_THRESHOLD or clicks > 20:
+            continue
+        ctr = clicks / impressions if impressions else 0.0
+        average_position = _weighted_average_position(group_rows)
+        if not (WEAK_RANKING_MIN <= average_position <= WEAK_RANKING_MAX and ctr <= LOW_CTR_THRESHOLD):
+            continue
+        metric_payload = {
+            "query": query,
+            "target_page": target_page,
+            "page_url": target_page,
+            "clicks": clicks,
+            "impressions": impressions,
+            "ctr": ctr,
+            "average_position": average_position,
+            "source": "gsc",
+            "row_count": len(group_rows),
+            "date_range": {
+                "start": min(row.date for row in group_rows if row.date).isoformat()
+                if any(row.date for row in group_rows)
+                else None,
+                "end": max(row.date for row in group_rows if row.date).isoformat()
+                if any(row.date for row in group_rows)
+                else None,
+            },
+        }
+        metric_payload["keyword_opportunity_score"] = _keyword_opportunity_score(metric_payload)
+        metric_payload["priority"] = _gsc_seo_task_priority(metric_payload)
+        metric_payload["task_type"] = _gsc_seo_task_type(metric_payload)
+        metric_payload["recommended_action"] = _gsc_seo_task_action(metric_payload)
+        metric_payload["reason"] = _gsc_seo_task_reason(metric_payload)
+        metric_payload["opportunity_reason"] = metric_payload["reason"]
+        opportunities.append(metric_payload)
+
+    seed_rank = {query: index for index, query in enumerate(GSC_SEO_SEED_QUERIES)}
+    return sorted(
+        opportunities,
+        key=lambda item: (
+            seed_rank.get(str(item["query"]), 999),
+            {"high": 0, "medium": 1, "low": 2}.get(str(item["priority"]), 3),
+            -int(item["impressions"]),
+            float(item["average_position"]),
+            str(item["query"]),
+        ),
+    )
+
+
+def _strong_matching_article_url(query: str, target_page: str) -> bool:
+    normalized_query = re.sub(r"\s+", "-", query.strip().lower())
+    normalized_url = target_page.lower().rstrip("/")
+    ascii_slug = _slugify(query)
+    is_article_path = any(segment in normalized_url for segment in ("/blog/", "/article", "/articles", "/recipes/"))
+    return bool(is_article_path and (normalized_query in normalized_url or ascii_slug in normalized_url))
+
+
+def _gsc_seo_task_priority(metric: dict[str, object]) -> str:
+    impressions = int(metric.get("impressions") or 0)
+    ctr = float(metric.get("ctr") or 0.0)
+    position = float(metric.get("average_position") or 0.0)
+    if impressions >= 500 and 4 <= position <= 12 and ctr < 0.02:
+        return "high"
+    if impressions >= 100 and 4 <= position <= 20:
+        return "medium"
+    return "low"
+
+
+def _gsc_seo_task_type(metric: dict[str, object]) -> str:
+    query = str(metric.get("query") or "")
+    target_page = str(metric.get("target_page") or metric.get("page_url") or "")
+    ctr = float(metric.get("ctr") or 0.0)
+    position = float(metric.get("average_position") or 0.0)
+    clicks = int(metric.get("clicks") or 0)
+    if _strong_matching_article_url(query, target_page):
+        return "refresh_existing_article"
+    if ctr <= LOW_CTR_THRESHOLD and 4 <= position <= 10:
+        return "meta_title_update" if ctr < 0.02 else "meta_description_update"
+    if 8 <= position <= 20 and clicks <= 20:
+        return "internal_linking"
+    return "new_article"
+
+
+def _gsc_seo_task_action(metric: dict[str, object]) -> str:
+    task_type = str(metric.get("task_type") or _gsc_seo_task_type(metric))
+    query = str(metric.get("query") or "the query")
+    actions = {
+        "new_article": (
+            f"Create a dedicated Hebrew article targeting '{query}' and link it to the relevant commercial page."
+        ),
+        "refresh_existing_article": f"Refresh the existing article/page so it better satisfies searches for '{query}'.",
+        "internal_linking": f"Add internal links with natural anchors around '{query}' to lift positions 8-20.",
+        "meta_title_update": f"Rewrite the meta title to improve low CTR for '{query}'.",
+        "meta_description_update": f"Rewrite the meta description to improve SERP CTR for '{query}'.",
+    }
+    return actions.get(task_type, actions["new_article"])
+
+
+def _gsc_seo_task_reason(metric: dict[str, object]) -> str:
+    return (
+        f"GSC opportunity: {int(metric.get('impressions') or 0)} impressions, "
+        f"{int(metric.get('clicks') or 0)} clicks, {float(metric.get('ctr') or 0.0):.2%} CTR, "
+        f"average position {float(metric.get('average_position') or 0.0):.1f}."
+    )
+
+
+def _gsc_task_recommendation(task: SEOTask) -> dict[str, object]:
+    payload = _parse_task_recommendation(task)
+    return payload if payload.get("source") == "gsc" else payload
+
+
+def _gsc_task_payload(task: SEOTask) -> dict[str, object]:
+    rec = _gsc_task_recommendation(task)
+    return {
+        "id": task.id,
+        "task_id": task.id,
+        "query": task.keyword or rec.get("query"),
+        "target_page": task.page_url,
+        "clicks": rec.get("clicks", 0),
+        "impressions": rec.get("impressions", 0),
+        "ctr": rec.get("ctr", 0.0),
+        "average_position": rec.get("average_position", 0.0),
+        "keyword_opportunity_score": rec.get("keyword_opportunity_score", 0),
+        "recommended_action": rec.get("recommended_action", ""),
+        "task_type": rec.get("task_type", "new_article"),
+        "priority": task.priority,
+        "reason": rec.get("reason", ""),
+        "source": rec.get("source", "gsc"),
+        "status": task.status,
+        "draft_id": rec.get("draft_id"),
+        "published_url": rec.get("published_url"),
+        "created_at": task.created_at.isoformat() if task.created_at else None,
+        "updated_at": task.updated_at.isoformat() if task.updated_at else None,
+    }
+
+
+def _upsert_gsc_seo_task(db: Session, metric: dict[str, object]) -> tuple[SEOTask, bool]:
+    query = str(metric["query"])
+    target_page = str(metric["target_page"])
+    existing = (
+        db.query(SEOTask)
+        .filter(SEOTask.page_url == target_page, SEOTask.keyword == query)
+        .order_by(SEOTask.id.desc())
+        .first()
+    )
+    recommendation = {
+        **metric,
+        "source": "gsc",
+        "recommended_action": str(metric["recommended_action"]),
+        "reason": str(metric["reason"]),
+    }
+    if existing is None:
+        task = SEOTask(
+            page_url=target_page,
+            keyword=query,
+            priority=str(metric["priority"]),
+            status="recommended",
+            recommendation_json=json.dumps(recommendation, ensure_ascii=False),
+            article_status="not_generated",
+        )
+        db.add(task)
+        return task, True
+    if existing.status not in {"approved", "published", "rejected"}:
+        existing.status = "recommended" if existing.status in {"open", "recommended"} else existing.status
+    existing.priority = str(metric["priority"])
+    existing.recommendation_json = json.dumps(
+        {**_parse_task_recommendation(existing), **recommendation}, ensure_ascii=False
+    )
+    db.add(existing)
+    return existing, False
+
+
+def _gsc_article_image_plan(draft: ContentArticleDraft) -> list[dict[str, str]]:
+    section_prompts = draft.to_dict().get("section_image_prompts", [])
+    prompts = [draft.featured_image_prompt, *[str(prompt) for prompt in section_prompts if prompt]][:4]
+    while len(prompts) < 4:
+        prompts.append(f"Realistic BBQ article support image for {draft.focus_keyword}, Compass Grill style")
+    keys = ["hero", "step-1", "step-2", "final"]
     return [
         {
-            "page_url": row.page_url,
-            "query": row.query,
-            "clicks": row.clicks,
-            "impressions": row.impressions,
-            "ctr": row.ctr,
-            "average_position": row.average_position,
-            "opportunity_reason": _gsc_opportunity_reason(row),
-            "recommended_action": _gsc_recommended_action(row),
-            "keyword_opportunity_score": _keyword_opportunity_score(row),
+            "image_key": keys[index],
+            "prompt": prompt,
+            "filename": f"compass-grill-{draft.slug}-{keys[index]}.webp",
+            "alt": draft.image_alt_text if index == 0 else f"{draft.title} - תמונה {index + 1}",
         }
-        for row in rows
+        for index, prompt in enumerate(prompts)
     ]
 
+
+def _gsc_article_copy_paste_fields(draft: ContentArticleDraft) -> dict[str, object]:
+    return {
+        "istore_fields": {
+            "title": draft.title,
+            "slug": draft.slug,
+            "meta_title": draft.meta_title,
+            "meta_description": draft.meta_description,
+            "description_html": draft.article_body,
+            "focus_keyword": draft.focus_keyword,
+            "target_path": draft.target_path,
+            "target_url": draft.target_url,
+        },
+        "mode": "copy_paste",
+        "auto_publish": False,
+    }
+
+
+def _gsc_generated_article_payload(draft: ContentArticleDraft) -> dict[str, object]:
+    draft_payload = draft.to_dict()
+    faq_schema = draft_payload.get("faq_schema", {})
+    faq = faq_schema.get("mainEntity", []) if isinstance(faq_schema, dict) else []
+    return {
+        "draft_id": draft.id,
+        "hebrew_article_title": draft.title,
+        "slug": draft.slug,
+        "meta_title": draft.meta_title,
+        "meta_description": draft.meta_description,
+        "primary_keyword": draft.focus_keyword,
+        "supporting_keywords": build_topic_seo_metadata(
+            draft.focus_keyword,
+            draft.title,
+            classify_topic(draft.topic_title, draft.focus_keyword, draft.target_intent),
+        ).get("secondary_keywords", []),
+        "article_body_html": draft.article_body,
+        "faq": faq,
+        "image_plan": _gsc_article_image_plan(draft),
+        "copy_paste_mode": _gsc_article_copy_paste_fields(draft),
+        "draft": draft_payload,
+    }
 
 def _upsert_gsc_metric(db: Session, row: dict[str, object]) -> bool:
     page_url = str(row.get("page_url") or "").strip()
@@ -2947,6 +3184,209 @@ def gsc_opportunities_view(request: Request, db: DatabaseSession) -> HTMLRespons
         request,
         "gsc_opportunities.html",
         {"opportunities": dashboard["low_ctr_mid_position_queries"], **dashboard},
+    )
+
+
+
+@router.get("/gsc/seo-tasks")
+def list_gsc_seo_tasks(db: DatabaseSession) -> dict[str, object]:
+    """Create/update SEO tasks from imported GSC query/page opportunities and return them."""
+    opportunities = _gsc_query_page_opportunity_rows(db)
+    tasks: list[SEOTask] = []
+    created_count = 0
+    for opportunity in opportunities:
+        task, created = _upsert_gsc_seo_task(db, opportunity)
+        tasks.append(task)
+        created_count += int(created)
+    db.commit()
+    for task in tasks:
+        db.refresh(task)
+    payloads = [_gsc_task_payload(task) for task in tasks]
+    return {
+        "success": True,
+        "created_count": created_count,
+        "updated_count": len(tasks) - created_count,
+        "task_count": len(payloads),
+        "tasks": payloads,
+        "seed_queries_detected": [task["query"] for task in payloads if task.get("query") in GSC_SEO_SEED_QUERIES],
+        "publishing": {
+            "auto_publish": False,
+            "mode": "live" if settings.istore_publish_enabled else "dry-run/protected",
+            "istore_publish_enabled": bool(settings.istore_publish_enabled),
+        },
+    }
+
+
+@router.post("/gsc/seo-tasks/{task_id}/generate-article")
+def generate_gsc_seo_task_article(task_id: int, db: DatabaseSession) -> dict[str, object]:
+    """Generate a reviewable iStore-ready article draft from a GSC SEO task without publishing it."""
+    task = db.get(SEOTask, task_id)
+    if not task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="GSC SEO task not found")
+    rec = _gsc_task_recommendation(task)
+    if rec.get("source") != "gsc":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Task is not a GSC SEO task")
+    if task.status == "rejected":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Rejected tasks cannot generate articles")
+
+    query = str(task.keyword or rec.get("query") or "").strip()
+    if not query:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="GSC task query is required")
+    topic_title = query if re.search(r"[\u0590-\u05ff]", query) else f"מדריך {query}"
+    if not topic_title.startswith("מדריך") and not topic_title.startswith("מתכון"):
+        topic_title = f"מדריך {topic_title}"
+    preferred_slug = _slugify(query) if re.search(r"[a-z0-9]", query.lower()) else None
+    draft = generate_topic_article_draft(
+        db,
+        topic_title=topic_title,
+        focus_keyword=query,
+        target_intent="commercial_informational",
+        preferred_slug=preferred_slug,
+    )
+    _set_active_manual_article(db, draft)
+
+    article_payload = _gsc_generated_article_payload(draft)
+    _apply_article_to_task(
+        task,
+        {
+            "article_html": draft.article_body,
+            "article_title": draft.title,
+            "meta_title": draft.meta_title,
+            "meta_description": draft.meta_description,
+            "faq_schema_json": draft.to_dict().get("faq_schema", {}),
+            "article_schema_json": {"@type": "Article", "headline": draft.title, "inLanguage": "he-IL"},
+        },
+    )
+    rec.update({"draft_id": draft.id, "generated_article": article_payload, "source": "gsc"})
+    task.recommendation_json = json.dumps(rec, ensure_ascii=False)
+    task.status = "draft_generated"
+    task.article_status = "generated"
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    db.refresh(draft)
+    return {
+        "success": True,
+        "task": _gsc_task_payload(task),
+        "article": article_payload,
+        "auto_publish": False,
+        "status": task.status,
+    }
+
+
+@router.post("/gsc/seo-tasks/{task_id}/approve")
+def approve_gsc_seo_task(task_id: int, db: DatabaseSession) -> dict[str, object]:
+    """Approve a generated GSC SEO article for explicit manual publishing."""
+    task = db.get(SEOTask, task_id)
+    if not task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="GSC SEO task not found")
+    rec = _gsc_task_recommendation(task)
+    if rec.get("source") != "gsc":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Task is not a GSC SEO task")
+    draft_id = rec.get("draft_id")
+    if draft_id:
+        draft = _get_content_draft_or_404(db, int(draft_id))
+        if not _content_quality_gate_passed(draft):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Generated article quality gate did not pass"
+            )
+        draft.status = "APPROVED"
+        db.add(draft)
+    task.status = "approved"
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return {"success": True, "task": _gsc_task_payload(task), "publish_allowed": bool(settings.istore_publish_enabled)}
+
+
+@router.post("/gsc/seo-tasks/{task_id}/reject")
+def reject_gsc_seo_task(task_id: int, db: DatabaseSession) -> dict[str, object]:
+    """Reject a GSC SEO task or generated draft; rejected tasks cannot publish."""
+    task = db.get(SEOTask, task_id)
+    if not task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="GSC SEO task not found")
+    rec = _gsc_task_recommendation(task)
+    if rec.get("source") != "gsc":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Task is not a GSC SEO task")
+    if rec.get("draft_id"):
+        draft = _get_content_draft_or_404(db, int(rec["draft_id"]))
+        draft.status = "REJECTED"
+        db.add(draft)
+    task.status = "rejected"
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return {"success": True, "task": _gsc_task_payload(task)}
+
+
+@router.post("/gsc/seo-tasks/{task_id}/publish")
+def publish_gsc_seo_task(task_id: int, db: DatabaseSession) -> dict[str, object]:
+    """Publish one approved GSC-generated article to iStore only when live publishing is enabled."""
+    task = db.get(SEOTask, task_id)
+    if not task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="GSC SEO task not found")
+    rec = _gsc_task_recommendation(task)
+    if rec.get("source") != "gsc":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Task is not a GSC SEO task")
+    if task.status != "approved":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only approved GSC SEO tasks can publish")
+    if not settings.istore_publish_enabled:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="ISTORE_PUBLISH_ENABLED=true is required")
+    draft_id = rec.get("draft_id")
+    if not draft_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Generated article draft is required before publishing"
+        )
+    draft = _get_content_draft_or_404(db, int(draft_id))
+    if draft.status != "APPROVED":
+        draft.status = "APPROVED"
+        db.add(draft)
+        db.commit()
+        db.refresh(draft)
+    if not _content_quality_gate_passed(draft):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Generated article quality gate did not pass"
+        )
+    adapter_ready = _blog_publish_adapter_ready()
+    allowed, blocked_reason = _article_publish_validation(draft, adapter_ready)
+    if not allowed:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=blocked_reason)
+    try:
+        result = IStoreBlogPublisher.from_settings().publish(draft)
+    except IStoreBlogPublishError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"פרסום נכשל: {exc}") from exc
+    live_url = str(result.get("live_url") or result.get("public_url") or "").strip()
+    external_content_id = str(result.get("external_content_id") or "").strip()
+    if not live_url and not external_content_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="iStore publish did not return a live URL or content id"
+        )
+    draft.status = "PUBLISHED"
+    draft.published_at = datetime.now(UTC)
+    draft.published_url = live_url or draft.target_url
+    draft.verification_status = "VERIFIED" if live_url else "PUBLISHED_NOT_VERIFIED"
+    rec.update({"published_url": draft.published_url, "publish_result": result, "source": "gsc"})
+    task.recommendation_json = json.dumps(rec, ensure_ascii=False)
+    task.status = "published"
+    db.add_all([draft, task])
+    db.commit()
+    db.refresh(task)
+    db.refresh(draft)
+    return {"success": True, "published": True, "task": _gsc_task_payload(task), "draft": draft.to_dict()}
+
+
+@router.get("/gsc/seo-tasks/dashboard", response_class=HTMLResponse)
+def gsc_seo_tasks_dashboard(request: Request, db: DatabaseSession) -> HTMLResponse:
+    """Render the GSC SEO task approval dashboard."""
+    tasks_response = list_gsc_seo_tasks(db)
+    return templates.TemplateResponse(
+        request,
+        "gsc_seo_tasks.html",
+        {
+            "tasks": tasks_response["tasks"],
+            "publishing_mode": tasks_response["publishing"],
+            "statuses": sorted(GSC_SEO_TASK_STATUSES),
+        },
     )
 
 
