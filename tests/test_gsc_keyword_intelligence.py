@@ -45,6 +45,7 @@ def add_metric(
     clicks: int = 10,
     ctr: float = 0.01,
     average_position: float = 7.5,
+    metric_date: date = date(2026, 5, 1),
 ) -> GSCKeywordMetric:
     metric = GSCKeywordMetric(
         page_url=page_url,
@@ -53,7 +54,7 @@ def add_metric(
         impressions=impressions,
         ctr=ctr,
         average_position=average_position,
-        date=date(2026, 5, 1),
+        date=metric_date,
         source="gsc",
     )
     db_session.add(metric)
@@ -299,6 +300,90 @@ def test_gsc_dashboard_views_render(client: TestClient, db_session: Session) -> 
     assert "dashboard keyword" in keywords_response.text
     assert opportunities_response.status_code == 200
     assert "dashboard keyword" in opportunities_response.text
+
+
+def test_gsc_opportunities_dashboard_uses_imported_metrics_and_hebrew_json(
+    client: TestClient, db_session: Session
+) -> None:
+    add_metric(
+        db_session,
+        page_url="https://example.com/grill",
+        query="גריל גז",
+        impressions=1200,
+        clicks=12,
+        ctr=0.01,
+        average_position=6.0,
+        metric_date=date(2026, 5, 1),
+    )
+    add_metric(
+        db_session,
+        page_url="https://example.com/grill",
+        query="גריל מומלץ",
+        impressions=300,
+        clicks=9,
+        ctr=0.03,
+        average_position=4.0,
+        metric_date=date(2026, 5, 1),
+    )
+    add_metric(
+        db_session,
+        page_url="https://example.com/smoker",
+        query="מעשנה",
+        impressions=900,
+        clicks=45,
+        ctr=0.05,
+        average_position=3.0,
+        metric_date=date(2026, 5, 1),
+    )
+    add_metric(
+        db_session,
+        page_url="https://example.com/declining",
+        query="declining grill",
+        impressions=1000,
+        clicks=40,
+        ctr=0.04,
+        average_position=2.0,
+        metric_date=date(2026, 4, 1),
+    )
+    add_metric(
+        db_session,
+        page_url="https://example.com/declining",
+        query="declining grill",
+        impressions=100,
+        clicks=3,
+        ctr=0.03,
+        average_position=8.0,
+        metric_date=date(2026, 5, 1),
+    )
+
+    response = client.get("/gsc/opportunities-dashboard")
+
+    assert response.status_code == 200
+    assert "charset=utf-8" in response.headers["content-type"]
+    assert "גריל גז" in response.text
+    assert "\\u05d2" not in response.text
+    payload = response.json()
+    assert payload["top_queries_by_impressions"][0]["query"] == "גריל גז"
+    assert payload["top_queries_by_clicks"][0]["query"] == "מעשנה"
+    assert payload["low_ctr_mid_position_queries"][0]["query"] == "גריל גז"
+    assert payload["top_pages_by_impressions"][0]["page_url"] == "https://example.com/grill"
+    assert payload["declining_pages"][0]["page_url"] == "https://example.com/declining"
+    assert payload["article_recommendations"][0]["primary_query"] == "גריל גז"
+
+
+def test_gsc_opportunities_dashboard_view_renders_all_sections(client: TestClient, db_session: Session) -> None:
+    add_metric(db_session, query="dashboard keyword", impressions=900, ctr=0.01, average_position=9.0)
+
+    response = client.get("/gsc/opportunities-view")
+
+    assert response.status_code == 200
+    assert "Top queries by impressions" in response.text
+    assert "Top queries by clicks" in response.text
+    assert "Top pages by impressions" in response.text
+    assert "Declining pages compared to previous period" in response.text
+    assert "Article recommendations based on GSC queries" in response.text
+    assert "Hebrew API and PowerShell output" in response.text
+    assert "dashboard keyword" in response.text
 
 
 def test_seo_tasks_are_enriched_with_gsc_keyword_opportunity(client: TestClient, db_session: Session) -> None:
