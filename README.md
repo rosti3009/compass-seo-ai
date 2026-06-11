@@ -139,7 +139,7 @@ Required OAuth scopes:
 | `GET` | `/auth/google/callback` | Store the Google OAuth token returned by Google. |
 | `GET` | `/auth/google/status` | Report whether Google OAuth is connected and list stored scopes. |
 | `GET` | `/integrations/gsc/status` | Validate Search Console configuration. |
-| `POST` | `/gsc/manual-sync` | Manually import the last 30 days of query/page/date Search Console rows for `sc-domain:compassgrill.co.il`; body confirmation must be `SYNC sc-domain:compassgrill.co.il`, and `X-Manual-Action-Token` is required when `MANUAL_ACTION_TOKEN` is configured. |
+| `POST` | `/gsc/manual-sync` | Manually import the last 30 days of query/page/date Search Console rows for the runtime `GSC_SITE_URL`; body confirmation must be `SYNC {GSC_SITE_URL}`, and `X-Manual-Action-Token` is required when `MANUAL_ACTION_TOKEN` is configured. |
 | `GET` | `/integrations/ga4/status` | Validate GA4 configuration. |
 | `GET` | `/integrations/istore/status` | Validate ISTORE read-only configuration with token redacted. |
 | `GET` | `/integrations/istore/products` | Fetch ISTORE products with a GET-only read. |

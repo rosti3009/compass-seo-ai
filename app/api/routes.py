@@ -119,8 +119,6 @@ from app.services.topical_clusters import build_cluster_summary
 logger = logging.getLogger(__name__)
 
 
-LIVE_GSC_SYNC_SITE_URL = "sc-domain:compassgrill.co.il"
-LIVE_GSC_SYNC_CONFIRMATION = f"SYNC {LIVE_GSC_SYNC_SITE_URL}"
 LIVE_GSC_SYNC_DAYS = 30
 LIVE_GSC_SYNC_ROW_LIMIT = 25000
 
@@ -560,13 +558,24 @@ def _safe_gsc_sync_error(exc: Exception) -> str:
     return "Google Search Console sync failed."
 
 
-def _require_manual_gsc_sync_confirmation(
-    payload: ManualGSCSyncRequest, manual_action_token: str | None
-) -> None:
-    if payload.confirmation != LIVE_GSC_SYNC_CONFIRMATION:
+def _runtime_gsc_site_url() -> str:
+    site_url = (settings.gsc_site_url or "").strip()
+    if not site_url:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Manual confirmation must be exactly: {LIVE_GSC_SYNC_CONFIRMATION}",
+            detail="GSC_SITE_URL is not configured.",
+        )
+    return site_url
+
+
+def _require_manual_gsc_sync_confirmation(
+    payload: ManualGSCSyncRequest, manual_action_token: str | None, site_url: str
+) -> None:
+    required_confirmation = f"SYNC {site_url}"
+    if payload.confirmation != required_confirmation:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Manual confirmation must be exactly: {required_confirmation}",
         )
     configured_token = settings.manual_action_token
     if configured_token and manual_action_token != configured_token:
@@ -2639,8 +2648,9 @@ def manual_live_gsc_sync(
     db: DatabaseSession,
     x_manual_action_token: Annotated[str | None, Header(alias="X-Manual-Action-Token")] = None,
 ) -> dict[str, object]:
-    """Safely trigger a manual 30-day GSC sync for the live Compass Grill domain property."""
-    _require_manual_gsc_sync_confirmation(payload, x_manual_action_token)
+    """Safely trigger a manual 30-day GSC sync for the configured GSC property."""
+    site_url = _runtime_gsc_site_url()
+    _require_manual_gsc_sync_confirmation(payload, x_manual_action_token, site_url)
     end_date = date.today()
     start_date = end_date - timedelta(days=LIVE_GSC_SYNC_DAYS - 1)
 
@@ -2649,17 +2659,17 @@ def manual_live_gsc_sync(
         fetch_rows = getattr(client, "fetch_query_page_date_rows", None)
         if callable(fetch_rows):
             rows = fetch_rows(
-                LIVE_GSC_SYNC_SITE_URL,
+                site_url,
                 start_date=start_date,
                 end_date=end_date,
                 limit=LIVE_GSC_SYNC_ROW_LIMIT,
             )
         else:
-            rows = client.fetch_top_queries(LIVE_GSC_SYNC_SITE_URL, limit=LIVE_GSC_SYNC_ROW_LIMIT)
+            rows = client.fetch_top_queries(site_url, limit=LIVE_GSC_SYNC_ROW_LIMIT)
     except (MissingGSCCredentialsError, GSCAPIError, RuntimeError, ValueError) as exc:
         return {
             "success": False,
-            "site_url": LIVE_GSC_SYNC_SITE_URL,
+            "site_url": site_url,
             "date_range": {
                 "start_date": start_date.isoformat(),
                 "end_date": end_date.isoformat(),
@@ -2706,7 +2716,7 @@ def manual_live_gsc_sync(
 
     return {
         "success": True,
-        "site_url": LIVE_GSC_SYNC_SITE_URL,
+        "site_url": site_url,
         "date_range": {
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
