@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 from sqlalchemy.orm import Session
 
@@ -199,6 +200,168 @@ ISSUE_DEFINITIONS: dict[str, IssueDefinition] = {
 }
 
 
+MANUAL_ISTORE_NOTICE = "יש להעתיק ידנית לאתר ISTORE לאחר בדיקה."
+
+
+def _page_payload(page: PageAudit | None) -> dict[str, Any]:
+    if page is None:
+        return {}
+    payload = page.to_dict()
+    payload["raw_missing_fields"] = page.missing_fields or ""
+    return payload
+
+
+def _is_hebrew_text(value: str | None) -> bool:
+    return bool(value and re.search(r"[\u0590-\u05FF]", value))
+
+
+def _clean_label(value: str | None, fallback: str) -> str:
+    cleaned = re.sub(r"\s+", " ", (value or "").strip())
+    return cleaned or fallback
+
+
+def _truncate(value: str, limit: int) -> str:
+    return value if len(value) <= limit else value[: limit - 1].rstrip() + "…"
+
+
+def _site_root(page_url: str) -> str:
+    parsed = urlparse(page_url)
+    if parsed.scheme and parsed.netloc:
+        return urlunparse((parsed.scheme, parsed.netloc, "", "", "", ""))
+    return "/"
+
+
+def _suggested_slug(page_url: str, base: str) -> str | None:
+    current = urlparse(page_url).path.rstrip("/").split("/")[-1]
+    if _is_hebrew_text(current):
+        return None
+    words = re.findall(r"[\u0590-\u05FF\w]+", base.lower())[:6]
+    return "-".join(words).strip("-") or None
+
+
+def _copy_field(key: str, label: str, value: str | None, current: str | None = None) -> dict[str, str]:
+    return {"key": key, "label": label, "value": value or "", "current": current or ""}
+
+
+def _solution_summary(fields: list[dict[str, str]]) -> str:
+    return " | ".join(f"{field['label']}: {field['value']}" for field in fields if field.get("value"))
+
+
+def _build_ready_solution(
+    issue_type: str, page_url: str, page: PageAudit | None, evidence: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Build copy-paste-only Hebrew remediation content; never writes to the live site."""
+
+    evidence = evidence or {}
+    page_data = _page_payload(page)
+    page_label = _clean_label(str(page_data.get("title") or page_data.get("h1") or ""), _page_name(page_url))
+    meta_title = _truncate(f"{page_label} | ISTORE", 60)
+    meta_description = _truncate(
+        f"{page_label} זמין ב-ISTORE עם מידע ברור, מפרט שימושי וחוויית קנייה נוחה. "
+        "בדקו פרטים, התאמה וזמינות לפני רכישה.",
+        155,
+    )
+    h1 = page_label
+    short_description = _truncate(f"{page_label} - פתרון איכותי ללקוחות ISTORE, עם מידע ברור שיעזור לבחור נכון.", 220)
+    long_description = (
+        f"{page_label} מתאים ללקוחות שמחפשים מידע ברור לפני רכישה באתר ISTORE. "
+        "מומלץ להציג בעמוד יתרונות מרכזיים, מפרט רלוונטי, שימושים נפוצים ותשובות לשאלות שחוזרות אצל לקוחות. "
+        "יש לוודא שהניסוח תואם למוצר בפועל, למלאי ולמדיניות החנות לפני העתקה לאתר."
+    )
+    fields: list[dict[str, str]] = []
+    replacements: list[dict[str, str]] = []
+    affected_pages = evidence.get("affected_pages") if isinstance(evidence.get("affected_pages"), list) else []
+
+    if issue_type == "product_seo_issue":
+        slug = _suggested_slug(page_url, page_label)
+        fields = [
+            _copy_field("current_product_title", "כותרת מוצר נוכחית", str(page_data.get("title") or "")),
+            _copy_field("suggested_hebrew_product_title", "כותרת מוצר מוצעת בעברית", page_label),
+            _copy_field("suggested_meta_title", "Meta title מוצע", meta_title, str(page_data.get("title") or "")),
+            _copy_field(
+                "suggested_meta_description",
+                "Meta description מוצע",
+                meta_description,
+                str(page_data.get("meta_description") or ""),
+            ),
+            _copy_field("suggested_h1", "H1 מוצע", h1, str(page_data.get("h1") or "")),
+            _copy_field("suggested_short_product_description", "תיאור מוצר קצר מוצע", short_description),
+            _copy_field("suggested_long_product_description", "תיאור מוצר ארוך מוצע", long_description),
+        ]
+        if slug:
+            fields.append(_copy_field("suggested_slug", "Slug מוצע", slug))
+    elif issue_type == "image_missing_alt":
+        image_name = str(evidence.get("image_url") or evidence.get("filename") or _page_name(page_url))
+        fields = [
+            _copy_field("image_url_or_filename", "כתובת/שם קובץ תמונה", image_name),
+            _copy_field("current_alt", "ALT נוכחי", str(evidence.get("current_alt") or "")),
+            _copy_field("suggested_alt", "ALT מוצע בעברית", f"תמונה של {page_label} באתר ISTORE"),
+            _copy_field("suggested_image_title", "כותרת תמונה מוצעת", f"{page_label} - ISTORE"),
+        ]
+    elif issue_type == "missing_meta_title":
+        fields = [
+            _copy_field("current_meta_title", "Meta title נוכחי", str(page_data.get("title") or "")),
+            _copy_field("suggested_meta_title", "Meta title מוצע", meta_title),
+        ]
+    elif issue_type == "missing_meta_description":
+        fields = [
+            _copy_field(
+                "current_meta_description", "Meta description נוכחי", str(page_data.get("meta_description") or "")
+            ),
+            _copy_field("suggested_meta_description", "Meta description מוצע", meta_description),
+        ]
+    elif issue_type == "missing_h1":
+        fields = [
+            _copy_field("current_h1", "H1 נוכחי", str(page_data.get("h1") or "")),
+            _copy_field("suggested_h1", "H1 מוצע", h1),
+        ]
+    elif issue_type in {"duplicate_meta_title", "duplicate_h1"}:
+        duplicated = str(evidence.get("title") or evidence.get("h1") or page_label)
+        field_label = "Meta title" if issue_type == "duplicate_meta_title" else "H1"
+        fields = [_copy_field("duplicated_value", "ערך כפול", duplicated)]
+        pages_for_replacements = affected_pages or [page_url]
+        for index, affected_url in enumerate(pages_for_replacements, start=1):
+            if issue_type == "duplicate_meta_title":
+                unique = _truncate(f"{duplicated} - {index} | ISTORE", 60)
+            else:
+                unique = f"{duplicated} - עמוד {index}"
+            replacements.append(
+                {"page_url": str(affected_url), "label": f"{field_label} ייחודי לעמוד {index}", "value": unique}
+            )
+    elif issue_type == "broken_link":
+        replacement = str(
+            evidence.get("suggested_replacement_url") or page_data.get("canonical") or _site_root(page_url)
+        )
+        fields = [
+            _copy_field("source_page", "עמוד מקור", str(evidence.get("source_page") or "לא זוהה בסריקה - לבדוק ידנית")),
+            _copy_field("broken_url", "כתובת שבורה", page_url),
+            _copy_field("suggested_replacement_url", "כתובת חלופית מוצעת", replacement),
+            _copy_field("suggested_anchor_text", "טקסט עוגן מוצע", page_label),
+        ]
+    elif issue_type == "internal_link_opportunity":
+        target = str(evidence.get("target_page") or page_url)
+        anchor = page_label
+        fields = [
+            _copy_field("source_page", "עמוד מקור", page_url),
+            _copy_field("target_page", "עמוד יעד", target),
+            _copy_field("suggested_anchor_text", "טקסט עוגן מוצע", anchor),
+            _copy_field(
+                "suggested_link_sentence", "משפט מוצע עם הקישור", f"למידע נוסף מומלץ לקרוא על {anchor} באתר ISTORE."
+            ),
+        ]
+    else:
+        fields = [_copy_field("suggested_manual_fix", "פתרון ידני מוצע", ISSUE_DEFINITIONS[issue_type].recommended_fix)]
+
+    return {
+        "heading": "פתרון מוכן להעתקה",
+        "manual_notice": MANUAL_ISTORE_NOTICE,
+        "fields": fields,
+        "affected_pages": [str(url) for url in affected_pages],
+        "unique_replacements": replacements,
+        "links": {"site_url": page_url, "admin_url": evidence.get("admin_url")},
+    }
+
+
 def _json_load(raw: str | None, fallback: Any) -> Any:
     try:
         return json.loads(raw or "")
@@ -255,11 +418,17 @@ def discover_issue_candidates(db: Session) -> list[dict[str, Any]]:
         if "meta_description" in missing or not (page.meta_description or "").strip():
             add(page, "missing_meta_description")
         if (page.title or "").strip() and title_counts[(page.title or "").strip().lower()] > 1:
-            add(page, "duplicate_meta_title", {"title": page.title})
+            duplicate_pages = [
+                item.url for item in pages if (item.title or "").strip().lower() == (page.title or "").strip().lower()
+            ]
+            add(page, "duplicate_meta_title", {"title": page.title, "affected_pages": duplicate_pages})
         if "h1" in missing or not (page.h1 or "").strip():
             add(page, "missing_h1")
         if (page.h1 or "").strip() and h1_counts[(page.h1 or "").strip().lower()] > 1:
-            add(page, "duplicate_h1", {"h1": page.h1})
+            duplicate_pages = [
+                item.url for item in pages if (item.h1 or "").strip().lower() == (page.h1 or "").strip().lower()
+            ]
+            add(page, "duplicate_h1", {"h1": page.h1, "affected_pages": duplicate_pages})
         if "image_alt" in missing or "image_missing_alt" in missing or "missing_image_alt" in missing:
             add(page, "image_missing_alt")
         if (page.internal_links or 0) < 3 and page.status_code < 400:
@@ -357,6 +526,8 @@ def ensure_fix_center_tasks(db: Session) -> dict[str, int]:
         db.add(task)
         db.flush()
         page = candidate.get("page")
+        evidence = candidate.get("evidence", {})
+        ready_solution = _build_ready_solution(issue_type, page_url, page, evidence)
         current_value = None
         if page is not None:
             current_value = json.dumps(page.to_dict(), ensure_ascii=False)
@@ -366,7 +537,9 @@ def ensure_fix_center_tasks(db: Session) -> dict[str, int]:
                 page_url=page_url,
                 fix_type=issue_type,
                 current_value=current_value,
-                proposed_value=_proposed_value(issue_type, page_url, page),
+                proposed_value=(
+                    _solution_summary(ready_solution["fields"]) or _proposed_value(issue_type, page_url, page)
+                ),
                 status="חדש",
                 confidence_score=0.85 if definition.risk_level == "נמוך" else 0.65,
                 source="fix_center",
@@ -377,6 +550,7 @@ def ensure_fix_center_tasks(db: Session) -> dict[str, int]:
                         "requires_approval": True,
                         "requires_double_confirmation": definition.risk_level == "גבוה",
                         "safe_one_click": issue_type in LOW_RISK_SAFE_FIXES and definition.risk_level == "נמוך",
+                        "copyable_solution": ready_solution,
                     },
                     ensure_ascii=False,
                 ),
@@ -397,6 +571,9 @@ def task_card(fix: SEOFix) -> dict[str, Any]:
     notes = _notes(fix)
     task = fix.task
     title = definition.title_template.format(page=_page_name(fix.page_url))
+    copyable_solution = notes.get("copyable_solution")
+    if not isinstance(copyable_solution, dict):
+        copyable_solution = _build_ready_solution(fix.fix_type, fix.page_url, None, {})
     return {
         "id": fix.id,
         "task_id": fix.task_id,
@@ -414,6 +591,8 @@ def task_card(fix: SEOFix) -> dict[str, Any]:
         "severity": definition.severity,
         "status": fix.status or "חדש",
         "proposed_value": fix.proposed_value,
+        "copyable_solution": copyable_solution,
+        "manual_notice": MANUAL_ISTORE_NOTICE,
         "tooltip": definition.tooltip,
         "safe_one_click": bool(notes.get("safe_one_click")),
         "safe_action": LOW_RISK_SAFE_FIXES.get(fix.fix_type),

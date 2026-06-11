@@ -6,7 +6,7 @@
     <title>מרכז תיקוני SEO ידידותי לעובדים</title>
     <link rel="stylesheet" href="/static/style.css">
     <style>
-      .fix-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem}.task-card{border:1px solid #d8e2ef;border-radius:18px;padding:1rem;background:#fff;box-shadow:0 8px 24px rgba(15,23,42,.06)}.badge{display:inline-block;padding:.25rem .55rem;border-radius:999px;background:#eef6ff;margin:.1rem;font-size:.85rem}.badge.high{background:#fee2e2}.badge.safe{background:#dcfce7}.actions{display:flex;flex-wrap:wrap;gap:.45rem;margin-top:.8rem}.actions button,.actions a{border:0;border-radius:10px;padding:.55rem .7rem;background:#1d4ed8;color:white;text-decoration:none;cursor:pointer}.actions .secondary{background:#475569}.actions .danger{background:#b91c1c}.filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.7rem}.summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.8rem}.metric{background:#f8fafc;border-radius:14px;padding:1rem}.help{border-bottom:1px dotted #64748b;cursor:help}.safety{background:#fff7ed;border:1px solid #fed7aa;border-radius:16px;padding:1rem}.top-task{padding:.6rem;border-bottom:1px solid #e2e8f0}.muted{color:#64748b}.details{background:#f8fafc;border-radius:12px;padding:.75rem;margin-top:.75rem}
+      .fix-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem}.task-card{border:1px solid #d8e2ef;border-radius:18px;padding:1rem;background:#fff;box-shadow:0 8px 24px rgba(15,23,42,.06)}.badge{display:inline-block;padding:.25rem .55rem;border-radius:999px;background:#eef6ff;margin:.1rem;font-size:.85rem}.badge.high{background:#fee2e2}.badge.safe{background:#dcfce7}.actions{display:flex;flex-wrap:wrap;gap:.45rem;margin-top:.8rem}.actions button,.actions a{border:0;border-radius:10px;padding:.55rem .7rem;background:#1d4ed8;color:white;text-decoration:none;cursor:pointer}.actions .secondary{background:#475569}.actions .danger{background:#b91c1c}.copy-solution{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:14px;padding:.85rem;margin-top:.9rem}.copy-field{background:white;border:1px solid #dcfce7;border-radius:12px;padding:.65rem;margin:.55rem 0}.copy-field textarea{width:100%;min-height:58px;direction:rtl}.copy-button{border:0;border-radius:9px;background:#15803d;color:white;padding:.4rem .65rem;cursor:pointer}.manual-notice{font-weight:700;color:#9a3412}.filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.7rem}.summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.8rem}.metric{background:#f8fafc;border-radius:14px;padding:1rem}.help{border-bottom:1px dotted #64748b;cursor:help}.safety{background:#fff7ed;border:1px solid #fed7aa;border-radius:16px;padding:1rem}.top-task{padding:.6rem;border-bottom:1px solid #e2e8f0}.muted{color:#64748b}.details{background:#f8fafc;border-radius:12px;padding:.75rem;margin-top:.75rem}
     </style>
   </head>
   <body>
@@ -15,7 +15,7 @@
         <p class="eyebrow">SEO Operations</p>
         <h1>מרכז תיקוני SEO ידידותי לעובדים</h1>
         <p>המערכת מוצאת בעיות SEO ומתרגמת אותן למשימות פשוטות בעברית. אין פרסום אוטומטי ואין עריכת תוכן חי בלי אישור.</p>
-        <p><a href="/seo/fixes/dashboard">לוח משימות מתקדם</a> · <a href="/seo/operations-view">חזרה ללוח התפעול</a></p>
+        <p><a href="/seo/command-center">SEO Command Center</a> · <a href="/seo/fixes/dashboard">לוח משימות מתקדם</a> · <a href="/seo/operations-view">חזרה ללוח התפעול</a></p>
       </section>
 
       <section class="panel safety" aria-label="כללי בטיחות">
@@ -70,7 +70,7 @@
         <h2>משימות פתוחות</h2>
         <div class="fix-grid">
           {% for task in tasks %}
-          <article class="task-card" data-issue-type="{{ task.issue_type }}" data-status="{{ task.status }}" data-severity="{{ task.severity }}" data-difficulty="{{ task.difficulty }}">
+          <article id="task-{{ task.id }}" class="task-card" data-issue-type="{{ task.issue_type }}" data-status="{{ task.status }}" data-severity="{{ task.severity }}" data-difficulty="{{ task.difficulty }}">
             <h3><span class="help" title="{{ task.tooltip }}">{{ task.title }}</span></h3>
             <p><strong>הסבר:</strong> {{ task.explanation }}</p>
             <p><strong>למה זה חשוב:</strong> {{ task.why_it_matters }}</p>
@@ -89,6 +89,33 @@
               <p><strong>הצעה:</strong> {{ task.proposed_value }}</p>
               {% if task.requires_double_confirmation %}<p><strong>שימו לב:</strong> שינוי בסיכון גבוה דורש אישור כפול.</p>{% endif %}
             </details>
+            <section class="copy-solution" aria-label="פתרון מוכן להעתקה">
+              <h4>{{ task.copyable_solution.heading or 'פתרון מוכן להעתקה' }}</h4>
+              <p class="manual-notice">{{ task.copyable_solution.manual_notice or task.manual_notice }}</p>
+              <div class="actions">
+                {% if task.copyable_solution.links.site_url %}<a href="{{ task.copyable_solution.links.site_url }}" target="_blank" rel="noreferrer">פתח עמוד באתר</a>{% endif %}
+                {% if task.copyable_solution.links.admin_url %}<a class="secondary" href="{{ task.copyable_solution.links.admin_url }}" target="_blank" rel="noreferrer">פתח בממשק ניהול</a>{% endif %}
+              </div>
+              {% for field in task.copyable_solution.fields %}
+                <div class="copy-field">
+                  <label><strong>{{ field.label }}</strong></label>
+                  {% if field.current %}<p class="muted">נוכחי: {{ field.current }}</p>{% endif %}
+                  <textarea readonly id="copy-{{ task.id }}-{{ field.key }}">{{ field.value }}</textarea>
+                  <button class="copy-button" type="button" data-copy-target="copy-{{ task.id }}-{{ field.key }}">העתק</button>
+                </div>
+              {% endfor %}
+              {% if task.copyable_solution.affected_pages %}
+                <p><strong>עמודים מושפעים:</strong></p>
+                <ul>{% for page_url in task.copyable_solution.affected_pages %}<li>{{ page_url }}</li>{% endfor %}</ul>
+              {% endif %}
+              {% for replacement in task.copyable_solution.unique_replacements %}
+                <div class="copy-field">
+                  <label><strong>{{ replacement.label }}</strong> - {{ replacement.page_url }}</label>
+                  <textarea readonly id="copy-{{ task.id }}-replacement-{{ loop.index }}">{{ replacement.value }}</textarea>
+                  <button class="copy-button" type="button" data-copy-target="copy-{{ task.id }}-replacement-{{ loop.index }}">העתק</button>
+                </div>
+              {% endfor %}
+            </section>
             <div class="actions">
               <form method="post" action="/seo/fix-center/{{ task.id }}/check"><button type="submit">בדוק</button></form>
               <form method="post" action="/seo/fix-center/{{ task.id }}/details"><button class="secondary" type="submit">הצג פרטים</button></form>
@@ -113,5 +140,21 @@
         </dl>
       </section>
     </main>
+    <script>
+      document.addEventListener('click', async (event) => {
+        const button = event.target.closest('[data-copy-target]');
+        if (!button) return;
+        const field = document.getElementById(button.dataset.copyTarget);
+        if (!field) return;
+        field.select();
+        try {
+          await navigator.clipboard.writeText(field.value);
+          button.textContent = 'הועתק';
+        } catch (error) {
+          document.execCommand('copy');
+          button.textContent = 'הועתק';
+        }
+      });
+    </script>
   </body>
 </html>

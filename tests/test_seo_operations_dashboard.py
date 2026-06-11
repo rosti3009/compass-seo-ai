@@ -645,6 +645,59 @@ def test_fix_center_pages_render_hebrew_filters_tooltips_and_summary(client: Tes
     assert "High priority open" in dashboard_response.text
 
 
+
+def _field_values(task: dict[str, object]) -> dict[str, str]:
+    solution = task["copyable_solution"]
+    assert isinstance(solution, dict)
+    return {str(field["key"]): str(field["value"]) for field in solution["fields"]}  # type: ignore[index]
+
+
+def test_fix_center_scan_route_and_ready_to_copy_solutions(client: TestClient, db_session: Session) -> None:
+    _seed_fix_center_crawl(db_session)
+
+    post_response = client.post("/seo/fix-center/scan")
+    get_response = client.get("/seo/fix-center/scan")
+
+    assert post_response.status_code == 201
+    assert get_response.status_code == 200
+    tasks = client.get("/seo/fix-center/tasks").json()["tasks"]
+
+    product_task = next(task for task in tasks if task["issue_type"] == "product_seo_issue")
+    product_fields = _field_values(product_task)
+    assert product_fields["suggested_meta_title"]
+    assert product_fields["suggested_meta_description"]
+    assert product_task["manual_notice"] == "יש להעתיק ידנית לאתר ISTORE לאחר בדיקה."
+
+    image_task = next(task for task in tasks if task["issue_type"] == "image_missing_alt")
+    image_fields = _field_values(image_task)
+    assert image_fields["suggested_alt"]
+
+    broken_task = next(task for task in tasks if task["issue_type"] == "broken_link")
+    broken_fields = _field_values(broken_task)
+    assert broken_fields["suggested_replacement_url"]
+
+
+def test_fix_center_ui_and_command_center_render_copyable_manual_workflows(
+    client: TestClient, db_session: Session
+) -> None:
+    _seed_fix_center_crawl(db_session)
+
+    fix_center_response = client.get("/seo/fix-center")
+    command_center_response = client.get("/seo/command-center")
+
+    assert fix_center_response.status_code == 200
+    assert "פתרון מוכן להעתקה" in fix_center_response.text
+    assert "יש להעתיק ידנית לאתר ISTORE לאחר בדיקה." in fix_center_response.text
+    assert "פתח עמוד באתר" in fix_center_response.text
+    assert "data-copy-target" in fix_center_response.text
+    assert command_center_response.status_code == 200
+    assert "SEO Command Center" in command_center_response.text
+    assert "GSC SEO Tasks" in command_center_response.text
+    assert "Article Drafts" in command_center_response.text
+    assert "SEO Fix Center" in command_center_response.text
+    assert "Manual iStore Publishing Queue" in command_center_response.text
+    assert "Daily top priorities" in command_center_response.text
+
 def test_fix_center_workflow_requires_double_confirmation_for_high_risk(
     client: TestClient, db_session: Session
 ) -> None:
