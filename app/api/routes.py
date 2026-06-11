@@ -2417,6 +2417,13 @@ def scan_seo_fix_center(db: DatabaseSession) -> dict[str, int]:
     return ensure_fix_center_tasks(db)
 
 
+@router.get("/seo/fix-center/scan")
+def scan_seo_fix_center_preview(db: DatabaseSession) -> dict[str, int]:
+    """Allow GET scan requests to hit scan explicitly instead of the fix_id route; no publishing occurs."""
+
+    return ensure_fix_center_tasks(db)
+
+
 @router.get("/seo/fix-center/tasks")
 def list_seo_fix_center_tasks(
     db: DatabaseSession,
@@ -2449,6 +2456,27 @@ def list_seo_fix_center_tasks(
             "high_risk_double_confirmation": True,
         },
     }
+
+
+@router.get("/seo/command-center", response_class=HTMLResponse)
+def seo_command_center_view(request: Request, db: DatabaseSession) -> HTMLResponse:
+    """Render the main manual SEO Command Center with links to daily workflows."""
+
+    ensure_fix_center_tasks(db)
+    cards = list_fix_center_tasks(db)
+    return templates.TemplateResponse(
+        request,
+        "seo_command_center.html",
+        {
+            "summary": fix_center_dashboard_summary(cards),
+            "daily_top_priorities": cards[:5],
+            "safety": {
+                "auto_publish": False,
+                "auto_content_edits": False,
+                "manual_notice": "יש להעתיק ידנית לאתר ISTORE לאחר בדיקה.",
+            },
+        },
+    )
 
 
 @router.get("/seo/fix-center", response_class=HTMLResponse)
@@ -2501,7 +2529,7 @@ def seo_fixes_dashboard_view(request: Request, db: DatabaseSession) -> HTMLRespo
     )
 
 
-@router.get("/seo/fix-center/{fix_id}")
+@router.get("/seo/fix-center/{fix_id:int}")
 def get_seo_fix_center_task(fix_id: int, db: DatabaseSession) -> dict[str, object]:
     fix = db.get(SEOFix, fix_id)
     if fix is None or fix.source != "fix_center":
@@ -2509,7 +2537,7 @@ def get_seo_fix_center_task(fix_id: int, db: DatabaseSession) -> dict[str, objec
     return {"task": fix_center_task_card(fix)}
 
 
-@router.post("/seo/fix-center/{fix_id}/check")
+@router.post("/seo/fix-center/{fix_id:int}/check")
 def check_seo_fix_center_task(fix_id: int, db: DatabaseSession) -> dict[str, object]:
     try:
         fix = update_fix_status(db, fix_id, "בבדיקה")
@@ -2518,7 +2546,7 @@ def check_seo_fix_center_task(fix_id: int, db: DatabaseSession) -> dict[str, obj
     return {"success": True, "task": fix_center_task_card(fix)}
 
 
-@router.post("/seo/fix-center/{fix_id}/details")
+@router.post("/seo/fix-center/{fix_id:int}/details")
 def details_seo_fix_center_task(fix_id: int, db: DatabaseSession) -> dict[str, object]:
     try:
         fix = update_fix_status(db, fix_id, "ממתין לאישור")
@@ -2527,7 +2555,7 @@ def details_seo_fix_center_task(fix_id: int, db: DatabaseSession) -> dict[str, o
     return {"success": True, "task": fix_center_task_card(fix)}
 
 
-@router.post("/seo/fix-center/{fix_id}/approve")
+@router.post("/seo/fix-center/{fix_id:int}/approve")
 def approve_seo_fix_center_task(
     fix_id: int, db: DatabaseSession, payload: FixCenterApprovalRequest | None = OPTIONAL_FIX_CENTER_APPROVAL_BODY
 ) -> dict[str, object]:
@@ -2540,7 +2568,7 @@ def approve_seo_fix_center_task(
     return {"success": True, "task": fix_center_task_card(fix), "auto_published": False}
 
 
-@router.post("/seo/fix-center/{fix_id}/reject")
+@router.post("/seo/fix-center/{fix_id:int}/reject")
 def reject_seo_fix_center_task(fix_id: int, db: DatabaseSession) -> dict[str, object]:
     try:
         fix = update_fix_status(db, fix_id, "נדחה")
@@ -2549,7 +2577,7 @@ def reject_seo_fix_center_task(fix_id: int, db: DatabaseSession) -> dict[str, ob
     return {"success": True, "task": fix_center_task_card(fix)}
 
 
-@router.post("/seo/fix-center/{fix_id}/complete")
+@router.post("/seo/fix-center/{fix_id:int}/complete")
 def complete_seo_fix_center_task(fix_id: int, db: DatabaseSession) -> dict[str, object]:
     try:
         fix = update_fix_status(db, fix_id, "בוצע")
@@ -2558,7 +2586,7 @@ def complete_seo_fix_center_task(fix_id: int, db: DatabaseSession) -> dict[str, 
     return {"success": True, "task": fix_center_task_card(fix), "auto_published": False}
 
 
-@router.post("/seo/fix-center/{fix_id}/safe-fix")
+@router.post("/seo/fix-center/{fix_id:int}/safe-fix")
 def safe_fix_seo_fix_center_task(fix_id: int, db: DatabaseSession) -> dict[str, object]:
     try:
         fix = apply_safe_one_click(db, fix_id)
