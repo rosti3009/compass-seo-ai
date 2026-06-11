@@ -633,20 +633,22 @@ def _gsc_task_payload(task: SEOTask) -> dict[str, object]:
 def _upsert_gsc_seo_task(db: Session, metric: dict[str, object]) -> tuple[SEOTask, bool]:
     query = str(metric["query"])
     target_page = str(metric["target_page"])
+    source = str(metric.get("source") or "gsc")
     existing = (
         db.query(SEOTask)
-        .filter(SEOTask.page_url == target_page, SEOTask.keyword == query)
+        .filter(SEOTask.source == source, SEOTask.page_url == target_page, SEOTask.keyword == query)
         .order_by(SEOTask.id.desc())
         .first()
     )
     recommendation = {
         **metric,
-        "source": "gsc",
+        "source": source,
         "recommended_action": str(metric["recommended_action"]),
         "reason": str(metric["reason"]),
     }
     if existing is None:
         task = SEOTask(
+            source=source,
             page_url=target_page,
             keyword=query,
             priority=str(metric["priority"]),
@@ -659,6 +661,7 @@ def _upsert_gsc_seo_task(db: Session, metric: dict[str, object]) -> tuple[SEOTas
     if existing.status not in {"approved", "published", "rejected"}:
         existing.status = "recommended" if existing.status in {"open", "recommended"} else existing.status
     existing.priority = str(metric["priority"])
+    existing.source = source
     existing.recommendation_json = json.dumps(
         {**_parse_task_recommendation(existing), **recommendation}, ensure_ascii=False
     )
@@ -1543,6 +1546,7 @@ def _build_task_from_page(page: PageAudit, gsc_metric: GSCKeywordMetric | None =
     if keyword_opportunity_score >= 55:
         priority = "high"
     return SEOTask(
+        source=str(recommendation["source"]),
         page_url=page.url,
         keyword=gsc_metric.query if gsc_metric else None,
         priority=priority,

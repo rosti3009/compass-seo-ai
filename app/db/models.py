@@ -313,6 +313,7 @@ class SEOTask(Base):
     __tablename__ = "seo_tasks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    source: Mapped[str] = mapped_column(String(64), default="seo_task", index=True)
     page_url: Mapped[str] = mapped_column(String(1024), nullable=False, index=True)
     keyword: Mapped[str | None] = mapped_column(String(255), nullable=True)
     priority: Mapped[str] = mapped_column(String(32), default="medium", index=True)
@@ -335,6 +336,7 @@ class SEOTask(Base):
     def to_dict(self) -> dict[str, object]:
         return {
             "id": self.id,
+            "source": self.source,
             "page_url": self.page_url,
             "keyword": self.keyword,
             "priority": self.priority,
