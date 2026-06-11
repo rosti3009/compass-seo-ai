@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>מרכז תיקוני SEO ידידותי לעובדים</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+      .fix-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem}.task-card{border:1px solid #d8e2ef;border-radius:18px;padding:1rem;background:#fff;box-shadow:0 8px 24px rgba(15,23,42,.06)}.badge{display:inline-block;padding:.25rem .55rem;border-radius:999px;background:#eef6ff;margin:.1rem;font-size:.85rem}.badge.high{background:#fee2e2}.badge.safe{background:#dcfce7}.actions{display:flex;flex-wrap:wrap;gap:.45rem;margin-top:.8rem}.actions button,.actions a{border:0;border-radius:10px;padding:.55rem .7rem;background:#1d4ed8;color:white;text-decoration:none;cursor:pointer}.actions .secondary{background:#475569}.actions .danger{background:#b91c1c}.filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.7rem}.summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.8rem}.metric{background:#f8fafc;border-radius:14px;padding:1rem}.help{border-bottom:1px dotted #64748b;cursor:help}.safety{background:#fff7ed;border:1px solid #fed7aa;border-radius:16px;padding:1rem}.top-task{padding:.6rem;border-bottom:1px solid #e2e8f0}.muted{color:#64748b}.details{background:#f8fafc;border-radius:12px;padding:.75rem;margin-top:.75rem}
+    </style>
+  </head>
+  <body>
+    <main class="container">
+      <section class="hero compact">
+        <p class="eyebrow">SEO Operations</p>
+        <h1>מרכז תיקוני SEO ידידותי לעובדים</h1>
+        <p>המערכת מוצאת בעיות SEO ומתרגמת אותן למשימות פשוטות בעברית. אין פרסום אוטומטי ואין עריכת תוכן חי בלי אישור.</p>
+        <p><a href="/seo/fixes/dashboard">לוח משימות מתקדם</a> · <a href="/seo/operations-view">חזרה ללוח התפעול</a></p>
+      </section>
+
+      <section class="panel safety" aria-label="כללי בטיחות">
+        <h2>כללי בטיחות</h2>
+        <ul>
+          {% for rule in summary.safety %}<li>{{ rule }}</li>{% endfor %}
+        </ul>
+      </section>
+
+      <section class="panel">
+        <h2>סיכום יומי</h2>
+        <div class="summary">
+          <div class="metric"><strong>{{ summary.new_issues }}</strong><br>בעיות חדשות</div>
+          <div class="metric"><strong>{{ summary.fixed_today }}</strong><br>תוקנו היום</div>
+          <div class="metric"><strong>{{ summary.waiting_for_approval }}</strong><br>ממתינות לאישור</div>
+          <div class="metric"><strong>{{ summary.high_priority_open }}</strong><br>פתוחות בעדיפות גבוהה</div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>מה כדאי לעשות עכשיו?</h2>
+        {% if summary.top_open_tasks %}
+          {% for task in summary.top_open_tasks %}
+            <div class="top-task"><strong>{{ loop.index }}. {{ task.title }}</strong><br><span class="muted">{{ task.recommended_fix }}</span></div>
+          {% endfor %}
+        {% else %}
+          <p class="empty">אין כרגע משימות פתוחות. אפשר להריץ סריקה חדשה.</p>
+        {% endif %}
+      </section>
+
+      <section class="panel">
+        <h2>סינון משימות</h2>
+        <form class="filters" method="get" action="/seo/fix-center">
+          <label>חומרה
+            <select name="severity"><option value="">הכול</option>{% for value in ['גבוהה','בינונית','נמוכה'] %}<option value="{{ value }}" {% if filters.severity == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select>
+          </label>
+          <label>סוג בעיה
+            <select name="issue_type"><option value="">הכול</option>{% for issue in issue_types %}<option value="{{ issue }}" {% if filters.issue_type == issue %}selected{% endif %}>{{ issue }}</option>{% endfor %}</select>
+          </label>
+          <label>סטטוס
+            <select name="status_filter"><option value="">הכול</option>{% for status in statuses %}<option value="{{ status }}" {% if filters.status == status %}selected{% endif %}>{{ status }}</option>{% endfor %}</select>
+          </label>
+          <label>עמוד <input name="page" value="{{ filters.page or '' }}" placeholder="כתובת או חלק ממנה"></label>
+          <label>קלות ביצוע
+            <select name="difficulty"><option value="">הכול</option>{% for value in ['קל','בינוני','מתקדם'] %}<option value="{{ value }}" {% if filters.difficulty == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select>
+          </label>
+          <button type="submit">סנן</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>משימות פתוחות</h2>
+        <div class="fix-grid">
+          {% for task in tasks %}
+          <article class="task-card" data-issue-type="{{ task.issue_type }}" data-status="{{ task.status }}" data-severity="{{ task.severity }}" data-difficulty="{{ task.difficulty }}">
+            <h3><span class="help" title="{{ task.tooltip }}">{{ task.title }}</span></h3>
+            <p><strong>הסבר:</strong> {{ task.explanation }}</p>
+            <p><strong>למה זה חשוב:</strong> {{ task.why_it_matters }}</p>
+            <p><strong>תיקון מומלץ:</strong> {{ task.recommended_fix }}</p>
+            <p class="muted"><a href="{{ task.page_url }}" target="_blank" rel="noreferrer">{{ task.page_url }}</a></p>
+            <div>
+              <span class="badge">קושי: {{ task.difficulty }}</span>
+              <span class="badge {% if task.risk_level == 'גבוה' %}high{% endif %}">סיכון: {{ task.risk_level }}</span>
+              <span class="badge">השפעה: {{ task.estimated_impact }}</span>
+              <span class="badge">סטטוס: {{ task.status }}</span>
+              {% if task.safe_one_click %}<span class="badge safe">תיקון בטוח בלחיצה</span>{% endif %}
+            </div>
+            <details class="details">
+              <summary>הצג פרטים</summary>
+              <p><strong>סוג בעיה:</strong> {{ task.issue_type }}</p>
+              <p><strong>הצעה:</strong> {{ task.proposed_value }}</p>
+              {% if task.requires_double_confirmation %}<p><strong>שימו לב:</strong> שינוי בסיכון גבוה דורש אישור כפול.</p>{% endif %}
+            </details>
+            <div class="actions">
+              <form method="post" action="/seo/fix-center/{{ task.id }}/check"><button type="submit">בדוק</button></form>
+              <form method="post" action="/seo/fix-center/{{ task.id }}/details"><button class="secondary" type="submit">הצג פרטים</button></form>
+              <form method="post" action="/seo/fix-center/{{ task.id }}/approve"><button type="submit">אשר תיקון</button></form>
+              <form method="post" action="/seo/fix-center/{{ task.id }}/reject"><button class="danger" type="submit">דחה</button></form>
+              <form method="post" action="/seo/fix-center/{{ task.id }}/complete"><button class="secondary" type="submit">סמן כבוצע</button></form>
+              {% if task.safe_one_click %}<form method="post" action="/seo/fix-center/{{ task.id }}/safe-fix"><button type="submit">{{ task.safe_action }}</button></form>{% endif %}
+            </div>
+          </article>
+          {% else %}
+          <p class="empty">לא נמצאו משימות. לחץ על סריקה כדי ליצור משימות מנתוני הזחילה, הסייטמאפ, Search Console ומטא-דאטה קיימים.</p>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>עזרה לפי סוג משימה</h2>
+        <dl>
+          {% for issue, definition in issue_definitions.items() %}
+            <dt><strong>{{ issue }}</strong></dt><dd>{{ definition.tooltip }}</dd>
+          {% endfor %}
+        </dl>
+      </section>
+    </main>
+  </body>
+</html>
