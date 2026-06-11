@@ -3,11 +3,11 @@ from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.db.database import Base, get_db
+from app.db.database import Base, ensure_sqlite_schema_compatibility, get_db
 from app.db.models import ContentArticleDraft, CrawlRun, GSCKeywordMetric, PageAudit, SEOTask
 from app.main import app
 
@@ -465,6 +465,114 @@ def test_gsc_seo_tasks_group_duplicate_metrics_and_classify(client: TestClient, 
     assert second_response.status_code == 200
     assert second_response.json()["created_count"] == 0
     assert db_session.query(SEOTask).count() == 2
+
+
+def test_gsc_seo_tasks_allow_same_page_url_with_different_queries(
+    client: TestClient, db_session: Session
+) -> None:
+    page_url = "https://example.com/blog/brisket-oven"
+    add_metric(
+        db_session,
+        page_url=page_url,
+        query="בריסקט בתנור",
+        clicks=4,
+        impressions=500,
+        ctr=0.008,
+        average_position=6.0,
+    )
+    add_metric(
+        db_session,
+        page_url=page_url,
+        query="איך מכינים בריסקט",
+        clicks=3,
+        impressions=450,
+        ctr=0.006,
+        average_position=7.0,
+    )
+
+    response = client.get("/gsc/seo-tasks")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["created_count"] == 2
+    assert payload["task_count"] == 2
+    tasks = db_session.query(SEOTask).filter(SEOTask.page_url == page_url).order_by(SEOTask.keyword).all()
+    assert len(tasks) == 2
+    assert {task.source for task in tasks} == {"gsc"}
+    assert {task.keyword for task in tasks} == {"בריסקט בתנור", "איך מכינים בריסקט"}
+
+    second_response = client.get("/gsc/seo-tasks")
+
+    assert second_response.status_code == 200
+    assert second_response.json()["created_count"] == 0
+    assert db_session.query(SEOTask).filter(SEOTask.page_url == page_url).count() == 2
+
+
+def test_sqlite_migration_removes_legacy_unique_page_url_constraint_without_dropping_seo_tasks() -> None:
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE seo_tasks (
+                    id INTEGER NOT NULL,
+                    page_url VARCHAR(1024) NOT NULL UNIQUE,
+                    keyword VARCHAR(255),
+                    priority VARCHAR(32),
+                    status VARCHAR(32),
+                    suggested_title VARCHAR(512),
+                    suggested_h1 VARCHAR(512),
+                    meta_description VARCHAR(1024),
+                    recommendation_json TEXT,
+                    article_html TEXT,
+                    article_schema_json TEXT,
+                    faq_schema_json TEXT,
+                    article_status VARCHAR(32),
+                    created_at DATETIME,
+                    updated_at DATETIME,
+                    PRIMARY KEY (id)
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO seo_tasks (
+                    id, page_url, keyword, priority, status, recommendation_json,
+                    article_schema_json, faq_schema_json, article_status
+                )
+                VALUES (
+                    1, 'https://example.com/blog/brisket-oven', 'בריסקט בתנור', 'high', 'recommended',
+                    '{"source":"gsc","query":"בריסקט בתנור"}', '{}', '{}', 'not_generated'
+                )
+                """
+            )
+        )
+
+    ensure_sqlite_schema_compatibility(engine)
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO seo_tasks (
+                    source, page_url, keyword, priority, status, recommendation_json,
+                    article_schema_json, faq_schema_json, article_status
+                )
+                VALUES (
+                    'gsc', 'https://example.com/blog/brisket-oven', 'איך מכינים בריסקט', 'high', 'recommended',
+                    '{"source":"gsc","query":"איך מכינים בריסקט"}', '{}', '{}', 'not_generated'
+                )
+                """
+            )
+        )
+        rows = connection.execute(text("SELECT id, source, page_url, keyword FROM seo_tasks ORDER BY id")).fetchall()
+
+    assert rows == [
+        (1, "gsc", "https://example.com/blog/brisket-oven", "בריסקט בתנור"),
+        (2, "gsc", "https://example.com/blog/brisket-oven", "איך מכינים בריסקט"),
+    ]
 
 
 def test_gsc_seo_task_generation_creates_copy_paste_article(

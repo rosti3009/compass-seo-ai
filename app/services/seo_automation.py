@@ -166,6 +166,7 @@ def _build_task_from_page(page: PageAudit, gsc_metric: GSCKeywordMetric | None =
     if keyword_opportunity_score >= 55:
         priority = "high"
     return SEOTask(
+        source="automation_latest_crawl_gsc_enriched" if gsc_metric else "automation_latest_crawl",
         page_url=page.url,
         keyword=gsc_metric.query if gsc_metric else None,
         priority=priority,
