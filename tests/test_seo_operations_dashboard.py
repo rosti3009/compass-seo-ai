@@ -493,3 +493,193 @@ def test_simple_workspace_hides_system_slug_and_recommendation_only_rows(
     assert "https://example.com/products/slug" not in html
     assert "https://example.com/products/keep" not in html
     assert (safe_fix.target_url or "") in html
+
+
+def _seed_fix_center_crawl(db_session: Session) -> CrawlRun:
+    crawl_run = CrawlRun(target_domain="https://example.com", status="completed", pages_crawled=5, average_score=51)
+    db_session.add(crawl_run)
+    db_session.flush()
+    db_session.add_all(
+        [
+            PageAudit(
+                crawl_run_id=crawl_run.id,
+                url="https://example.com/blog/brisket",
+                status_code=200,
+                title="מאמר בריסקט",
+                meta_description="",
+                h1="",
+                word_count=120,
+                internal_links=0,
+                missing_fields="meta_description,h1,image_alt",
+                page_type="article",
+                seo_score=46,
+                seo_risk_level="high",
+                remediation_suggestions=json.dumps(["internal_link_opportunity"]),
+            ),
+            PageAudit(
+                crawl_run_id=crawl_run.id,
+                url="https://example.com/products/grill-a",
+                status_code=200,
+                title="גריל גז",
+                meta_description="תיאור מוצר",
+                h1="גריל גז",
+                word_count=80,
+                internal_links=2,
+                missing_fields="generic_ai_meta,redirect_chain",
+                page_type="product",
+                seo_score=52,
+                seo_risk_level="critical",
+                remediation_suggestions=json.dumps(["redirect_chain"]),
+            ),
+            PageAudit(
+                crawl_run_id=crawl_run.id,
+                url="https://example.com/products/grill-b",
+                status_code=200,
+                title="גריל גז",
+                meta_description="תיאור מוצר אחר",
+                h1="גריל גז",
+                word_count=80,
+                internal_links=3,
+                missing_fields="",
+                page_type="product",
+                seo_score=65,
+            ),
+            PageAudit(
+                crawl_run_id=crawl_run.id,
+                url="https://example.com/empty-category",
+                status_code=200,
+                title="קטגוריה ריקה",
+                meta_description="",
+                h1="קטגוריה ריקה",
+                word_count=10,
+                internal_links=1,
+                missing_fields="meta_description",
+                page_type="category",
+                seo_score=20,
+            ),
+            PageAudit(
+                crawl_run_id=crawl_run.id,
+                url="https://example.com/old-404",
+                status_code=404,
+                title="ישן",
+                meta_description="",
+                h1="ישן",
+                word_count=0,
+                internal_links=0,
+                missing_fields="",
+                page_type="unknown",
+                seo_score=0,
+            ),
+        ]
+    )
+    db_session.commit()
+    return crawl_run
+
+
+def test_fix_center_scan_generates_employee_friendly_tasks(client: TestClient, db_session: Session) -> None:
+    _seed_fix_center_crawl(db_session)
+
+    response = client.post("/seo/fix-center/scan")
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["created_count"] >= 8
+    tasks_response = client.get("/seo/fix-center/tasks")
+    assert tasks_response.status_code == 200
+    tasks_payload = tasks_response.json()
+    issue_types = {task["issue_type"] for task in tasks_payload["tasks"]}
+    assert "missing_meta_description" in issue_types
+    assert "missing_h1" in issue_types
+    assert "image_missing_alt" in issue_types
+    assert "duplicate_meta_title" in issue_types
+    assert "duplicate_h1" in issue_types
+    assert "redirect_chain" in issue_types
+    assert "product_seo_issue" in issue_types
+    assert "gsc_404" in issue_types
+    first_task = tasks_payload["tasks"][0]
+    assert first_task["title"]
+    assert first_task["explanation"]
+    assert first_task["why_it_matters"]
+    assert first_task["recommended_fix"]
+    assert first_task["difficulty"] in {"קל", "בינוני", "מתקדם"}
+    assert first_task["risk_level"] in {"נמוך", "בינוני", "גבוה"}
+    assert first_task["estimated_impact"] in {"גבוה", "בינוני", "נמוך"}
+    assert tasks_payload["safety"] == {
+        "auto_publish": False,
+        "auto_content_edits": False,
+        "approval_required": True,
+        "high_risk_double_confirmation": True,
+    }
+
+
+def test_fix_center_pages_render_hebrew_filters_tooltips_and_summary(client: TestClient, db_session: Session) -> None:
+    _seed_fix_center_crawl(db_session)
+
+    fix_center_response = client.get("/seo/fix-center")
+    dashboard_response = client.get("/seo/fixes/dashboard")
+
+    assert fix_center_response.status_code == 200
+    html = fix_center_response.text
+    assert '<html lang="he" dir="rtl">' in html
+    assert "מרכז תיקוני SEO ידידותי לעובדים" in html
+    assert "מה כדאי לעשות עכשיו?" in html
+    assert "סיכום יומי" in html
+    assert "חומרה" in html
+    assert "סוג בעיה" in html
+    assert "סטטוס" in html
+    assert "עמוד" in html
+    assert "קלות ביצוע" in html
+    assert "בדוק" in html
+    assert "הצג פרטים" in html
+    assert "אשר תיקון" in html
+    assert "דחה" in html
+    assert "סמן כבוצע" in html
+    assert "אין פרסום אוטומטי" in html
+    assert "missing_meta_description" in html
+    assert "Meta description הוא תקציר" in html
+    assert dashboard_response.status_code == 200
+    assert "What should I do now?" in dashboard_response.text
+    assert "New issues" in dashboard_response.text
+    assert "Fixed today" in dashboard_response.text
+    assert "Waiting for approval" in dashboard_response.text
+    assert "High priority open" in dashboard_response.text
+
+
+def test_fix_center_workflow_requires_double_confirmation_for_high_risk(
+    client: TestClient, db_session: Session
+) -> None:
+    _seed_fix_center_crawl(db_session)
+    client.post("/seo/fix-center/scan")
+    tasks = client.get("/seo/fix-center/tasks").json()["tasks"]
+    high_risk_task = next(task for task in tasks if task["requires_double_confirmation"])
+
+    check_response = client.post(f"/seo/fix-center/{high_risk_task['id']}/check")
+    assert check_response.status_code == 200
+    assert check_response.json()["task"]["status"] == "בבדיקה"
+
+    approve_response = client.post(f"/seo/fix-center/{high_risk_task['id']}/approve", json={"double_confirm": False})
+    assert approve_response.status_code == 409
+
+    confirmed_response = client.post(f"/seo/fix-center/{high_risk_task['id']}/approve", json={"double_confirm": True})
+    assert confirmed_response.status_code == 200
+    assert confirmed_response.json()["task"]["status"] == "אושר"
+    assert confirmed_response.json()["auto_published"] is False
+
+
+def test_fix_center_safe_one_click_is_low_risk_only_and_never_publishes(
+    client: TestClient, db_session: Session
+) -> None:
+    _seed_fix_center_crawl(db_session)
+    client.post("/seo/fix-center/scan")
+    tasks = client.get("/seo/fix-center/tasks").json()["tasks"]
+    safe_task = next(task for task in tasks if task["issue_type"] == "image_missing_alt")
+    unsafe_task = next(task for task in tasks if task["risk_level"] != "נמוך")
+
+    safe_response = client.post(f"/seo/fix-center/{safe_task['id']}/safe-fix")
+    assert safe_response.status_code == 200
+    assert safe_response.json()["task"]["status"] == "ממתין לאישור"
+    assert safe_response.json()["auto_published"] is False
+    assert "לא פורסם" in safe_response.json()["message"]
+
+    unsafe_response = client.post(f"/seo/fix-center/{unsafe_task['id']}/safe-fix")
+    assert unsafe_response.status_code == 403

@@ -105,6 +105,21 @@ from app.services.seo_draft_lifecycle import (
     regenerate_stale_drafts,
     stale_drafts,
 )
+from app.services.seo_fix_center import (
+    ISSUE_DEFINITIONS,
+    ISSUE_TYPES,
+    STATUS_HEBREW,
+    apply_safe_one_click,
+    ensure_fix_center_tasks,
+    list_fix_center_tasks,
+    update_fix_status,
+)
+from app.services.seo_fix_center import (
+    dashboard_summary as fix_center_dashboard_summary,
+)
+from app.services.seo_fix_center import (
+    task_card as fix_center_task_card,
+)
 from app.services.seo_scheduler import (
     create_schedule_config,
     ensure_default_schedule_config,
@@ -121,6 +136,15 @@ logger = logging.getLogger(__name__)
 
 LIVE_GSC_SYNC_DAYS = 30
 LIVE_GSC_SYNC_ROW_LIMIT = 25000
+
+
+class FixCenterApprovalRequest(BaseModel):
+    """Approval request for the employee-friendly SEO Fix Center."""
+
+    double_confirm: bool = False
+
+
+OPTIONAL_FIX_CENTER_APPROVAL_BODY = Body(default=None)
 
 
 class ManualGSCSyncRequest(BaseModel):
@@ -2384,6 +2408,170 @@ def health() -> dict[str, str]:
 def dashboard(request: Request, db: DatabaseSession) -> HTMLResponse:
     """Render the SEO operations dashboard as the app home page."""
     return templates.TemplateResponse(request, "dashboard.html", _operations_view_context(db, legacy_root_markers=True))
+
+
+@router.post("/seo/fix-center/scan", status_code=status.HTTP_201_CREATED)
+def scan_seo_fix_center(db: DatabaseSession) -> dict[str, int]:
+    """Discover employee-friendly SEO tasks without publishing or editing content."""
+
+    return ensure_fix_center_tasks(db)
+
+
+@router.get("/seo/fix-center/tasks")
+def list_seo_fix_center_tasks(
+    db: DatabaseSession,
+    severity: str | None = None,
+    issue_type: str | None = None,
+    status_filter: str | None = None,
+    page: str | None = None,
+    difficulty: str | None = None,
+) -> dict[str, object]:
+    ensure_fix_center_tasks(db)
+    cards = list_fix_center_tasks(
+        db,
+        {
+            "severity": severity,
+            "issue_type": issue_type,
+            "status": status_filter,
+            "page": page,
+            "difficulty": difficulty,
+        },
+    )
+    return {
+        "tasks": cards,
+        "summary": fix_center_dashboard_summary(cards),
+        "issue_types": ISSUE_TYPES,
+        "statuses": STATUS_HEBREW,
+        "safety": {
+            "auto_publish": False,
+            "auto_content_edits": False,
+            "approval_required": True,
+            "high_risk_double_confirmation": True,
+        },
+    }
+
+
+@router.get("/seo/fix-center", response_class=HTMLResponse)
+def seo_fix_center_view(
+    request: Request,
+    db: DatabaseSession,
+    severity: str | None = None,
+    issue_type: str | None = None,
+    status_filter: str | None = None,
+    page: str | None = None,
+    difficulty: str | None = None,
+) -> HTMLResponse:
+    ensure_fix_center_tasks(db)
+    filters = {
+        "severity": severity,
+        "issue_type": issue_type,
+        "status": status_filter,
+        "page": page,
+        "difficulty": difficulty,
+    }
+    cards = list_fix_center_tasks(db, filters)
+    return templates.TemplateResponse(
+        request,
+        "seo_fix_center.html",
+        {
+            "tasks": cards,
+            "summary": fix_center_dashboard_summary(cards),
+            "issue_types": ISSUE_TYPES,
+            "issue_definitions": ISSUE_DEFINITIONS,
+            "statuses": STATUS_HEBREW,
+            "filters": filters,
+        },
+    )
+
+
+@router.get("/seo/fixes/dashboard", response_class=HTMLResponse)
+def seo_fixes_dashboard_view(request: Request, db: DatabaseSession) -> HTMLResponse:
+    ensure_fix_center_tasks(db)
+    cards = list_fix_center_tasks(db)
+    return templates.TemplateResponse(
+        request,
+        "seo_fixes_dashboard.html",
+        {
+            "tasks": cards,
+            "summary": fix_center_dashboard_summary(cards),
+            "issue_definitions": ISSUE_DEFINITIONS,
+            "issue_types": ISSUE_TYPES,
+            "statuses": STATUS_HEBREW,
+        },
+    )
+
+
+@router.get("/seo/fix-center/{fix_id}")
+def get_seo_fix_center_task(fix_id: int, db: DatabaseSession) -> dict[str, object]:
+    fix = db.get(SEOFix, fix_id)
+    if fix is None or fix.source != "fix_center":
+        raise HTTPException(status_code=404, detail="Fix Center task not found")
+    return {"task": fix_center_task_card(fix)}
+
+
+@router.post("/seo/fix-center/{fix_id}/check")
+def check_seo_fix_center_task(fix_id: int, db: DatabaseSession) -> dict[str, object]:
+    try:
+        fix = update_fix_status(db, fix_id, "בבדיקה")
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"success": True, "task": fix_center_task_card(fix)}
+
+
+@router.post("/seo/fix-center/{fix_id}/details")
+def details_seo_fix_center_task(fix_id: int, db: DatabaseSession) -> dict[str, object]:
+    try:
+        fix = update_fix_status(db, fix_id, "ממתין לאישור")
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"success": True, "task": fix_center_task_card(fix)}
+
+
+@router.post("/seo/fix-center/{fix_id}/approve")
+def approve_seo_fix_center_task(
+    fix_id: int, db: DatabaseSession, payload: FixCenterApprovalRequest | None = OPTIONAL_FIX_CENTER_APPROVAL_BODY
+) -> dict[str, object]:
+    try:
+        fix = update_fix_status(db, fix_id, "אושר", double_confirm=bool(payload and payload.double_confirm))
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"success": True, "task": fix_center_task_card(fix), "auto_published": False}
+
+
+@router.post("/seo/fix-center/{fix_id}/reject")
+def reject_seo_fix_center_task(fix_id: int, db: DatabaseSession) -> dict[str, object]:
+    try:
+        fix = update_fix_status(db, fix_id, "נדחה")
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"success": True, "task": fix_center_task_card(fix)}
+
+
+@router.post("/seo/fix-center/{fix_id}/complete")
+def complete_seo_fix_center_task(fix_id: int, db: DatabaseSession) -> dict[str, object]:
+    try:
+        fix = update_fix_status(db, fix_id, "בוצע")
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"success": True, "task": fix_center_task_card(fix), "auto_published": False}
+
+
+@router.post("/seo/fix-center/{fix_id}/safe-fix")
+def safe_fix_seo_fix_center_task(fix_id: int, db: DatabaseSession) -> dict[str, object]:
+    try:
+        fix = apply_safe_one_click(db, fix_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {
+        "success": True,
+        "task": fix_center_task_card(fix),
+        "message": "ההצעה הוכנה לאישור בלבד. לא פורסם ולא נערך תוכן חי.",
+        "auto_published": False,
+    }
 
 
 @router.get("/seo/operations-view", response_class=HTMLResponse)
