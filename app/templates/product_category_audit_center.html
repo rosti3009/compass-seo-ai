@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Product & Category SEO Audit Center</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+      .audit-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem}.metric{background:#f8fafc;border-radius:16px;padding:1rem}.audit-card{border:1px solid #d8e2ef;border-radius:18px;padding:1rem;margin:1rem 0;background:#fff;box-shadow:0 8px 24px rgba(15,23,42,.05)}.audit-head{display:flex;justify-content:space-between;gap:1rem;align-items:flex-start}.badge{display:inline-block;border-radius:999px;background:#eef6ff;padding:.25rem .55rem;margin:.15rem}.status-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:.6rem}.status{border-radius:14px;padding:.65rem;background:#f8fafc}.status.ok{border:1px solid #bbf7d0}.status.warning{border:1px solid #fed7aa}.fix-box{background:#f8fafc;border-radius:14px;padding:.75rem;margin:.5rem 0}.fix-box textarea{width:100%;min-height:72px}.safety{background:#fff7ed;border:1px solid #fed7aa;border-radius:16px;padding:1rem}.muted{color:#64748b}.ltr{direction:ltr;text-align:left;word-break:break-all}@media(max-width:800px){.audit-head{display:block}}
+    </style>
+  </head>
+  <body>
+    <main class="container">
+      <section class="hero compact">
+        <p class="eyebrow">SEO Audit Center</p>
+        <h1>מרכז ביקורת SEO למוצרים וקטגוריות</h1>
+        <p>מזהה קטגוריות ומוצרים שמאבדים תנועה אורגנית ופוטנציאל הכנסות, ומייצר המלצות בעברית להעתקה ידנית בלבד.</p>
+        <p><a href="/seo/command-center">SEO Command Center</a> · <a href="/seo/product-category-audit-center">JSON</a></p>
+      </section>
+
+      <section class="panel safety">
+        <h2>בטיחות</h2>
+        <p>{{ summary.safety }} ההמלצות הן טיוטות לעובדים בלבד, לא פרסום ולא עריכה באתר חי.</p>
+      </section>
+
+      <section class="panel audit-grid">
+        <div class="metric"><strong>{{ summary.categories }}</strong><br>קטגוריות</div>
+        <div class="metric"><strong>{{ summary.products }}</strong><br>מוצרים</div>
+        <div class="metric"><strong>{{ summary.high_value_products }}</strong><br>מוצרים בעלי ערך גבוה</div>
+        <div class="metric"><strong>{{ summary.with_gsc_impressions }}</strong><br>עם חשיפות GSC</div>
+        <div class="metric"><strong>{{ summary.losing_traffic }}</strong><br>מאבדים תנועה</div>
+      </section>
+
+      <section class="panel">
+        <h2>סדר עדיפויות</h2>
+        <ol>{% for item in prioritization %}<li>{{ item }}</li>{% endfor %}</ol>
+      </section>
+
+      <section class="panel">
+        <h2>ביקורות מוכנות לעבודה</h2>
+        {% for audit in audits %}
+          <article class="audit-card" id="audit-{{ loop.index }}">
+            <div class="audit-head">
+              <div>
+                <span class="badge">{{ audit.entity_type_hebrew }}</span>
+                <span class="badge">SEO {{ audit.seo_score }}/100</span>
+                <span class="badge">Value {{ audit.value_score }}/100</span>
+                <h3>{{ audit.name }}</h3>
+                <p class="ltr"><a href="{{ audit.url }}" target="_blank" rel="noreferrer">{{ audit.url }}</a></p>
+              </div>
+              <div>
+                <strong>סיכון הכנסה:</strong> {{ audit.revenue_risk.label }}<br>
+                <small>{{ audit.revenue_risk.note }}</small>
+              </div>
+            </div>
+
+            <div class="status-grid">
+              {% for key, status in audit.statuses.items() %}
+                <div class="status {{ status.severity }}">
+                  <strong>{{ status.label }}: {{ status.status }}</strong>
+                  <p>{{ status.detail }}</p>
+                </div>
+              {% endfor %}
+              <div class="status {% if audit.internal_link_score >= 60 %}ok{% else %}warning{% endif %}">
+                <strong>Internal linking score: {{ audit.internal_link_score }}/100</strong>
+                <p>ציון קישורים פנימיים לפי כמות הקישורים שנמצאה בסריקה.</p>
+              </div>
+            </div>
+
+            <p class="muted">GSC: {{ audit.gsc.impressions }} חשיפות, {{ audit.gsc.clicks }} קליקים, שינוי חשיפות {{ audit.gsc.impressions_delta }}, שינוי קליקים {{ audit.gsc.clicks_delta }}.</p>
+
+            <h4>המלצות מוכנות להעתקה</h4>
+            {% for fix in audit.ready_to_copy_fixes %}
+              <div class="fix-box">
+                <strong>{{ fix.field }}</strong> — {{ fix.recommendation }}
+                <textarea readonly>{{ fix.copy }}</textarea>
+              </div>
+            {% else %}
+              <p class="empty">לא נמצאו תיקונים דחופים להעתקה.</p>
+            {% endfor %}
+          </article>
+        {% else %}
+          <p class="empty">אין עדיין נתוני מוצרים או קטגוריות. הריצו סריקה/סנכרון מוצרים ו-GSC.</p>
+        {% endfor %}
+      </section>
+    </main>
+  </body>
+</html>
