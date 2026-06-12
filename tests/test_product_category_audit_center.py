@@ -119,8 +119,10 @@ def test_product_category_audit_center_prioritizes_categories_and_copy_ready_heb
 
     assert dashboard["audits"][0]["entity_type"] == "category"
     category = dashboard["audits"][0]
-    assert category["statuses"]["meta_description"]["status"] == "דורש טיפול"
-    assert category["statuses"]["h1"]["status"] == "דורש טיפול"
+    assert category["statuses"]["meta_description"]["status"] == "חסר לפי נתונים זמינים"
+    assert category["statuses"]["h1"]["status"] == "חסר לפי נתונים זמינים"
+    assert category["data_confidence_score"] == 100
+    assert category["missing_confirmed_count"] >= 3
     assert category["revenue_risk"]["estimated_lost_clicks"] == 50
     assert category["safety"] == {
         "auto_publish": False,
@@ -131,6 +133,8 @@ def test_product_category_audit_center_prioritizes_categories_and_copy_ready_heb
     copies = "\n".join(fix["copy"] for fix in category["ready_to_copy_fixes"])
     assert "גרילים ומעשנות" in copies
     assert "שאלה:" in copies
+    assert all("built-in method" not in fix["copy_text"] for fix in category["ready_to_copy_fixes"])
+    assert all(isinstance(fix["copy_text"], str) for fix in category["ready_to_copy_fixes"])
     assert dashboard["summary"]["with_gsc_impressions"] >= 2
 
 
@@ -160,3 +164,98 @@ def test_product_category_audit_center_endpoint_and_view_are_read_only(client: T
     assert view.status_code == 200
     assert "מרכז ביקורת SEO למוצרים וקטגוריות" in view.text
     assert "לא פרסום ולא עריכה באתר חי" in view.text
+    assert "יש להעתיק ידנית לאתר ISTORE לאחר בדיקה." in view.text
+    assert "textarea" in view.text
+
+
+def test_unknown_crawl_data_reduces_confidence_without_confirmed_missing(db_session: Session) -> None:
+    db_session.add_all(
+        [
+            IStoreProduct(
+                istore_product_id="p3",
+                product_name="גריל ללא סריקה",
+                canonical_url="https://example.com/products/no-crawl",
+                category="גרילים",
+                meta_title="גריל איכותי ללא סריקה",
+                meta_description="תיאור מוצר מסונכרן מ-ISTORE שמספק מידע בסיסי וברור ללקוחות לפני רכישה באתר.",
+            ),
+            IStoreProduct(
+                istore_product_id="p4",
+                product_name="מוצר חסר מטא",
+                canonical_url="https://example.com/products/missing-meta",
+                category="אביזרים",
+                meta_title="",
+                meta_description="",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    dashboard = build_product_category_audit_center(db_session)
+    product = next(item for item in dashboard["audits"] if item["url"] == "https://example.com/products/no-crawl")
+    missing_product = next(item for item in dashboard["audits"] if item["url"] == "https://example.com/products/missing-meta")
+
+    assert product["statuses"]["h1"]["status"] == "לא נסרק — נדרש בדיקה ידנית"
+    assert product["statuses"]["schema"]["state"] == "unknown"
+    assert product["data_confidence_score"] < 100
+    assert product["missing_confirmed_count"] == 0
+    assert product["seo_score"] != 5
+    assert product["seo_score"] != missing_product["seo_score"]
+
+
+def test_gsc_url_matching_ignores_query_trailing_slash_scheme_and_encoded_hebrew(db_session: Session) -> None:
+    product_url = "https://example.com/products/%D7%92%D7%A8%D7%99%D7%9C"
+    db_session.add(
+        IStoreProduct(
+            istore_product_id="p5",
+            product_name="גריל",
+            canonical_url=product_url,
+            category="גרילים",
+            meta_title="גריל איכותי לבית",
+            meta_description="תיאור מוצר מסונכרן מ-ISTORE שמספק מידע ברור ומספיק ארוך ללקוחות לפני רכישה באתר.",
+        )
+    )
+    _add_metric(db_session, page_url="http://example.com/products/גריל/?from_admin=1", metric_date=date(2026, 5, 25), impressions=321, clicks=12)
+    db_session.commit()
+
+    dashboard = build_product_category_audit_center(db_session)
+    product = next(item for item in dashboard["audits"] if item["url"] == product_url)
+
+    assert product["gsc"]["impressions"] == 321
+    assert product["gsc"]["clicks"] == 12
+    assert "GSC" in product["priority_reason"]
+
+
+def test_category_discovery_from_sitemap_entries(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "app.services.product_category_audit_center._load_sitemap_index",
+        lambda: ([{"url": "https://example.com/category/outdoor-kitchens", "page_type": "category", "title": "מטבחי חוץ"}], {}),
+    )
+
+    dashboard = build_product_category_audit_center(db_session)
+
+    assert dashboard["summary"]["categories"] == 1
+    assert dashboard["audits"][0]["entity_type"] == "category"
+    assert dashboard["audits"][0]["name"] == "מטבחי חוץ"
+
+
+def test_ready_to_copy_product_suggestions_include_required_fields(db_session: Session) -> None:
+    db_session.add(
+        IStoreProduct(
+            istore_product_id="p6",
+            product_name="טאבון גז",
+            canonical_url="https://example.com/products/oven",
+            category="טאבונים",
+            meta_title="",
+            meta_description="",
+        )
+    )
+    db_session.commit()
+
+    dashboard = build_product_category_audit_center(db_session)
+    product = next(item for item in dashboard["audits"] if item["entity_type"] == "product")
+    field_keys = {fix["field_key"] for fix in product["ready_to_copy_fixes"]}
+
+    assert {"meta_title", "meta_description", "h1", "short_product_description", "long_product_description", "faq", "alt_text", "internal_link"} <= field_keys
+    assert all(fix["suggested_value"] for fix in product["ready_to_copy_fixes"])
+    assert all(fix["manual_notice"] == "יש להעתיק ידנית לאתר ISTORE לאחר בדיקה." for fix in product["ready_to_copy_fixes"])
