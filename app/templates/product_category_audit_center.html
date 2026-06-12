@@ -6,7 +6,7 @@
     <title>Product & Category SEO Audit Center</title>
     <link rel="stylesheet" href="/static/style.css">
     <style>
-      .audit-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem}.metric{background:#f8fafc;border-radius:16px;padding:1rem}.audit-card{border:1px solid #d8e2ef;border-radius:18px;padding:1rem;margin:1rem 0;background:#fff;box-shadow:0 8px 24px rgba(15,23,42,.05)}.audit-head{display:flex;justify-content:space-between;gap:1rem;align-items:flex-start}.badge{display:inline-block;border-radius:999px;background:#eef6ff;padding:.25rem .55rem;margin:.15rem}.status-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:.6rem}.status{border-radius:14px;padding:.65rem;background:#f8fafc}.status.ok{border:1px solid #bbf7d0}.status.warning{border:1px solid #fed7aa}.fix-box{background:#f8fafc;border-radius:14px;padding:.75rem;margin:.5rem 0}.fix-box textarea{width:100%;min-height:72px}.safety{background:#fff7ed;border:1px solid #fed7aa;border-radius:16px;padding:1rem}.muted{color:#64748b}.ltr{direction:ltr;text-align:left;word-break:break-all}@media(max-width:800px){.audit-head{display:block}}
+      .audit-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem}.metric{background:#f8fafc;border-radius:16px;padding:1rem}.audit-card{border:1px solid #d8e2ef;border-radius:18px;padding:1rem;margin:1rem 0;background:#fff;box-shadow:0 8px 24px rgba(15,23,42,.05)}.audit-head{display:flex;justify-content:space-between;gap:1rem;align-items:flex-start}.badge{display:inline-block;border-radius:999px;background:#eef6ff;padding:.25rem .55rem;margin:.15rem}.status-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:.6rem}.status{border-radius:14px;padding:.65rem;background:#f8fafc}.status.ok{border:1px solid #bbf7d0}.status.warning{border:1px solid #fed7aa}.status.critical{border:1px solid #fecaca;background:#fff1f2}.status.unknown{border:1px solid #cbd5e1;background:#f8fafc}.fix-box{background:#f8fafc;border-radius:14px;padding:.75rem;margin:.5rem 0}.fix-box textarea{width:100%;min-height:88px}.copy-button{border:0;border-radius:999px;background:#0f766e;color:white;padding:.35rem .75rem;cursor:pointer}.safety{background:#fff7ed;border:1px solid #fed7aa;border-radius:16px;padding:1rem}.muted{color:#64748b}.ltr{direction:ltr;text-align:left;word-break:break-all}@media(max-width:800px){.audit-head{display:block}}
     </style>
   </head>
   <body>
@@ -29,6 +29,8 @@
         <div class="metric"><strong>{{ summary.high_value_products }}</strong><br>מוצרים בעלי ערך גבוה</div>
         <div class="metric"><strong>{{ summary.with_gsc_impressions }}</strong><br>עם חשיפות GSC</div>
         <div class="metric"><strong>{{ summary.losing_traffic }}</strong><br>מאבדים תנועה</div>
+        <div class="metric"><strong>{{ summary.confirmed_missing_meta }}</strong><br>חוסר Meta מאומת</div>
+        <div class="metric"><strong>{{ summary.unknown_scan_data }}</strong><br>נתוני סריקה לא ידועים</div>
       </section>
 
       <section class="panel">
@@ -44,9 +46,11 @@
               <div>
                 <span class="badge">{{ audit.entity_type_hebrew }}</span>
                 <span class="badge">SEO {{ audit.seo_score }}/100</span>
+                <span class="badge">אמינות נתונים {{ audit.data_confidence_score }}/100</span>
                 <span class="badge">Value {{ audit.value_score }}/100</span>
                 <h3>{{ audit.name }}</h3>
                 <p class="ltr"><a href="{{ audit.url }}" target="_blank" rel="noreferrer">{{ audit.url }}</a></p>
+                <p><strong>סיבת עדיפות:</strong> {{ audit.priority_reason }}</p>
               </div>
               <div>
                 <strong>סיכון הכנסה:</strong> {{ audit.revenue_risk.label }}<br>
@@ -67,13 +71,19 @@
               </div>
             </div>
 
-            <p class="muted">GSC: {{ audit.gsc.impressions }} חשיפות, {{ audit.gsc.clicks }} קליקים, שינוי חשיפות {{ audit.gsc.impressions_delta }}, שינוי קליקים {{ audit.gsc.clicks_delta }}.</p>
+            <p><strong>בעיות מאומתות/חלשות:</strong> {{ audit.confirmed_problems|join(', ') if audit.confirmed_problems else 'אין' }}</p>
+            <p><strong>שדות לא ידועים:</strong> {{ audit.unknown_fields|join(', ') if audit.unknown_fields else 'אין' }}</p>
+
+            <p class="muted">GSC: {{ audit.gsc.impressions }} חשיפות, {{ audit.gsc.clicks }} קליקים, CTR {{ '%.2f'|format(audit.gsc.ctr * 100) }}%, מיקום ממוצע {{ '%.1f'|format(audit.gsc.average_position) }}, שינוי חשיפות {{ audit.gsc.impressions_delta }}, שינוי קליקים {{ audit.gsc.clicks_delta }}.</p>
 
             <h4>המלצות מוכנות להעתקה</h4>
             {% for fix in audit.ready_to_copy_fixes %}
               <div class="fix-box">
-                <strong>{{ fix.field }}</strong> — {{ fix.recommendation }}
-                <textarea readonly>{{ fix.copy }}</textarea>
+                <strong>{{ fix.label_he }}</strong> — {{ fix.instruction_he }}
+                {% if fix.current_value %}<p class="muted">ערך נוכחי: {{ fix.current_value }}</p>{% endif %}
+                <textarea id="copy-{{ loop.index }}-{{ fix.field_key }}" readonly>{{ fix.copy_text or fix.suggested_value }}</textarea>
+                <p class="muted">{{ fix.manual_notice }}</p>
+                <button class="copy-button" type="button" data-copy-target="copy-{{ loop.index }}-{{ fix.field_key }}">העתקה</button>
               </div>
             {% else %}
               <p class="empty">לא נמצאו תיקונים דחופים להעתקה.</p>
@@ -84,5 +94,15 @@
         {% endfor %}
       </section>
     </main>
+    <script>
+      document.querySelectorAll('[data-copy-target]').forEach((button) => {
+        button.addEventListener('click', async () => {
+          const target = document.getElementById(button.dataset.copyTarget);
+          if (!target) return;
+          await navigator.clipboard.writeText(target.value);
+          button.textContent = 'הועתק';
+        });
+      });
+    </script>
   </body>
 </html>
