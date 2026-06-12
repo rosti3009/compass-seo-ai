@@ -91,6 +91,7 @@ from app.services.istore_mapping import (
     verify_pending_istore_mappings,
 )
 from app.services.istore_product_seo import analyze_istore_product_seo
+from app.services.product_category_audit_center import build_product_category_audit_center
 from app.services.seo_auto_fixes import (
     AutoFixOptions,
     fix_to_review_dict,
@@ -2456,6 +2457,22 @@ def list_seo_fix_center_tasks(
             "high_risk_double_confirmation": True,
         },
     }
+
+
+
+@router.get("/seo/product-category-audit-center")
+def product_category_audit_center(db: DatabaseSession, limit: int = 100) -> dict[str, object]:
+    """Return read-only product/category SEO audits with Hebrew copy-ready fixes."""
+
+    return {"success": True, **build_product_category_audit_center(db, limit=limit)}
+
+
+@router.get("/seo/product-category-audit-center/view", response_class=HTMLResponse)
+def product_category_audit_center_view(request: Request, db: DatabaseSession, limit: int = 100) -> HTMLResponse:
+    """Render the Product & Category SEO Audit Center without publishing changes."""
+
+    dashboard = build_product_category_audit_center(db, limit=limit)
+    return templates.TemplateResponse(request, "product_category_audit_center.html", dashboard)
 
 
 @router.get("/seo/command-center", response_class=HTMLResponse)
