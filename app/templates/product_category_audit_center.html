@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Product & Category SEO Audit Center</title>
+    <title>Product & Category SEO Work Center</title>
     <link rel="stylesheet" href="/static/style.css">
     <style>
       .audit-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem}.metric{background:#f8fafc;border-radius:16px;padding:1rem}.audit-card{border:1px solid #d8e2ef;border-radius:18px;padding:1rem;margin:1rem 0;background:#fff;box-shadow:0 8px 24px rgba(15,23,42,.05)}.audit-head{display:flex;justify-content:space-between;gap:1rem;align-items:flex-start}.badge{display:inline-block;border-radius:999px;background:#eef6ff;padding:.25rem .55rem;margin:.15rem}.status-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:.6rem}.status{border-radius:14px;padding:.65rem;background:#f8fafc}.status.ok{border:1px solid #bbf7d0}.status.warning{border:1px solid #fed7aa}.status.critical{border:1px solid #fecaca;background:#fff1f2}.status.unknown{border:1px solid #cbd5e1;background:#f8fafc}.fix-box{background:#f8fafc;border-radius:14px;padding:.75rem;margin:.5rem 0}.fix-box textarea{width:100%;min-height:88px}.copy-button{border:0;border-radius:999px;background:#0f766e;color:white;padding:.35rem .75rem;cursor:pointer}.safety{background:#fff7ed;border:1px solid #fed7aa;border-radius:16px;padding:1rem}.muted{color:#64748b}.ltr{direction:ltr;text-align:left;word-break:break-all}@media(max-width:800px){.audit-head{display:block}}
@@ -76,13 +76,16 @@
 
             <p class="muted">GSC: {{ audit.gsc.impressions }} חשיפות, {{ audit.gsc.clicks }} קליקים, CTR {{ '%.2f'|format(audit.gsc.ctr * 100) }}%, מיקום ממוצע {{ '%.1f'|format(audit.gsc.average_position) }}, שינוי חשיפות {{ audit.gsc.impressions_delta }}, שינוי קליקים {{ audit.gsc.clicks_delta }}.</p>
 
-            <h4>המלצות מוכנות להעתקה</h4>
+            <h4>פתרון מוכן להעתקה</h4>
             {% for fix in audit.ready_to_copy_fixes %}
               <div class="fix-box">
                 <strong>{{ fix.label_he }}</strong> — {{ fix.instruction_he }}
-                {% if fix.current_value %}<p class="muted">ערך נוכחי: {{ fix.current_value }}</p>{% endif %}
+                <p class="muted">ערך נוכחי: {{ fix.current_value or 'לא ידוע / לא נסרק' }}</p>
+                <p><strong>סטטוס:</strong> {{ fix.detected_status }} · <strong>בעיה:</strong> {{ fix.issue_he }}</p>
+                <p><strong>איפה להדביק ב-iStore:</strong> {{ fix.istore_path_he }}</p>
                 <textarea id="copy-{{ loop.index }}-{{ fix.field_key }}" readonly>{{ fix.copy_text or fix.suggested_value }}</textarea>
                 <p class="muted">{{ fix.manual_notice }}</p>
+                {% if fix.quality_flags %}<p class="muted">Quality flags: {{ fix.quality_flags|join(', ') }}</p>{% endif %}
                 <button class="copy-button" type="button" data-copy-target="copy-{{ loop.index }}-{{ fix.field_key }}">העתקה</button>
               </div>
             {% else %}

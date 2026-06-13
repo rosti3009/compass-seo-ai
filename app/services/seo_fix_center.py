@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 """Employee-friendly SEO Fix Center task discovery and workflow helpers."""
 
 from __future__ import annotations
@@ -8,7 +9,7 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import unquote, urlparse, urlunparse
 
 from sqlalchemy.orm import Session
 
@@ -190,7 +191,7 @@ ISSUE_DEFINITIONS: dict[str, IssueDefinition] = {
         "בעיית SEO במוצר {page}",
         "עמוד מוצר חסר מידע SEO חשוב או נשמע גנרי מדי.",
         "עמודי מוצר חלשים עלולים לקבל פחות חשיפה ופחות הקלקות מגוגל.",
-        "לשפר כותרת/תיאור מוצר בהצעה ידנית, ואז להעביר לאישור.",
+        "לשנות שדה ספציפי ב-iStore לפי הערך המוצע בכרטיס: שם, Meta title, Meta description, H1 או תיאור.",
         "בינוני",
         "בינוני",
         "גבוה",
@@ -239,8 +240,34 @@ def _suggested_slug(page_url: str, base: str) -> str | None:
     return "-".join(words).strip("-") or None
 
 
-def _copy_field(key: str, label: str, value: str | None, current: str | None = None) -> dict[str, str]:
-    return {"key": key, "label": label, "value": value or "", "current": current or ""}
+def _istore_path_for(key: str) -> str:
+    paths = {
+        "current_product_title": "עריכת מוצר/קטגוריה > כללי > שם",
+        "suggested_hebrew_product_title": "עריכת מוצר/קטגוריה > כללי > שם",
+        "suggested_meta_title": "עריכת מוצר/קטגוריה > כללי > כותרת לקידום במנוע חיפוש",
+        "suggested_meta_description": "עריכת מוצר/קטגוריה > כללי > תיאור לקידום במנוע חיפוש",
+        "suggested_h1": "עריכת מוצר/קטגוריה > כללי > שם / כותרת העמוד",
+        "suggested_short_product_description": "עריכת מוצר > כללי > תיאור קצר",
+        "suggested_long_product_description": "עריכת מוצר/קטגוריה > כללי > תיאור",
+        "suggested_slug": "עריכת מוצר/קטגוריה > נתונים > שם ייחודי לקישור",
+        "suggested_alt": "עריכת תמונה / העלאת תמונה > ALT / תיאור תמונה",
+        "suggested_replacement_url": "ניהול הפניות ידני > יעד 301 מוצע",
+    }
+    return paths.get(key, "עריכה ידנית ב-iStore לאחר בדיקה")
+
+
+def _copy_field(
+    key: str, label: str, value: str | None, current: str | None = None, issue: str = "נדרש שיפור ידני"
+) -> dict[str, str]:
+    return {
+        "key": key,
+        "label": label,
+        "value": str(value or ""),
+        "current": str(current or ""),
+        "issue_he": issue,
+        "istore_path_he": _istore_path_for(key),
+        "manual_notice": MANUAL_ISTORE_NOTICE,
+    }
 
 
 def _solution_summary(fields: list[dict[str, str]]) -> str:
@@ -255,19 +282,23 @@ def _build_ready_solution(
     evidence = evidence or {}
     page_data = _page_payload(page)
     page_label = _clean_label(str(page_data.get("title") or page_data.get("h1") or ""), _page_name(page_url))
-    meta_title = _truncate(f"{page_label} | ISTORE", 60)
-    meta_description = _truncate(
-        f"{page_label} זמין ב-ISTORE עם מידע ברור, מפרט שימושי וחוויית קנייה נוחה. "
-        "בדקו פרטים, התאמה וזמינות לפני רכישה.",
-        155,
-    )
-    h1 = page_label
-    short_description = _truncate(f"{page_label} - פתרון איכותי ללקוחות ISTORE, עם מידע ברור שיעזור לבחור נכון.", 220)
+    specific = _specific_hebrew_copy(page_label)
+    meta_title = specific["title"]
+    meta_description = specific["description"]
+    h1 = specific["name"]
+    short_description = specific["short"]
     long_description = (
-        f"{page_label} מתאים ללקוחות שמחפשים מידע ברור לפני רכישה באתר ISTORE. "
-        "מומלץ להציג בעמוד יתרונות מרכזיים, מפרט רלוונטי, שימושים נפוצים ותשובות לשאלות שחוזרות אצל לקוחות. "
-        "יש לוודא שהניסוח תואם למוצר בפועל, למלאי ולמדיניות החנות לפני העתקה לאתר."
+        f"{specific['name']} — יש לעדכן את תיאור העמוד לפי המוצר המאומת בלבד. "
+        "ציינו שימושים, התאמה לגריל/מעשנה/מטבח חוץ, יתרון ללקוח, מידות או חומרי גלם רק אם הם מופיעים במפרט הרשמי. "
+        "אין להמציא נתונים טכניים שאינם ידועים."
     )
+    faq_block = (
+        f"שאלה: למי מתאים {specific['name']}?\n"
+        "תשובה: למי שמחפש פתרון מתאים בתחום הגריל, הבישול או מטבח החוץ, לאחר בדיקת התאמה למוצר בפועל.\n"
+        "שאלה: מה חשוב לבדוק לפני רכישה?\n"
+        "תשובה: מפרט מאומת, מידות, חומרי גלם, הוראות שימוש וזמינות במלאי."
+    )
+    manual_notice = "ידני בלבד: יש לוודא שהניסוח תואם למוצר בפועל, למלאי ולמדיניות החנות לפני העתקה לאתר."
     fields: list[dict[str, str]] = []
     replacements: list[dict[str, str]] = []
     affected_pages = evidence.get("affected_pages") if isinstance(evidence.get("affected_pages"), list) else []
@@ -276,7 +307,7 @@ def _build_ready_solution(
         slug = _suggested_slug(page_url, page_label)
         fields = [
             _copy_field("current_product_title", "כותרת מוצר נוכחית", str(page_data.get("title") or "")),
-            _copy_field("suggested_hebrew_product_title", "כותרת מוצר מוצעת בעברית", page_label),
+            _copy_field("suggested_hebrew_product_title", "כותרת מוצר מוצעת בעברית", specific["name"]),
             _copy_field("suggested_meta_title", "Meta title מוצע", meta_title, str(page_data.get("title") or "")),
             _copy_field(
                 "suggested_meta_description",
@@ -287,6 +318,7 @@ def _build_ready_solution(
             _copy_field("suggested_h1", "H1 מוצע", h1, str(page_data.get("h1") or "")),
             _copy_field("suggested_short_product_description", "תיאור מוצר קצר מוצע", short_description),
             _copy_field("suggested_long_product_description", "תיאור מוצר ארוך מוצע", long_description),
+            _copy_field("suggested_faq", "FAQ מוצע", faq_block),
         ]
         if slug:
             fields.append(_copy_field("suggested_slug", "Slug מוצע", slug))
@@ -295,8 +327,8 @@ def _build_ready_solution(
         fields = [
             _copy_field("image_url_or_filename", "כתובת/שם קובץ תמונה", image_name),
             _copy_field("current_alt", "ALT נוכחי", str(evidence.get("current_alt") or "")),
-            _copy_field("suggested_alt", "ALT מוצע בעברית", f"תמונה של {page_label} באתר ISTORE"),
-            _copy_field("suggested_image_title", "כותרת תמונה מוצעת", f"{page_label} - ISTORE"),
+            _copy_field("suggested_alt", "ALT מוצע בעברית", f"{specific['name']} - תמונת מוצר Compass Grill"),
+            _copy_field("suggested_image_title", "כותרת תמונה מוצעת", f"{specific['name']} - Compass Grill"),
         ]
     elif issue_type == "missing_meta_title":
         fields = [
@@ -328,15 +360,22 @@ def _build_ready_solution(
             replacements.append(
                 {"page_url": str(affected_url), "label": f"{field_label} ייחודי לעמוד {index}", "value": unique}
             )
-    elif issue_type == "broken_link":
+    elif issue_type in {"broken_link", "gsc_404"}:
         replacement = str(
-            evidence.get("suggested_replacement_url") or page_data.get("canonical") or _site_root(page_url)
+            evidence.get("suggested_redirect_target")
+            or evidence.get("matching_live_url_candidate")
+            or evidence.get("suggested_replacement_url")
+            or page_data.get("canonical")
+            or _site_root(page_url)
         )
         fields = [
             _copy_field("source_page", "עמוד מקור", str(evidence.get("source_page") or "לא זוהה בסריקה - לבדוק ידנית")),
             _copy_field("broken_url", "כתובת שבורה", page_url),
-            _copy_field("suggested_replacement_url", "כתובת חלופית מוצעת", replacement),
-            _copy_field("suggested_anchor_text", "טקסט עוגן מוצע", page_label),
+            _copy_field("suggested_replacement_url", "יעד 301 מוצע / כתובת חלופית", replacement),
+            _copy_field("redirect_action_type", "סוג פעולה", str(evidence.get("action_type") or "manual review")),
+            _copy_field("redirect_confidence", "ציון ביטחון", str(evidence.get("confidence_score") or "לא ידוע")),
+            _copy_field("redirect_reason", "סיבה", str(evidence.get("reason") or "בדיקה ידנית בלבד")),
+            _copy_field("suggested_anchor_text", "טקסט עוגן מוצע", specific["name"]),
         ]
     elif issue_type == "internal_link_opportunity":
         target = str(evidence.get("target_page") or page_url)
@@ -346,7 +385,9 @@ def _build_ready_solution(
             _copy_field("target_page", "עמוד יעד", target),
             _copy_field("suggested_anchor_text", "טקסט עוגן מוצע", anchor),
             _copy_field(
-                "suggested_link_sentence", "משפט מוצע עם הקישור", f"למידע נוסף מומלץ לקרוא על {anchor} באתר ISTORE."
+                "suggested_link_sentence",
+                "משפט מוצע עם הקישור",
+                f"למידע נוסף על {anchor}, עברו לעמוד הרלוונטי באתר Compass Grill.",
             ),
         ]
     else:
@@ -354,7 +395,7 @@ def _build_ready_solution(
 
     return {
         "heading": "פתרון מוכן להעתקה",
-        "manual_notice": MANUAL_ISTORE_NOTICE,
+        "manual_notice": manual_notice if "manual_notice" in locals() else MANUAL_ISTORE_NOTICE,
         "fields": fields,
         "affected_pages": [str(url) for url in affected_pages],
         "unique_replacements": replacements,
@@ -370,9 +411,86 @@ def _json_load(raw: str | None, fallback: Any) -> Any:
 
 
 def _page_name(url: str) -> str:
-    path = urlparse(url).path.rstrip("/")
+    path = unquote(urlparse(url).path.rstrip("/"))
     slug = path.split("/")[-1] if path else urlparse(url).netloc
     return slug.replace("-", " ") or url
+
+
+def _normalize_url_key(url: str | None) -> str:
+    raw = (url or "").strip()
+    if not raw:
+        return ""
+    parsed = urlparse(raw if re.match(r"^[a-z][a-z0-9+.-]*://", raw, flags=re.I) else f"https://{raw}")
+    host = (parsed.netloc or "").lower().removeprefix("www.")
+    path = re.sub(r"/{2,}", "/", unquote(parsed.path or "/")).rstrip("/") or "/"
+    return f"{host}{path}".lower()
+
+
+def _specific_hebrew_copy(label: str) -> dict[str, str]:
+    text = label.lower()
+    if any(token in text for token in ("basalt", "בזלת")):
+        name = "אבני בזלת לגריל גז"
+        return {
+            "name": name,
+            "title": "אבני בזלת לגריל גז – פיזור חום והפחתת התלקחויות | Compass Grill",
+            "description": "אבני בזלת לגריל גז לשיפור פיזור החום, שמירה על טמפרטורה יציבה והפחתת התלקחויות בזמן צלייה.",
+            "short": "אבני בזלת לגריל גז מסייעות לפיזור חום אחיד, להפחתת התלקחויות ולצלייה יציבה יותר.",
+        }
+    if any(token in text for token in ("vacuum", "ואקום")):
+        name = "שקיות ואקום מחורצות 20×30"
+        return {
+            "name": name,
+            "title": "שקיות ואקום מחורצות 20×30 לסו-ויד ואחסון מזון | Compass Grill",
+            "description": "שקיות ואקום מחורצות לשימוש עם מכונות ואקום תואמות. מתאימות לסו-ויד, הקפאה ושמירה על טריות המזון.",
+            "short": "שקיות ואקום מחורצות לאחסון מזון, הקפאה ובישול סו-ויד במכונה תואמת.",
+        }
+    if any(token in text for token in ("tandoor", "kazan", "טנדור", "קאזן", "persian", "roma")):
+        name = "טנדור או קאזן לבישול חוץ"
+        return {
+            "name": name,
+            "title": "קאזן אסייתי מברזל יצוק לבישול שטח | Compass Grill",
+            "description": "קאזן או טנדור לבישול שטח, קדירות, תבשילים וצלייה מעל אש. מתאים לקמפינג ולמטבחי גינה.",
+            "short": "קאזן/טנדור לבישול חוץ מתאים לקדירות, תבשילים וצלייה מעל אש פתוחה.",
+        }
+    if any(token in text for token in ("smoker", "מעשנה")):
+        name = "מעשנת פלט מקצועית"
+        return {
+            "name": name,
+            "title": "מעשנת פלט מקצועית לבשר, דגים וירקות | Compass Grill",
+            "description": "מעשנת פלט לשליטה בטמפרטורה, עישון ארוך וצלייה איטית. מתאימה לבריסקט, אסאדו, עוף ודגים.",
+            "short": "מעשנה לעישון ארוך וצלייה איטית עם שליטה יציבה בחום וטעמי עץ.",
+        }
+    if any(token in text for token in ("grill", "גריל")):
+        name = "גריל גז מקצועי"
+        return {
+            "name": name,
+            "title": "גריל גז מקצועי לגינה ולמטבח חוץ | Compass Grill",
+            "description": "גריל גז איכותי לצלייה ביתית ומקצועית, עם פיזור חום יציב וחוויית בישול נוחה בגינה או במרפסת.",
+            "short": "גריל גז לגינה או למרפסת מאפשר חימום מהיר, שליטה בחום וצלייה נוחה.",
+        }
+    if any(token in text for token in ("knife", "סכין")):
+        name = "סכין מקצועית לחיתוך בשר"
+        return {
+            "name": name,
+            "title": "סכין מקצועית לחיתוך בשר ועבודת מטבח | Compass Grill",
+            "description": "סכין מקצועית לחיתוך, פריסה והכנת בשר במטבח ובאזור הגריל לפני צלייה, עישון ובישול.",
+            "short": "סכין מקצועית מסייעת בחיתוך מדויק של בשר וחומרי גלם לפני צלייה או עישון.",
+        }
+    if text in {"assman", "atman", "skiff"} or not re.search(r"[֐-׿]", label):
+        return {
+            "name": "זהות מוצר לא ברורה — נדרש בדיקה ידנית",
+            "title": "זהות מוצר לא ברורה — נדרש בדיקה ידנית",
+            "description": "זהות מוצר לא ברורה — נדרש שיוך ידני לפני כתיבת SEO.",
+            "short": "אין להפיק טקסט שיווקי עד שמוודאים מה המוצר.",
+        }
+    return {
+        "name": label,
+        "title": _truncate(f"{label} | Compass Grill", 60),
+        "description": _truncate(
+            f"{label} לשימוש בתחום הגריל, הבישול או מטבח החוץ. יש לבדוק מפרט, התאמה וזמינות לפני רכישה.", 155
+        ),
+        "short": f"{label} מיועד לשימוש בתחום הגריל, הבישול או מטבח החוץ לאחר אימות מפרט המוצר.",
+    }
 
 
 def _missing_fields(page: PageAudit) -> set[str]:
@@ -445,14 +563,14 @@ def discover_issue_candidates(db: Session) -> list[dict[str, Any]]:
         .all()
     )
     crawled_urls = {page.url for page in pages}
+    products_for_matching = db.query(IStoreProduct).limit(1000).all()
     for (page_url,) in gsc_pages:
         if page_url and page_url not in crawled_urls and page_url not in known_urls:
-            candidates.append(
-                {"page_url": page_url, "issue_type": "gsc_404", "page": None, "evidence": {"source": "gsc"}}
-            )
+            evidence = {"source": "gsc", **_find_redirect_candidate(page_url, pages, products_for_matching)}
+            candidates.append({"page_url": page_url, "issue_type": "gsc_404", "page": None, "evidence": evidence})
             known_urls.add(page_url)
 
-    for product in db.query(IStoreProduct).limit(250).all():
+    for product in products_for_matching[:250]:
         product_url = (
             getattr(product, "canonical_url", None)
             or getattr(product, "product_url", None)
@@ -473,6 +591,57 @@ def discover_issue_candidates(db: Session) -> list[dict[str, Any]]:
                 known_urls.add(product_url)
 
     return candidates
+
+
+def _find_redirect_candidate(page_url: str, pages: list[PageAudit], products: list[IStoreProduct]) -> dict[str, Any]:
+    old_tokens = {
+        token
+        for token in re.split(r"[^\w\u0590-\u05FF]+", _page_name(page_url).lower())
+        if len(token) > 2 and not token.isdigit()
+    }
+    best_url = ""
+    best_score = 0
+    best_type = "manual review"
+    for page in pages:
+        if page.status_code >= 400:
+            continue
+        tokens = {
+            token
+            for token in re.split(r"[^\w\u0590-\u05FF]+", _page_name(page.url).lower())
+            if len(token) > 2 and not token.isdigit()
+        }
+        score = int(100 * len(old_tokens & tokens) / max(1, len(old_tokens | tokens)))
+        if _normalize_url_key(page.canonical) == _normalize_url_key(page_url):
+            score = max(score, 95)
+        if score > best_score:
+            best_url, best_score = page.url, score
+            best_type = (
+                "redirect to category"
+                if page.page_type == "category"
+                else "redirect to live product"
+                if page.page_type == "product"
+                else "redirect to blog article"
+                if page.page_type in {"blog", "article"}
+                else "manual review"
+            )
+    for product in products:
+        target = product.canonical_url or product.product_url or product.slug or ""
+        if not target:
+            continue
+        compare = f"{product.product_name or ''} {target}".lower()
+        score = 80 if any(token and token in compare for token in old_tokens) else 0
+        if "basalt" in page_url.lower() and ("בזלת" in compare or "basalt" in compare):
+            score = 92
+        if score > best_score:
+            best_url, best_score, best_type = target, score, "redirect to live product"
+    action = best_type if best_score >= 75 else "manual review"
+    return {
+        "matching_live_url_candidate": best_url,
+        "confidence_score": best_score,
+        "suggested_redirect_target": best_url if best_score >= 75 else "",
+        "action_type": action,
+        "reason": "התאמה לפי סלאג/שם מוצר/קנוניקל; המלצה ידנית בלבד, לא נוצרת הפניה אוטומטית.",
+    }
 
 
 def _priority_for(definition: IssueDefinition) -> str:

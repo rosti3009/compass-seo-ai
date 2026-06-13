@@ -6,49 +6,79 @@
     <title>SEO Command Center</title>
     <link rel="stylesheet" href="/static/style.css">
     <style>
-      .command-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:1rem}.command-card{background:#fff;border:1px solid #d8e2ef;border-radius:18px;padding:1rem;box-shadow:0 8px 24px rgba(15,23,42,.06);text-decoration:none;color:#0f172a}.command-card strong{display:block;font-size:1.15rem;margin-bottom:.35rem}.priority{border-bottom:1px solid #e2e8f0;padding:.7rem 0}.safety{background:#fff7ed;border:1px solid #fed7aa;border-radius:16px;padding:1rem}.muted{color:#64748b}
+      .queue{display:grid;gap:1rem}.work-card{background:#fff;border:1px solid #d8e2ef;border-radius:18px;padding:1rem;box-shadow:0 8px 24px rgba(15,23,42,.06)}.badge{display:inline-block;border-radius:999px;background:#eef6ff;padding:.25rem .55rem;margin:.12rem}.badge.hot{background:#fee2e2}.badge.safe{background:#dcfce7}.actions{display:flex;gap:.45rem;flex-wrap:wrap}.actions a,.actions button{border:0;border-radius:10px;padding:.5rem .7rem;background:#1d4ed8;color:#fff;text-decoration:none}.actions .secondary{background:#475569}.actions .copy{background:#15803d}.safety{background:#fff7ed;border:1px solid #fed7aa;border-radius:16px;padding:1rem}.muted{color:#64748b}.columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1rem}.mini{background:#f8fafc;border-radius:14px;padding:.85rem}.filters span{display:inline-block;background:#f1f5f9;border-radius:999px;padding:.25rem .55rem;margin:.15rem}
     </style>
   </head>
   <body>
     <main class="container">
       <section class="hero compact">
-        <p class="eyebrow">SEO Operations</p>
-        <h1>SEO Command Center</h1>
-        <p>מרכז שליטה ידני לכל עבודת ה-SEO: משימות GSC, טיוטות מאמרים, מרכז תיקונים ותור פרסום ידני ל-ISTORE.</p>
+        <p class="eyebrow">Compass Grill SEO Work Center</p>
+        <h1>מרכז עבודה יומי לקידום מוצרים וקטגוריות</h1>
+        <p>בחרו את המשימה הראשונה בתור, העתיקו את הטקסט המוכן ל-iStore, סמנו שבוצע ידנית. אין צורך להבין SEO.</p>
       </section>
 
       <section class="panel safety">
-        <h2>בטיחות</h2>
-        <p>אין פרסום אוטומטי ואין עריכת תוכן חי. {{ safety.manual_notice }}</p>
+        <h2>הודעת בטיחות</h2>
+        <p>ידני בלבד: אין פרסום אוטומטי, אין עריכת תוכן חי, אין יצירת הפניות אוטומטיות. {{ safety.manual_notice }}</p>
       </section>
 
       <section class="panel">
-        <h2>קישורים מרכזיים</h2>
-        <div class="command-grid">
-          <a class="command-card" href="/gsc/seo-tasks/dashboard"><strong>GSC SEO Tasks</strong><span>משימות מתובנות Search Console.</span></a>
-          <a class="command-card" href="/seo/simple-workspace#articles"><strong>Article Drafts</strong><span>טיוטות תוכן ומאמרים לבדיקה ידנית.</span></a>
-          <a class="command-card" href="/seo/fix-center"><strong>SEO Fix Center</strong><span>תיקוני SEO עם פתרון מוכן להעתקה.</span></a>
-          <a class="command-card" href="/seo/product-category-audit-center/view"><strong>Product & Category Audit</strong><span>קטגוריות ומוצרים שמאבדים תנועה והכנסות.</span></a>
-          <a class="command-card" href="/seo/publishing-packages-view"><strong>Manual iStore Publishing Queue</strong><span>חבילות העתקה ידניות לפרסום ב-ISTORE.</span></a>
-          <a class="command-card" href="#daily-top-priorities"><strong>Daily top priorities</strong><span>המשימות החשובות ביותר להיום.</span></a>
+        <p class="muted"><a href="/gsc/seo-tasks/dashboard">GSC SEO Tasks</a> · <a href="/seo/simple-workspace#articles">Article Drafts</a> · <a href="/seo/fix-center">SEO Fix Center</a> · <a href="/seo/product-category-audit-center/view">Product & Category Audit</a></p>
+        <h2>Daily top priorities / Top 20 Work Queue</h2>
+        <p class="muted">זה התור המרכזי לעובדים: קטגוריות ומוצרי non-food עם הזדמנות GSC ובעיות מאומתות מקבלים קדימות; נתונים לא ידועים אינם נחשבים ככשל מאומת.</p>
+        <div class="filters">
+          {% for filter in audit_dashboard.filters %}<span>{{ filter }}</span>{% endfor %}
+        </div>
+        <div class="queue">
+          {% for item in top_20_work_queue %}
+            <article class="work-card">
+              <h3>{{ loop.index }}. {{ item.entity_type_hebrew }} — {{ item.name }}</h3>
+              <p>{{ item.priority_reason }}</p>
+              <div>
+                <span class="badge {% if item.quick_win %}hot{% endif %}">Priority {{ item.priority_score }}</span>
+                <span class="badge">SEO {{ item.seo_score }}/100</span>
+                <span class="badge">אמינות נתונים {{ item.data_confidence_score }}/100</span>
+                <span class="badge">ערך מסחרי {{ item.commercial_value_score }}/100</span>
+                <span class="badge">הזדמנות תנועה {{ item.traffic_opportunity_score }}/100</span>
+                <span class="badge safe">{{ item.product_family }}</span>
+              </div>
+              <p class="muted">GSC: {{ item.gsc.impressions }} חשיפות · {{ item.gsc.clicks }} קליקים · CTR {{ '%.2f'|format(item.gsc.ctr * 100) }}% · מיקום {{ '%.1f'|format(item.gsc.average_position) }}</p>
+              {% set first_fix = item.ready_to_copy_fixes[0] if item.ready_to_copy_fixes else none %}
+              {% if first_fix %}
+                <div class="mini">
+                  <strong>מה לעשות עכשיו:</strong> {{ first_fix.label_he }}<br>
+                  <span class="muted">איפה להדביק: {{ first_fix.istore_path_he }}</span>
+                  <textarea readonly id="cc-{{ loop.index }}" style="width:100%;min-height:54px;direction:rtl">{{ first_fix.copy_text }}</textarea>
+                </div>
+              {% endif %}
+              <div class="actions">
+                <a href="/seo/product-category-audit-center/view#audit-{{ loop.index }}">פתח ביקורת</a>
+                <a class="secondary" href="{{ item.url }}" target="_blank" rel="noreferrer">פתח עמוד חי</a>
+                {% if first_fix %}<button class="copy" type="button" data-copy-target="cc-{{ loop.index }}">העתק תיקון מומלץ</button>{% endif %}
+                <a class="secondary" href="/seo/fix-center">Mark as manually applied / Ignore / Needs review</a>
+              </div>
+            </article>
+          {% else %}
+            <p>אין נתוני ביקורת. הריצו סריקה/סנכרון מוצרים ו-GSC.</p>
+          {% endfor %}
         </div>
       </section>
 
-      <section id="daily-top-priorities" class="panel">
-        <h2>Daily top priorities</h2>
-        {% if daily_top_priorities %}
-          {% for task in daily_top_priorities %}
-            <div class="priority">
-              <strong>{{ loop.index }}. {{ task.title }}</strong>
-              <p class="muted">{{ task.issue_type }} · {{ task.status }} · {{ task.estimated_impact }}</p>
-              <p>{{ task.copyable_solution.manual_notice or task.manual_notice }}</p>
-              <a href="/seo/fix-center#task-{{ task.id }}">פתח במרכז התיקונים</a>
-            </div>
-          {% endfor %}
-        {% else %}
-          <p>אין כרגע משימות פתוחות. אפשר להתחיל מסריקה במרכז התיקונים.</p>
-        {% endif %}
+      <section class="panel columns">
+        <div class="mini"><h2>Technical 404 queue</h2>{% for task in technical_404_queue[:5] %}<p><a href="/seo/fix-center#task-{{ task.id }}">{{ task.title }}</a></p>{% else %}<p>אין 404 פתוחים.</p>{% endfor %}</div>
+        <div class="mini"><h2>Product/category SEO queue</h2>{% for item in product_category_queue[:5] %}<p>{{ item.name }} — {{ item.seo_score }}/100</p>{% endfor %}</div>
+        <div class="mini"><h2>GSC quick wins</h2>{% for item in gsc_quick_wins[:5] %}<p>{{ item.name }} — CTR {{ '%.2f'|format(item.gsc.ctr * 100) }}%, מיקום {{ '%.1f'|format(item.gsc.average_position) }}</p>{% else %}<p>אין כרגע quick wins.</p>{% endfor %}</div>
+        <div class="mini"><h2>Recently fixed</h2>{% for task in recently_fixed[:5] %}<p>{{ task.title }}</p>{% else %}<p>אין תיקונים שסומנו היום.</p>{% endfor %}</div>
+        <div class="mini"><h2>Waiting for approval</h2>{% for task in waiting_for_approval[:5] %}<p>{{ task.title }}</p>{% else %}<p>אין ממתינים לאישור.</p>{% endfor %}</div>
+        <div class="mini"><h2>Manual publishing queue</h2><p><a href="/seo/publishing-packages-view">Manual iStore Publishing Queue — פתח תור פרסום ידני ל-iStore</a></p></div>
       </section>
     </main>
+    <script>
+      document.addEventListener('click', async (event) => {
+        const button = event.target.closest('[data-copy-target]'); if (!button) return;
+        const field = document.getElementById(button.dataset.copyTarget); if (!field) return;
+        await navigator.clipboard.writeText(field.value); button.textContent = 'הועתק';
+      });
+    </script>
   </body>
 </html>
