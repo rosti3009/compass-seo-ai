@@ -751,6 +751,7 @@ def _gsc_generated_article_payload(draft: ContentArticleDraft) -> dict[str, obje
         "draft": draft_payload,
     }
 
+
 def _upsert_gsc_metric(db: Session, row: dict[str, object]) -> bool:
     page_url = str(row.get("page_url") or "").strip()
     query = str(row.get("query") or "").strip()
@@ -2459,7 +2460,6 @@ def list_seo_fix_center_tasks(
     }
 
 
-
 @router.get("/seo/product-category-audit-center")
 def product_category_audit_center(db: DatabaseSession, limit: int = 100) -> dict[str, object]:
     """Return read-only product/category SEO audits with Hebrew copy-ready fixes."""
@@ -2481,12 +2481,23 @@ def seo_command_center_view(request: Request, db: DatabaseSession) -> HTMLRespon
 
     ensure_fix_center_tasks(db)
     cards = list_fix_center_tasks(db)
+    audit_dashboard = build_product_category_audit_center(db, limit=100)
+    top_20 = audit_dashboard.get("top_20_work_queue", audit_dashboard.get("audits", []))[:20]
     return templates.TemplateResponse(
         request,
         "seo_command_center.html",
         {
             "summary": fix_center_dashboard_summary(cards),
             "daily_top_priorities": cards[:5],
+            "audit_dashboard": audit_dashboard,
+            "top_20_work_queue": top_20,
+            "technical_404_queue": [card for card in cards if card.get("issue_type") == "gsc_404"],
+            "product_category_queue": [
+                item for item in audit_dashboard.get("audits", []) if item.get("entity_type") in {"product", "category"}
+            ],
+            "gsc_quick_wins": [item for item in audit_dashboard.get("audits", []) if item.get("quick_win")],
+            "recently_fixed": [card for card in cards if card.get("status") == "בוצע"],
+            "waiting_for_approval": [card for card in cards if card.get("status") == "ממתין לאישור"],
             "safety": {
                 "auto_publish": False,
                 "auto_content_edits": False,
@@ -3422,7 +3433,6 @@ def gsc_opportunities_view(request: Request, db: DatabaseSession) -> HTMLRespons
         "gsc_opportunities.html",
         {"opportunities": dashboard["low_ctr_mid_position_queries"], **dashboard},
     )
-
 
 
 @router.get("/gsc/seo-tasks")

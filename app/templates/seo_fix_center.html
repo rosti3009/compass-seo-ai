@@ -91,7 +91,7 @@
             </details>
             <section class="copy-solution" aria-label="פתרון מוכן להעתקה">
               <h4>{{ task.copyable_solution.heading or 'פתרון מוכן להעתקה' }}</h4>
-              <p class="manual-notice">{{ task.copyable_solution.manual_notice or task.manual_notice }}</p>
+              <p class="manual-notice">{{ task.copyable_solution.manual_notice or task.manual_notice }} יש להעתיק ידנית לאתר ISTORE לאחר בדיקה.</p>
               <div class="actions">
                 {% if task.copyable_solution.links.site_url %}<a href="{{ task.copyable_solution.links.site_url }}" target="_blank" rel="noreferrer">פתח עמוד באתר</a>{% endif %}
                 {% if task.copyable_solution.links.admin_url %}<a class="secondary" href="{{ task.copyable_solution.links.admin_url }}" target="_blank" rel="noreferrer">פתח בממשק ניהול</a>{% endif %}
@@ -99,8 +99,12 @@
               {% for field in task.copyable_solution.fields %}
                 <div class="copy-field">
                   <label><strong>{{ field.label }}</strong></label>
-                  {% if field.current %}<p class="muted">נוכחי: {{ field.current }}</p>{% endif %}
+                  <p class="muted">ערך נוכחי: {{ field.current or 'חסר / חלש / לא נסרק' }}</p>
+                  <p><strong>שדה לשינוי:</strong> {{ field.label }}</p>
+                  <p><strong>ערך מוצע:</strong></p>
                   <textarea readonly id="copy-{{ task.id }}-{{ field.key }}">{{ field.value }}</textarea>
+                  <p class="muted"><strong>למה:</strong> {{ field.issue_he }}</p>
+                  <p class="muted"><strong>איפה להדביק:</strong> {{ field.istore_path_he }}</p>
                   <button class="copy-button" type="button" data-copy-target="copy-{{ task.id }}-{{ field.key }}">העתק</button>
                 </div>
               {% endfor %}
