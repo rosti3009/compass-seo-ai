@@ -412,3 +412,115 @@ def test_command_center_and_fix_center_render_manual_workflow(client: TestClient
     assert "ערך מוצע" in fix_center.text
     assert "איפה להדביק" in fix_center.text
     assert "אין פרסום אוטומטי" in fix_center.text
+
+
+def test_meat_products_classified_as_meat_food_not_grill(db_session: Session) -> None:
+    for pid, name in [
+        ("asado", "נשנושי אסאדו אנגוס FL ללא עצם"),
+        ("entrecote", "סטייק אנטריקוט טרי"),
+        ("burger", "המבורגר אנגוס קפוא"),
+    ]:
+        db_session.add(
+            IStoreProduct(
+                istore_product_id=pid,
+                product_name=name,
+                canonical_url=f"https://example.com/products/{pid}",
+                category="בשר",
+                meta_title="",
+                meta_description="",
+            )
+        )
+    db_session.commit()
+
+    dashboard = build_product_category_audit_center(db_session, limit=20)
+
+    for pid in ["asado", "entrecote", "burger"]:
+        product = next(item for item in dashboard["audits"] if item["url"] == f"https://example.com/products/{pid}")
+        assert product["product_family"] == "meat_food"
+        assert product["product_family"] != "grill"
+
+
+def test_meat_product_copy_is_meat_specific_and_not_gas_grill(db_session: Session) -> None:
+    db_session.add(
+        IStoreProduct(
+            istore_product_id="asado",
+            product_name="נשנושי אסאדו אנגוס FL ללא עצם",
+            canonical_url="https://example.com/products/asado",
+            category="בשר",
+            meta_title="",
+            meta_description="",
+        )
+    )
+    db_session.commit()
+
+    dashboard = build_product_category_audit_center(db_session, limit=20)
+    product = next(item for item in dashboard["audits"] if item["url"] == "https://example.com/products/asado")
+    copy = "\n".join(fix["copy_text"] for fix in product["ready_to_copy_fixes"])
+
+    assert product["product_family"] == "meat_food"
+    assert "נשנושי אסאדו אנגוס" in copy
+    assert "בישול איטי" in copy or "בישול ארוך" in copy
+    assert "גריל גז מקצועי לגינה ולמטבח חוץ" not in copy
+    assert "איך בוחרים גריל גז" not in copy
+
+
+def test_default_top_20_queue_uses_non_food_focus_before_meat_food(db_session: Session) -> None:
+    for pid, name, category in [
+        ("asado", "נשנושי אסאדו אנגוס FL ללא עצם", "בשר"),
+        ("basalt", "אבני בזלת לגריל גז", "אבני בזלת"),
+        ("vacuum", "שקיות ואקום מחורצות", "ואקום"),
+    ]:
+        db_session.add(
+            IStoreProduct(
+                istore_product_id=pid,
+                product_name=name,
+                canonical_url=f"https://example.com/products/{pid}",
+                category=category,
+                meta_title="",
+                meta_description="",
+            )
+        )
+    db_session.commit()
+
+    dashboard = build_product_category_audit_center(db_session, limit=20)
+    queue_urls = [item["url"] for item in dashboard["top_20_work_queue"]]
+
+    assert dashboard["non_food_focus_default"] is True
+    assert "https://example.com/products/basalt" in queue_urls
+    assert "https://example.com/products/vacuum" in queue_urls
+    assert "https://example.com/products/asado" not in queue_urls
+
+
+def test_non_food_products_keep_product_specific_copy(db_session: Session) -> None:
+    products = [
+        ("kazan", "קאזן אסייתי", "קאזן"),
+        ("tandoor", "טנדור דגם רומא", "טנדור"),
+        ("vacuum", "שקיות ואקום מחורצות", "שקיות ואקום"),
+        ("skewer", "שיפודים רחבים", "שיפוד"),
+    ]
+    for pid, name, category in products:
+        db_session.add(
+            IStoreProduct(
+                istore_product_id=pid,
+                product_name=name,
+                canonical_url=f"https://example.com/products/{pid}",
+                category=category,
+                meta_title="",
+                meta_description="",
+            )
+        )
+    db_session.commit()
+
+    dashboard = build_product_category_audit_center(db_session, limit=20)
+
+    expected = {
+        "kazan": "קאזן",
+        "tandoor": "טנדור",
+        "vacuum": "שקיות ואקום",
+        "skewer": "שיפוד",
+    }
+    for pid, term in expected.items():
+        product = next(item for item in dashboard["audits"] if item["url"] == f"https://example.com/products/{pid}")
+        copy = "\n".join(fix["copy_text"] for fix in product["ready_to_copy_fixes"])
+        assert product["product_family"] != "meat_food"
+        assert term in copy

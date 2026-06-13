@@ -51,7 +51,33 @@ HIGH_VALUE_KEYWORDS = (
     "broil",
 )
 
-FOOD_KEYWORDS = ("בשר", "סטייק", "אנטריקוט", "אסאדו", "עוף", "דג", "המבורגר", "נקניק", "meat", "steak")
+FOOD_KEYWORDS = (
+    "אסאדו",
+    "אנגוס",
+    "אנטריקוט",
+    "פילה",
+    "שורט ריב",
+    "דנוור",
+    "המבורגר",
+    "צלעות",
+    "סטייק",
+    "בשר",
+    "עגל",
+    "צ׳וריסוס",
+    "צ'וריסוס",
+    "פידלוט",
+    "בריסקט",
+    "פרוס",
+    "טרי",
+    "ללא עצם",
+    "עם עצם",
+    "עוף",
+    "נקניק",
+    "meat",
+    "steak",
+    "beef",
+    "burger",
+)
 NON_FOOD_FAMILIES = {
     "grill",
     "smoker",
@@ -70,6 +96,9 @@ NON_FOOD_FAMILIES = {
     "kazan/tandoor",
     "outdoor kitchen",
     "fireplace/fire pit",
+    "gloves",
+    "burners",
+    "grill accessories",
 }
 GENERIC_FORBIDDEN_PHRASES = (
     "מידע ברור",
@@ -661,7 +690,7 @@ def _unknown_count(statuses: dict[str, dict[str, str]]) -> int:
 def _entity_value_score(entity: AuditEntity, gsc: GSCPageMetrics) -> int:
     text = f"{entity.name} {entity.url} {entity.product.brand if entity.product else ''} {entity.product.category if entity.product else ''}".lower()
     family = _classify_product_family(entity)
-    commercial_bonus = 35 if family in NON_FOOD_FAMILIES else 8 if family == "meat/food product" else 12
+    commercial_bonus = 35 if family in NON_FOOD_FAMILIES else 8 if family == "meat_food" else 12
     commercial_bonus += 20 if any(keyword.lower() in text for keyword in HIGH_VALUE_KEYWORDS) else 0
     category_bonus = 25 if entity.entity_type == "category" else 0
     catalog_bonus = min(25, entity.category_product_count * 2) if entity.entity_type == "category" else 0
@@ -725,6 +754,7 @@ def _priority_reason(
 def _classify_product_family(entity: AuditEntity) -> str:
     text = f"{entity.name} {entity.url} {entity.product.category if entity.product else ''} {entity.product.keyword if entity.product else ''}".lower()
     rules = [
+        ("meat_food", FOOD_KEYWORDS),
         ("basalt stone", ("בזלת", "basalt")),
         ("vacuum bags", ("שקיות ואקום", "ואקום", "vacuum bag", "grooved bags")),
         ("sous vide", ("סו-ויד", "sous vide", "anova")),
@@ -739,10 +769,12 @@ def _classify_product_family(entity: AuditEntity) -> str:
         ("butcher paper", ("נייר קצבים", "butcher paper")),
         ("knives", ("סכין", "סכינים", "knife", "knives")),
         ("skewers", ("שיפוד", "שיפודים", "skewer")),
+        ("gloves", ("כפפות", "gloves", "glove")),
+        ("burners", ("מבער", "מבערים", "burner", "burners")),
+        ("grill accessories", ("אביזר", "אביזרים", "accessories", "accessory")),
         ("cast iron cookware", ("ברזל יצוק", "מחבת", "סיר", "cast iron")),
         ("outdoor kitchen", ("מטבח חוץ", "outdoor kitchen")),
         ("fireplace/fire pit", ("מדורה", "קמין", "fire pit", "fireplace")),
-        ("meat/food product", FOOD_KEYWORDS),
     ]
     for family, tokens in rules:
         if any(token in text for token in tokens):
@@ -751,7 +783,7 @@ def _classify_product_family(entity: AuditEntity) -> str:
 
 
 def _is_non_food(entity: AuditEntity, family: str) -> bool:
-    return family in NON_FOOD_FAMILIES and family != "meat/food product"
+    return family in NON_FOOD_FAMILIES and family != "meat_food"
 
 
 def _identity(entity: AuditEntity, family: str) -> dict[str, Any]:
@@ -797,6 +829,25 @@ def _specific_copy(entity: AuditEntity, gsc: GSCPageMetrics) -> dict[str, str]:
             "sentence": manual,
             "alt": name,
             "schema": "לא להוסיף Schema מוצר לפני זיהוי ידני.",
+        }
+    if family == "meat_food":
+        meat_name = _truncate(name.replace(" FL ", " ").strip(), 42)
+        return {
+            "family": family,
+            "name": meat_name,
+            "meta_title": _truncate(f"{meat_name} | Compass Grill", 58),
+            "meta_description": _truncate(
+                f"{meat_name} להכנה בתנור, גריל או מעשנה. נתח עסיסי ועשיר בטעם, מתאים לאירוח ולבישול ארוך.",
+                155,
+            ),
+            "h1": meat_name,
+            "short": f"{meat_name} הוא מוצר בשר עסיסי ועשיר בטעם, המתאים לבישול ארוך, צלייה או עישון.",
+            "long": f"{meat_name} דורש תוכן מוצר שמתייחס לבשר עצמו בלבד: סוג הנתח, אופי ההכנה, זמני בישול משוערים והנחיות בטיחות מזון. אין להחליף אותו בטקסט על ציוד כמו גריל, טנדור, קאזן או מעשנה.",
+            "faq": f"שאלה: איך מומלץ להכין {meat_name}?\nתשובה: מומלץ להכין בבישול איטי, צלייה בתנור או עישון עד לריכוך מלא.",
+            "anchor": meat_name,
+            "sentence": f"למידע נוסף על {meat_name}, עברו לעמוד {meat_name} באתר Compass Grill.",
+            "alt": f"{meat_name} - תמונת מוצר Compass Grill",
+            "schema": "לוודא שהעמוד כולל Product schema ו-FAQ schema רק לאחר הוספת FAQ מאומת, ללא פרסום אוטומטי.",
         }
     templates = {
         "basalt stone": {
@@ -1148,7 +1199,7 @@ def build_product_category_audit_center(db: Session, limit: int = 100) -> dict[s
                 350
                 if non_food
                 else -120
-                if family == "meat/food product" and not (gsc.impressions or gsc.clicks)
+                if family == "meat_food" and not (gsc.impressions or gsc.clicks)
                 else 0
             )
             + (300 if quick_win else 0)
@@ -1229,6 +1280,11 @@ def build_product_category_audit_center(db: Session, limit: int = 100) -> dict[s
             str(item["name"]),
         ),
     )[:limit]
+    default_top_20_work_queue = [
+        item
+        for item in audits
+        if item["product_family"] != "meat_food" or int(item["traffic_opportunity_score"]) >= 80
+    ][:20]
     categories = [item for item in audits if item["entity_type"] == "category"]
     products = [item for item in audits if item["entity_type"] == "product"]
     return {
@@ -1262,6 +1318,7 @@ def build_product_category_audit_center(db: Session, limit: int = 100) -> dict[s
             "show only 404 tasks",
             "show only confirmed issues",
             "hide unknown scan data",
+            "non-food focus enabled by default",
             "hide food/meat products",
             "show only quick wins",
             "show only high commercial value",
@@ -1271,7 +1328,8 @@ def build_product_category_audit_center(db: Session, limit: int = 100) -> dict[s
         "prioritization": [
             "GSC 404 עם חלופה",
             "קטגוריות לא-מזון",
-            "מוצרים לא-מזון עם חשיפות",
+            "מוצרים לא-מזון תחילה כברירת מחדל",
+            "מוצרי בשר/מזון רק לאחר מוצרי non-food או עם הזדמנות GSC גבוהה",
             "מיקום 5-15 עם CTR נמוך",
             "ירידת חשיפות/קליקים",
             "ערך מסחרי גבוה",
@@ -1279,7 +1337,8 @@ def build_product_category_audit_center(db: Session, limit: int = 100) -> dict[s
             "תוכן דל מאומת",
             "נתוני סריקה לא ידועים בסוף",
         ],
-        "top_20_work_queue": audits[:20],
+        "non_food_focus_default": True,
+        "top_20_work_queue": default_top_20_work_queue,
         "audits": audits,
         "categories": categories,
         "products": products,
