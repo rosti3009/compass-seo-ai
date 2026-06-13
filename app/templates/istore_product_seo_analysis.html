@@ -25,15 +25,15 @@
         </article>
         <article class="card">
           <span class="label">SEO score</span>
-          <strong>{{ analysis.score }}</strong>
+          <strong>{{ analysis.score }}</strong><span class="muted">Confidence: {{ analysis.confidence }}</span>
         </article>
         <article class="card">
           <span class="label">Images detected</span>
           <strong>{{ analysis.image_count }}</strong>
         </article>
         <article class="card">
-          <span class="label">Category</span>
-          <strong>{{ analysis.category or '—' }}</strong>
+          <span class="label">Family</span>
+          <strong>{{ analysis.product_family }}</strong>
         </article>
       </section>
 
@@ -70,8 +70,12 @@
             <p>{{ analysis.suggested_h1 }}</p>
           </article>
           <article class="istore-seo-box">
-            <span class="label">Price</span>
-            <p>{{ analysis.price or '—' }}</p>
+            <span class="label">Suggested English slug</span>
+            <p>{{ analysis.suggested_slug }}</p>
+          </article>
+          <article class="istore-seo-box">
+            <span class="label">Review status</span>
+            <p>{{ analysis.status }}</p>
           </article>
         </div>
       </section>
@@ -100,6 +104,24 @@
         {% else %}
         <p class="empty">No major product SEO issues were detected.</p>
         {% endif %}
+      </section>
+
+      <section class="panel">
+        <h2>Family-specific FAQ</h2>
+        <ul>
+          {% for item in analysis.faq_recommendations %}
+          <li>{{ item }}</li>
+          {% endfor %}
+        </ul>
+      </section>
+
+      <section class="panel">
+        <h2>Internal links</h2>
+        <ul>
+          {% for item in analysis.internal_link_opportunities %}
+          <li>{{ item }}</li>
+          {% endfor %}
+        </ul>
       </section>
 
       <section class="panel">

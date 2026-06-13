@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.integrations.istore import REDACTED_TOKEN, IStoreAPIError, IStoreClient
 from app.main import app
+from app.services.istore_browser_automation import IStoreBrowserCreateResult
 
 
 @pytest.fixture
@@ -174,8 +175,8 @@ def test_istore_product_seo_analysis_endpoint_is_read_only(client: TestClient, m
     body = response.json()
     assert body["product"]["id"] == "sku-1"
     assert body["analysis"]["product_id"] == "sku-1"
-    assert body["analysis"]["suggested_h1"] == "גריל גז מקצועי"
-    assert "חסרה כותרת SEO" in body["analysis"]["issues"]
+    assert body["analysis"]["suggested_h1"] == "Unknown – manual review required"
+    assert "חסרה כותרת SEO" not in body["analysis"]["issues"]
     assert client.put("/integrations/istore/products/sku-1/seo-analysis.json").status_code == 405
 
 
@@ -187,8 +188,7 @@ def test_istore_product_seo_analysis_view_renders_template(client: TestClient, m
                 "name": "מעשנת פחם",
                 "meta_title": "מעשנת פחם מקצועית לגינה | קומפס",
                 "meta_description": (
-                    "מעשנת פחם איכותית עם שטח צלייה גדול, שליטה בחום "
-                    "ואביזרים משלימים לחוויית ברביקיו ביתית."
+                    "מעשנת פחם איכותית עם שטח צלייה גדול, שליטה בחום " "ואביזרים משלימים לחוויית ברביקיו ביתית."
                 ),
                 "description": "מעשנת פחם עמידה שמיועדת לבישול ארוך, צלייה ועישון בשרים בבית ובגינה.",
                 "category": "מעשנות",
@@ -204,8 +204,6 @@ def test_istore_product_seo_analysis_view_renders_template(client: TestClient, m
     assert "Product SEO analysis" in response.text
     assert "מעשנת פחם" in response.text
     assert "View JSON" in response.text
-
-from app.services.istore_browser_automation import IStoreBrowserCreateResult
 
 
 def test_browser_create_test_dry_run_returns_dom_diagnostics(
@@ -251,3 +249,55 @@ def test_browser_create_test_dry_run_returns_dom_diagnostics(
     assert body["dom_diagnostics"]["inputs"] == []
     assert body["dom_diagnostics"]["buttons"] == []
     assert body["dom_diagnostics"]["visible_text_sample"] == "sample"
+
+
+def test_istore_product_seo_analysis_classifies_plancha_without_grill_hallucination(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class FakeIStoreClient:
+        def get_product(self, product_id: str) -> dict[str, Any]:
+            return {
+                "id": product_id,
+                "name": "פלנצ'ה צליה עגולה יציקת ברזל",
+                "slug": "cast-iron-round-plancha",
+                "category": "פלנצ'ות",
+                "meta_title": "",
+                "meta_description": "",
+                "description": "פלנצ'ה עגולה יציקת ברזל לצלייה וצריבה.",
+                "images": [{"url": "front.jpg", "alt": "פלנצ'ה יציקת ברזל"}],
+                "url": "https://example.test/products/cast-iron-round-plancha",
+            }
+
+    monkeypatch.setattr("app.api.routes.IStoreClient.from_settings", lambda: FakeIStoreClient())
+
+    response = client.get("/integrations/istore/products/plancha-1/seo-analysis.json")
+
+    assert response.status_code == 200
+    analysis = response.json()["analysis"]
+    assert analysis["product_family"] == "plancha"
+    assert analysis["suggested_slug"] == "cast-iron-round-plancha"
+    assert "גריל גז" not in analysis["suggested_meta_description"]
+    assert "compatibility" not in " ".join(analysis["faq_recommendations"]).lower()
+    assert any("seasoning" in item for item in analysis["faq_recommendations"])
+    assert analysis["internal_link_opportunities"] == ["No internal link opportunities found"]
+
+
+def test_istore_product_seo_analysis_unknown_fields_are_not_hallucinated(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class FakeIStoreClient:
+        def get_product(self, product_id: str) -> dict[str, Any]:
+            return {"id": product_id, "name": "שקיות ואקום", "category": "ואקום"}
+
+    monkeypatch.setattr("app.api.routes.IStoreClient.from_settings", lambda: FakeIStoreClient())
+
+    response = client.get("/integrations/istore/products/vacuum-1/seo-analysis.json")
+
+    assert response.status_code == 200
+    analysis = response.json()["analysis"]
+    assert analysis["product_family"] == "vacuum"
+    assert analysis["score"] == "Unknown"
+    assert analysis["confidence"] == "Low"
+    assert analysis["suggested_h1"] == "Unknown – manual review required"
+    assert analysis["suggested_meta_description"] == "Unknown – manual review required"
+    assert any("Unknown – manual review required" in item for item in analysis["recommendations"] + analysis["issues"])
