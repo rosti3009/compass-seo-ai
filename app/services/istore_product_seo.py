@@ -34,6 +34,10 @@ class ProductSEOAnalysis:
     suggested_title: str
     suggested_meta_description: str
     suggested_h1: str
+    suggested_slug: str
+    detected_family: str
+    confidence_score: int
+    review_status: str
     image_count: int
     price: str | None
 
@@ -52,6 +56,10 @@ class ProductSEOAnalysis:
             "suggested_title": self.suggested_title,
             "suggested_meta_description": self.suggested_meta_description,
             "suggested_h1": self.suggested_h1,
+            "suggested_slug": self.suggested_slug,
+            "detected_family": self.detected_family,
+            "confidence_score": self.confidence_score,
+            "review_status": self.review_status,
             "image_count": self.image_count,
             "price": self.price,
         }
@@ -151,6 +159,13 @@ def analyze_istore_product_seo(payload: dict[str, Any]) -> ProductSEOAnalysis:
     suggested_meta_description = sanitize_generated_seo_copy(
         _clip_text(_suggested_meta_description(name, category, price), MAX_META_DESCRIPTION_LENGTH)
     )
+    detected_family, confidence_score = detect_istore_product_family(
+        name=name,
+        url=url,
+        category=category,
+        keyword=_first_text(product, ("keyword", "slug", "normalized_slug")),
+    )
+    review_status = "Needs Review" if confidence_score < 80 else "Ready for manual review"
 
     return ProductSEOAnalysis(
         product_id=product_id,
@@ -166,9 +181,80 @@ def analyze_istore_product_seo(payload: dict[str, Any]) -> ProductSEOAnalysis:
         suggested_title=suggested_title,
         suggested_meta_description=suggested_meta_description,
         suggested_h1=suggested_h1,
+        suggested_slug=suggest_english_product_slug(name, detected_family),
+        detected_family=detected_family,
+        confidence_score=confidence_score,
+        review_status=review_status,
         image_count=image_count,
         price=price,
     )
+
+
+def detect_istore_product_family(
+    *, name: str, url: str | None = None, category: str | None = None, keyword: str | None = None
+) -> tuple[str, int]:
+    """Return the corrected ISTORE product family classification and confidence."""
+    text = f"{name} {url or ''} {category or ''} {keyword or ''}".lower()
+    rules: list[tuple[str, tuple[str, ...], int]] = [
+        ("kazan", ("קאזן", "kazan"), 96),
+        ("tandoor", ("טנדור", "tandoor", "persian", "roma"), 94),
+        ("meat_food", ("אסאדו", "אנטריקוט", "המבורגר", "סטייק", "בשר", "beef", "steak"), 90),
+        ("basalt stone", ("בזלת", "basalt"), 90),
+        ("vacuum bags", ("שקיות ואקום", "ואקום", "vacuum bag", "grooved bags"), 90),
+        ("sous vide", ("סו-ויד", "sous vide", "anova"), 88),
+        ("smoker", ("מעשנה", "smoker", "פלט"), 88),
+        ("grill", ("גריל", "מנגל", "grill", "bbq"), 86),
+        ("taboon", ("טאבון", "taboon", "pizza oven"), 86),
+        ("pizza stone", ("אבן פיצה", "pizza stone"), 86),
+        ("wood chips/chunks", ("שבבי עץ", "צ׳אנק", "צ'אנק", "wood chips", "chunks"), 86),
+        ("charcoal/firewood", ("פחם", "עצי הסקה", "charcoal", "firewood"), 86),
+        ("thermometer", ("מדחום", "thermometer"), 86),
+        ("butcher paper", ("נייר קצבים", "butcher paper"), 86),
+        ("knives", ("סכין", "סכינים", "knife", "knives"), 86),
+        ("skewers", ("שיפוד", "שיפודים", "skewer"), 86),
+        ("gloves", ("כפפות", "gloves", "glove"), 82),
+        ("burners", ("מבער", "מבערים", "burner", "burners"), 82),
+        ("grill accessories", ("אביזר", "אביזרים", "accessories", "accessory"), 75),
+        ("cast iron cookware", ("ברזל יצוק", "מחבת", "סיר", "cast iron"), 84),
+        ("outdoor kitchen", ("מטבח חוץ", "outdoor kitchen"), 86),
+        ("fireplace/fire pit", ("מדורה", "קמין", "fire pit", "fireplace"), 84),
+    ]
+    for family, tokens, confidence in rules:
+        if any(token in text for token in tokens):
+            return family, confidence
+    return "unknown", 35
+
+
+_SLUG_TOKEN_MAP = {
+    "kazan": "kazan",
+    "אסייתי": "asian",
+    "ליטר": "liter",
+    "מכסה": "lid",
+    "ברזל": "cast-iron",
+    "יצוק": "cast-iron",
+    "טנדור": "tandoor",
+    "גריל": "grill",
+    "מעשנה": "smoker",
+}
+
+
+def suggest_english_product_slug(name: str, family: str) -> str:
+    """Build an English-only slug suggestion from the detected family and known product tokens."""
+    parts = [family.replace(" ", "-").replace("/", "-")] if family != "unknown" else []
+    for token in re.findall(r"[\w\u0590-\u05FF]+", name.lower()):
+        mapped = _SLUG_TOKEN_MAP.get(token)
+        if mapped:
+            parts.extend(mapped.split("-"))
+        elif token.isascii() and re.search(r"[a-z0-9]", token):
+            parts.append(token)
+        elif token.isdigit():
+            parts.append(token)
+    deduped: list[str] = []
+    for part in parts:
+        if part and part not in deduped:
+            deduped.append(part)
+    slug = "-".join(deduped[:8])
+    return re.sub(r"[^a-z0-9-]+", "-", slug).strip("-") or "product-manual-review"
 
 
 def _product_payload(payload: dict[str, Any]) -> dict[str, Any]:
