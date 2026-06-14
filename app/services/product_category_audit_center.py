@@ -21,6 +21,11 @@ from bs4 import BeautifulSoup
 from sqlalchemy.orm import Session
 
 from app.db.models import CrawlRun, GSCKeywordMetric, IStoreProduct, PageAudit
+from app.services.istore_product_seo import (
+    analyze_istore_product_seo,
+    detect_istore_product_family,
+    suggest_english_product_slug,
+)
 
 try:  # sitemap support is best-effort and read-only
     from app.services.content_articles import _load_sitemap_index
@@ -93,7 +98,8 @@ NON_FOOD_FAMILIES = {
     "knives",
     "skewers",
     "cast iron cookware",
-    "kazan/tandoor",
+    "kazan",
+    "tandoor",
     "outdoor kitchen",
     "fireplace/fire pit",
     "gloves",
@@ -752,13 +758,22 @@ def _priority_reason(
 
 
 def _classify_product_family(entity: AuditEntity) -> str:
-    text = f"{entity.name} {entity.url} {entity.product.category if entity.product else ''} {entity.product.keyword if entity.product else ''}".lower()
+    if entity.product is not None:
+        family, _confidence = detect_istore_product_family(
+            name=entity.product.product_name or entity.name,
+            url=entity.product.canonical_url or entity.product.product_url or entity.url,
+            category=entity.product.category,
+            keyword=entity.product.keyword or entity.product.slug or entity.product.normalized_slug,
+        )
+        return family
+    text = f"{entity.name} {entity.url}".lower()
     rules = [
         ("meat_food", FOOD_KEYWORDS),
         ("basalt stone", ("בזלת", "basalt")),
         ("vacuum bags", ("שקיות ואקום", "ואקום", "vacuum bag", "grooved bags")),
         ("sous vide", ("סו-ויד", "sous vide", "anova")),
-        ("kazan/tandoor", ("קאזן", "טנדור", "tandoor", "kazan", "persian", "roma")),
+        ("kazan", ("קאזן", "kazan")),
+        ("tandoor", ("טנדור", "tandoor", "persian", "roma")),
         ("smoker", ("מעשנה", "smoker", "פלט")),
         ("grill", ("גריל", "מנגל", "grill", "bbq")),
         ("taboon", ("טאבון", "taboon", "pizza oven")),
@@ -801,7 +816,7 @@ def _identity(entity: AuditEntity, family: str) -> dict[str, Any]:
         "butcher paper sheets brown for smoking meat": "נייר קצבים חום לעישון בשר",
         "basalt stones": "אבני בזלת לגריל גז",
     }
-    if normalized == "persian" and family == "kazan/tandoor":
+    if normalized == "persian" and family == "tandoor":
         return {"name": "טנדור דגם פרסי", "unclear": False}
     if normalized in mapping:
         return {"name": mapping[normalized], "unclear": False}
@@ -865,12 +880,19 @@ def _specific_copy(entity: AuditEntity, gsc: GSCPageMetrics) -> dict[str, str]:
             "long": "שקיות ואקום מחורצות מיועדות לאיטום מזון במכונות ואקום תואמות, לאחסון מסודר, הקפאה ובישול סו-ויד. לפני שימוש יש לוודא התאמת גודל השקית והמכונה ולהקפיד על הוראות בטיחות מזון.",
             "faq": "שאלה: למה מיועדות שקיות ואקום מחורצות?\nתשובה: לאיטום מזון, הקפאה, שמירת טריות ובישול סו-ויד במכונה תואמת.\nשאלה: האם הן מתאימות לכל מכונת ואקום?\nתשובה: יש לבדוק התאמת רוחב וסוג השקית למכשיר לפני שימוש.",
         },
-        "kazan/tandoor": {
+        "kazan": {
             "meta_title": "קאזן אסייתי מברזל יצוק לבישול שטח | Compass Grill",
             "meta_description": "קאזן אסייתי מברזל יצוק לבישול שטח, קדירות, תבשילים וצלייה מעל אש. מתאים לחובבי בישול חוץ, קמפינג ומטבחי גינה.",
-            "short": "קאזן או טנדור לבישול חוץ מאפשר הכנת קדירות, תבשילים וצלייה מעל אש פתוחה במטבח גינה או בקמפינג.",
-            "long": "קאזן/טנדור מיועד לחובבי בישול שטח ומטבחי חוץ שרוצים לעבוד עם חום גבוה ואש חיה. מתאים להכנת קדירות, תבשילים, צלייה ובישול ארוך. יש לבדוק נפח, חומר, אביזרים תואמים והוראות שימוש לפני רכישה.",
-            "faq": "שאלה: למי מתאים קאזן או טנדור?\nתשובה: לחובבי בישול חוץ, קמפינג ומטבחי גינה.\nשאלה: מה חשוב לבדוק?\nתשובה: נפח, חומר, יציבות, מקור חום ואביזרים תואמים.",
+            "short": "קאזן לבישול חוץ מאפשר הכנת קדירות, תבשילים וצלייה מעל אש פתוחה במטבח גינה או בקמפינג.",
+            "long": "קאזן מיועד לחובבי בישול שטח ומטבחי חוץ שרוצים לעבוד עם חום גבוה ואש חיה. מתאים להכנת קדירות, תבשילים, צלייה ובישול ארוך. יש לבדוק נפח, חומר, אביזרים תואמים והוראות שימוש לפני רכישה.",
+            "faq": "שאלה: למי מתאים קאזן?\nתשובה: לחובבי בישול חוץ, קמפינג ומטבחי גינה.\nשאלה: מה חשוב לבדוק?\nתשובה: נפח, חומר, יציבות, מקור חום ואביזרים תואמים.",
+        },
+        "tandoor": {
+            "meta_title": "טנדור לבישול חוץ ואפייה מסורתית | Compass Grill",
+            "meta_description": "טנדור לבישול חוץ, אפייה וצלייה בחום גבוה. מתאים למטבחי גינה, אירוח וחובבי בישול שטח.",
+            "short": "טנדור לבישול חוץ מתאים לאפייה וצלייה בחום גבוה במטבח גינה או באירוח.",
+            "long": "טנדור מיועד לבישול חוץ בחום גבוה, אפייה וצלייה. אין להחליף אותו בטקסט על קאזן אלא אם המוצר עצמו כולל קאזן. לפני עדכון התוכן יש לוודא דגם, חומר, מידות, מקור חום ואביזרים תואמים.",
+            "faq": "שאלה: למי מתאים טנדור?\nתשובה: לחובבי אפייה וצלייה בחום גבוה במטבח חוץ.\nשאלה: מה חשוב לבדוק?\nתשובה: דגם, חומר, מידות, מקור חום והוראות שימוש.",
         },
         "smoker": {
             "meta_title": "מעשנת פלט מקצועית לבשר, דגים וירקות | Compass Grill",
@@ -979,24 +1001,35 @@ def _rec(
 
 def _suggested_slug_if_needed(entity: AuditEntity, name: str) -> str:
     slug = urlparse(entity.url).path.rstrip("/").split("/")[-1]
+    family = _classify_product_family(entity)
+    english_slug = suggest_english_product_slug(name, family)
     if not slug or re.search(r"[\u0590-\u05FF]", slug):
-        return ""
+        return english_slug
     generic = slug.lower() in {"assman", "atman", "skiff", "product", "item"} or bool(
         re.fullmatch(r"[a-z0-9-]+", slug.lower())
     )
     if not generic:
         return ""
-    tokens = re.findall(r"[\u0590-\u05FF0-9]+", name)
-    return "-".join(tokens[:6])
+    return english_slug
+
+
+def _istore_analysis_for_entity(entity: AuditEntity):
+    if entity.product is None:
+        return None
+    return analyze_istore_product_seo(entity.product.to_dict())
 
 
 def _ready_fixes(entity: AuditEntity, statuses: dict[str, dict[str, str]], gsc: GSCPageMetrics) -> list[dict[str, Any]]:
     copy = _specific_copy(entity, gsc)
+    istore_analysis = _istore_analysis_for_entity(entity)
+    if istore_analysis is not None:
+        copy["family"] = istore_analysis.detected_family
     name = copy["name"]
     identity_unclear = name.startswith("זהות מוצר לא ברורה")
     fixes: list[dict[str, Any]] = []
     status_for = lambda key: statuses.get(key, {}).get("status", "לא נסרק — נדרש בדיקה ידנית")
     current_for = lambda key: statuses.get(key, {}).get("current_value", "")
+    unknown = lambda key: _field_state(statuses.get(key, {})) == "unknown"
 
     fixes.append(
         _rec(
@@ -1031,40 +1064,45 @@ def _ready_fixes(entity: AuditEntity, statuses: dict[str, dict[str, str]], gsc: 
             "תיאור חסר/חלש או לא מספיק משכנע",
         )
     )
-    fixes.append(
-        _rec(
-            "h1",
-            "H1",
-            "להגדיר ככותרת ראשית אחת בעמוד.",
-            current_for("h1"),
-            copy["h1"],
-            status_for("h1"),
-            "כותרת ראשית חסרה/חלשה",
-        )
+    suppress_unscanned_generated_content = entity.entity_type == "product" and copy["family"] == "kazan" and (
+        unknown("h1") or unknown("content_length") or unknown("faq")
     )
+    if not suppress_unscanned_generated_content:
+        fixes.append(
+            _rec(
+                "h1",
+                "H1",
+                "להגדיר ככותרת ראשית אחת בעמוד.",
+                current_for("h1"),
+                copy["h1"],
+                status_for("h1"),
+                "כותרת ראשית חסרה/חלשה",
+            )
+        )
     if entity.entity_type == "product":
-        fixes.append(
-            _rec(
-                "short_product_description",
-                "תיאור מוצר קצר",
-                "להדביק בתיאור הקצר אחרי אימות מפרט ומלאי.",
-                "",
-                copy["short"],
-                "קיים אבל חלש",
-                "חסר תקציר מוצר ספציפי",
+        if not suppress_unscanned_generated_content:
+            fixes.append(
+                _rec(
+                    "short_product_description",
+                    "תיאור מוצר קצר",
+                    "להדביק בתיאור הקצר אחרי אימות מפרט ומלאי.",
+                    "",
+                    copy["short"],
+                    "קיים אבל חלש",
+                    "חסר תקציר מוצר ספציפי",
+                )
             )
-        )
-        fixes.append(
-            _rec(
-                "long_product_description",
-                "תיאור מוצר ארוך",
-                "להדביק בתיאור המוצר אחרי בדיקת דיוק המפרט.",
-                "",
-                copy["long"],
-                status_for("content_length"),
-                "תוכן מוצר דל או לא ממוקד",
+            fixes.append(
+                _rec(
+                    "long_product_description",
+                    "תיאור מוצר ארוך",
+                    "להדביק בתיאור המוצר אחרי בדיקת דיוק המפרט.",
+                    "",
+                    copy["long"],
+                    status_for("content_length"),
+                    "תוכן מוצר דל או לא ממוקד",
+                )
             )
-        )
     else:
         intro = copy["short"]
         if copy["family"] == "basalt stone":
@@ -1091,17 +1129,18 @@ def _ready_fixes(entity: AuditEntity, statuses: dict[str, dict[str, str]], gsc: 
                 "חסר תוכן קטגוריה מסביר",
             )
         )
-    fixes.append(
-        _rec(
-            "faq",
-            "FAQ block",
-            "להוסיף בסוף התיאור או באזור FAQ, ללא Schema אוטומטי.",
-            "",
-            copy["faq"],
-            status_for("faq"),
-            "חסר FAQ שימושי",
+    if not suppress_unscanned_generated_content:
+        fixes.append(
+            _rec(
+                "faq",
+                "FAQ block",
+                "להוסיף בסוף התיאור או באזור FAQ, ללא Schema אוטומטי.",
+                "",
+                copy["faq"],
+                status_for("faq"),
+                "חסר FAQ שימושי",
+            )
         )
-    )
     fixes.append(
         _rec(
             "alt_text",
@@ -1184,6 +1223,17 @@ def build_product_category_audit_center(db: Session, limit: int = 100) -> dict[s
         unknown_count = _unknown_count(statuses)
         internal_link_score = _internal_link_score(entity.page)
         family = _classify_product_family(entity)
+        istore_analysis = _istore_analysis_for_entity(entity)
+        confidence_score = (
+            istore_analysis.confidence_score if istore_analysis is not None else data_confidence_score
+        )
+        review_status = (
+            "Unknown – manual review required"
+            if unknown_count > 0
+            else istore_analysis.review_status
+            if istore_analysis is not None
+            else "Needs Review"
+        )
         non_food = _is_non_food(entity, family)
         identity = _identity(entity, family)
         value_score = _entity_value_score(entity, gsc)
@@ -1235,6 +1285,9 @@ def build_product_category_audit_center(db: Session, limit: int = 100) -> dict[s
                     "top_queries": list(gsc.top_queries),
                 },
                 "product_family": family,
+                "detected_family": family,
+                "confidence_score": confidence_score,
+                "review_status": review_status,
                 "is_non_food": non_food,
                 "identity_unclear": bool(identity.get("unclear")),
                 "commercial_value_score": commercial_value_score,

@@ -47,6 +47,9 @@
                 <span class="badge">{{ audit.entity_type_hebrew }}</span>
                 <span class="badge">SEO {{ audit.seo_score }}/100</span>
                 <span class="badge">אמינות נתונים {{ audit.data_confidence_score }}/100</span>
+                <span class="badge">Detected Family: {{ audit.detected_family }}</span>
+                <span class="badge">Confidence {{ audit.confidence_score }}/100</span>
+                <span class="badge">Review: {{ audit.review_status }}</span>
                 <span class="badge">Value {{ audit.value_score }}/100</span>
                 <h3>{{ audit.name }}</h3>
                 <p class="ltr"><a href="{{ audit.url }}" target="_blank" rel="noreferrer">{{ audit.url }}</a></p>

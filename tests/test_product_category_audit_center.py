@@ -524,3 +524,34 @@ def test_non_food_products_keep_product_specific_copy(db_session: Session) -> No
         copy = "\n".join(fix["copy_text"] for fix in product["ready_to_copy_fixes"])
         assert product["product_family"] != "meat_food"
         assert term in copy
+
+
+def test_kazan_product_uses_istore_engine_without_hallucinated_unscanned_fields(db_session: Session) -> None:
+    product_name = "קאזן אסייתי 6 ליטר עם מכסה מברזל יצוק ללא ציפוי"
+    db_session.add(
+        IStoreProduct(
+            istore_product_id="kazan-6l",
+            product_name=product_name,
+            canonical_url="https://example.com/products/קאזן-אסייתי-6-ליטר-עם-מכסה",
+            category="קאזן",
+            meta_title="",
+            meta_description="",
+        )
+    )
+    db_session.commit()
+
+    dashboard = build_product_category_audit_center(db_session, limit=20)
+    product = next(item for item in dashboard["audits"] if item["url"].startswith("https://example.com/products/"))
+    copy = "\n".join(fix["copy_text"] for fix in product["ready_to_copy_fixes"])
+    slug_fix = next(fix for fix in product["ready_to_copy_fixes"] if fix["field_key"] == "suggested_slug")
+    field_keys = {fix["field_key"] for fix in product["ready_to_copy_fixes"]}
+
+    assert product["detected_family"] == "kazan"
+    assert product["product_family"] == "kazan"
+    assert product["confidence_score"] >= 90
+    assert product["review_status"] == "Unknown – manual review required"
+    assert slug_fix["copy_text"] == "kazan-asian-6-liter-lid-cast-iron"
+    assert not any("\u0590" <= char <= "\u05FF" for char in slug_fix["copy_text"])
+    assert "טנדור" not in copy
+    assert "tandoor" not in copy.lower()
+    assert {"h1", "short_product_description", "long_product_description", "faq"}.isdisjoint(field_keys)
