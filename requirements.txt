@@ -12,3 +12,5 @@ uvicorn[standard]==0.34.0
 openai
 google-api-python-client
 google-auth
+
+openpyxl==3.1.5
