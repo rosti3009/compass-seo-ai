@@ -9,10 +9,10 @@ Analyzed real imported/live URLs: 3000.
 - copy: 76
 - numeric_suffix: 512
 - redirect: 0
-- parameters: 2484
-- needs_redirect: 551
+- parameters: 2486
+- needs_redirect: 0
 - needs_canonical: 208
-- needs_noindex: 2276
+- needs_noindex: 2278
 - sort_order_rating: 2276
 - category_id: 1108
 - suffix_1: 414

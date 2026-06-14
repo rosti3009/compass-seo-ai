@@ -292,8 +292,8 @@ def fetch_live(root: str, max_pages: int, timeout: int, delay: float, rows: dict
             rows[url].internal_links = max(rows[url].internal_links, count)
 
 
-def write_csv(path: Path, fields: list[str], rows: list[dict[str, object]]) -> None:
-    if not rows:
+def write_csv(path: Path, fields: list[str], rows: list[dict[str, object]], *, keep_empty: bool = False) -> None:
+    if not rows and not keep_empty:
         if path.exists():
             path.unlink()
         return
@@ -316,9 +316,23 @@ def page_type(url: str) -> str:
     return "product"
 
 
+def has_problem_gsc_reason(row: Row) -> bool:
+    reasons = " | ".join(row.gsc_reasons)
+    return bool(re.search(r"not found|404|crawled|currently not indexed|duplicate", reasons, re.I))
+
+
+def has_indexed_gsc_reason(row: Row) -> bool:
+    reasons = " | ".join(row.gsc_reasons)
+    return bool(re.search(r"indexed pages|submitted and indexed", reasons, re.I))
+
+
 def analyze(rows: dict[str, Row], out: Path) -> None:
     out.mkdir(parents=True, exist_ok=True)
-    good = {u for u, r in rows.items() if r.status.startswith("2") or not r.status}
+    good = {
+        u
+        for u, r in rows.items()
+        if (r.status.startswith("2") and not has_problem_gsc_reason(r)) or has_indexed_gsc_reason(r)
+    }
     redirects = []
     canon_rules = []
     noindex = []
@@ -330,7 +344,7 @@ def analyze(rows: dict[str, Row], out: Path) -> None:
     summary = defaultdict(int)
     overlap = []
     for u, r in rows.items():
-        qs = parse_qs(urlparse(u).query)
+        qs = parse_qs(urlparse(u).query, keep_blank_values=True)
         has_param = bool(PARAMS & set(qs))
         is_dup = bool(DUPLICATE_SUFFIX_RE.search(urlparse(u).path))
         is_broken = r.status in {"404", "410"} or STATUS_404_RE.search(" ".join(r.gsc_reasons))
@@ -370,16 +384,20 @@ def analyze(rows: dict[str, Row], out: Path) -> None:
                 action = "Canonical"
                 summary["needs_canonical"] += 1
             fixes.append({"url": u, "issue_type": "parameters", "suggested_action": action, "target_url": target})
+        validated_target = bool(target and target != u and target in good)
         if is_dup:
-            dups.append({"url": u, "duplicate_of": target})
-            if target:
+            dups.append({"url": u, "duplicate_of": target if validated_target else "manual_review"})
+            if validated_target:
                 redirects.append({"old_url": u, "new_url": target})
                 summary["needs_redirect"] += 1
+                duplicate_action = "Redirect 301"
+            else:
+                duplicate_action = "Manual review - target not HTTP-validated"
             fixes.append(
-                {"url": u, "issue_type": "duplicate", "suggested_action": "Redirect 301", "target_url": target}
+                {"url": u, "issue_type": "duplicate", "suggested_action": duplicate_action, "target_url": target}
             )
         if is_broken:
-            action = f"Redirect 301 to {target}" if target else "Remove internal links / restore page"
+            action = f"Redirect 301 to {target}" if validated_target else "Manual review - target not HTTP-validated"
             broken.append({"url": u, "recommended_action": action})
             fixes.append({"url": u, "issue_type": "404/410/soft 404", "suggested_action": action, "target_url": target})
         reasons = " | ".join(sorted(r.gsc_reasons))
@@ -413,7 +431,7 @@ def analyze(rows: dict[str, Row], out: Path) -> None:
             )
         if len({x for x in [has_param, is_dup, is_broken, bool(nonindexed)] if x}) > 1:
             overlap.append(u)
-    write_csv(out / "redirects.csv", ["old_url", "new_url"], redirects)
+    write_csv(out / "redirects.csv", ["old_url", "new_url"], redirects, keep_empty=True)
     write_csv(out / "canonical-rules.csv", ["pattern", "canonical_target"], canon_rules)
     write_csv(out / "noindex-rules.csv", ["pattern"], noindex)
     write_csv(out / "duplicate-urls.csv", ["url", "duplicate_of"], dups)

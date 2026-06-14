@@ -43,13 +43,11 @@ def test_imported_exports_generate_real_actions_without_empty_templates(tmp_path
     assert broken == [
         {
             "url": "https://compassgrill.co.il/missing",
-            "recommended_action": "Remove internal links / restore page",
+            "recommended_action": "Manual review - target not HTTP-validated",
         }
     ]
     assert not (output_dir / "canonical-rules.csv").exists()
-    assert "Analyzed real imported/live URLs: 4" in (output_dir / "implementation-plan.md").read_text(
-        encoding="utf-8"
-    )
+    assert "Analyzed real imported/live URLs: 4" in (output_dir / "implementation-plan.md").read_text(encoding="utf-8")
 
 
 def test_xlsx_gsc_drilldown_is_inferred_converted_and_counted(tmp_path: Path) -> None:
@@ -74,3 +72,26 @@ def test_xlsx_gsc_drilldown_is_inferred_converted_and_counted(tmp_path: Path) ->
     assert "- suffix_1: 1" in plan
     assert "- nonindexed_products: 1" in plan
     assert "- nonindexed_articles: 1" in plan
+
+
+def test_problem_gsc_rows_do_not_create_self_redirects_and_keep_blank_params(tmp_path: Path) -> None:
+    input_file = tmp_path / "gsc.csv"
+    output_dir = tmp_path / "output"
+    input_file.write_text(
+        "URL,Reason\n"
+        "https://compassgrill.co.il/brisket-1/?from_admin,Duplicate without user-selected canonical\n"
+        "https://compassgrill.co.il/brisket-1/,Duplicate without user-selected canonical\n",
+        encoding="utf-8",
+    )
+
+    rows: dict[str, audit.Row] = {}
+    audit.import_files([input_file], rows)
+    audit.analyze(rows, output_dir)
+
+    assert _read_csv(output_dir / "redirects.csv") == []
+    noindex = _read_csv(output_dir / "noindex-rules.csv")
+    assert noindex == [{"pattern": "https://compassgrill.co.il/brisket-1/?from_admin"}]
+    duplicate_rows = _read_csv(output_dir / "duplicate-urls.csv")
+    assert duplicate_rows[0]["duplicate_of"] == "manual_review"
+    fixes = _read_csv(output_dir / "fix-recommendations.csv")
+    assert any(row["suggested_action"] == "Manual review - target not HTTP-validated" for row in fixes)
